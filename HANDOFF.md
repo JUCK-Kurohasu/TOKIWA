@@ -3,7 +3,7 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-10-22（セッション 1 / 統合担当）
+最終更新: 2026-10-22 08:15 UTC（セッション 1 / 統合担当）
 作業ブランチ: `claude/affectionate-knuth-1inglo`
 
 ## 1. 現在の状態（サマリ）
@@ -31,9 +31,16 @@
 
 ## 3. 進行中（第 1 波の担当一覧）
 
-detect-web / sigma / detect-ai / sensors / gate / deception / llm / triage-correlate / intel-feeds /
-intel-advisor / respond / copilot / api-core / frontend-core / frontend-ops / frontend-intel / lab-eval / devops
-→ 統合担当がブランチをマージし、ここを更新する。
+- PR #1（骨格）は main にマージ済み。第 1 波は PR #2（同ブランチ）で統合中。
+- **統合済み**: copilot, llm（`cd backend && uv run pytest` → 85 件 緑）
+- **実装中（16）**: detect-web / sigma / detect-ai / sensors / gate / deception / triage-correlate / intel-feeds /
+  intel-advisor / respond / api-core / frontend-core / frontend-ops / frontend-intel / lab-eval / devops
+- 各エージェントは `.claude/worktrees/agent-*`（ブランチ `worktree-agent-*`）で作業。利用制限で全員が一時中断
+  （08:10 UTC リセット後に再開指示済み）。**別セッションで引き継ぐ場合**: 各 worktree の `git status` /
+  `git log c4881e1..HEAD` で進捗を確認し、未完ならその worktree で `docs/tasks/<name>.md` の続きを実装 →
+  コミット → 統合ブランチへ `git merge --no-edit worktree-agent-<id>`。
+- worktree のブランチは古い main（0efcd24）から作られることがある。その場合は `git merge --ff-only c4881e1`
+  で骨格に追いつかせてから作業する（copilot/llm 担当はそうした）。
 
 ## 4. 次の一手（優先順）
 
@@ -59,3 +66,6 @@ intel-advisor / respond / copilot / api-core / frontend-core / frontend-ops / fr
 
 - hatchling は `readme` にプロジェクト外パスを指定できない → `backend/README.md` を置いた。
 - ruff の E501 は formatter に任せて無効化（日本語 docstring が長くなるため）。
+- 18 体同時実行でアカウントのセッション利用制限に到達（約 1.5 時間で全員停止）。作業は worktree に残るので
+  SendMessage で再開できる。エージェントには「論理単位ごとにコミット」を指示済み。
+- anthropic SDK 2.x は httpx2 ベースのため respx では SDK 通信を捕捉できない → httpx2 のモックトランスポートを注入（llm 担当）。
