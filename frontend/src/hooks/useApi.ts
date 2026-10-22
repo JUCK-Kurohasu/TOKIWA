@@ -41,8 +41,24 @@ export function useApiQuery<T>(
   });
 }
 
-/** Best-effort human readable message for an unknown error. */
+/**
+ * Best-effort human readable message for an unknown error. FastAPI 422 bodies
+ * (`{detail: [{loc, msg}, ...]}`) are flattened to "field: message; ...".
+ */
 export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const detail = (error.body as { detail?: unknown } | undefined)?.detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map((d) => {
+          const item = d as { loc?: unknown[]; msg?: unknown };
+          const loc = Array.isArray(item.loc) ? item.loc.filter((x) => x !== "body").join(".") : "";
+          return `${loc ? `${loc}: ` : ""}${String(item.msg ?? JSON.stringify(d))}`;
+        })
+        .join("; ");
+    }
+    return error.message;
+  }
   if (error instanceof Error) return error.message;
   return String(error);
 }
