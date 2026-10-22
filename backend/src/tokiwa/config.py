@@ -216,6 +216,10 @@ class CopilotSettings(BaseModel):
     enabled: bool = True
     max_tool_iterations: int = 8
     max_history_messages: int = 40
+    # Interactive Q&A with multi-step tool use benefits from the strong model; "fast" trades quality for cost.
+    tier: Literal["fast", "deep"] = "deep"
+    # Upper bound (chars of JSON) for one tool result handed to the LLM. Lists are trimmed to fit.
+    max_tool_result_chars: int = 12_000
 
 
 class Settings(BaseSettings):
