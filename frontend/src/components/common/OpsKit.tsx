@@ -318,3 +318,34 @@ export function FilterField({
     </div>
   );
 }
+
+/** Toggle chip for quick filters (aria-pressed). `ai` renders the active state in purple. */
+export function FilterChip({
+  active,
+  ai,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  ai?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+        active
+          ? ai
+            ? "border-ai/60 bg-ai/15 text-ai"
+            : "border-accent/60 bg-accent-soft text-accent"
+          : "border-line text-muted hover:text-fg",
+      )}
+    >
+      {children}
+    </button>
+  );
+}

@@ -4,7 +4,7 @@
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, FilterX, RefreshCw, Sparkles } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api } from "@/api/client";
 import { type Alert, type AlertStatus, type Page, SEVERITIES } from "@/api/types";
@@ -14,6 +14,7 @@ import {
   AlertStatusBadge,
   CategoryBadge,
   DebouncedInput,
+  FilterChip,
   FilterField,
   Notice,
   Pager,
@@ -294,23 +295,23 @@ export function AlertsListPage() {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted">{L.quick}:</span>
-          <QuickChip active={filters.status === "new"} onClick={() => toggleFilter("status", "new")}>
+          <FilterChip active={filters.status === "new"} onClick={() => toggleFilter("status", "new")}>
             {L.qNew}
-          </QuickChip>
-          <QuickChip
+          </FilterChip>
+          <FilterChip
             ai
             active={filters.min_ai_score === "0.7"}
             onClick={() => toggleFilter("min_ai_score", "0.7")}
           >
             <Sparkles className="h-3 w-3" aria-hidden />
             {L.qAi}
-          </QuickChip>
-          <QuickChip
+          </FilterChip>
+          <FilterChip
             active={filters.category === "deception"}
             onClick={() => toggleFilter("category", "deception")}
           >
             {L.qDeception}
-          </QuickChip>
+          </FilterChip>
           {filters.incident_id && (
             <Badge tone="accent">{fmt(L.incidentFilter, { id: filters.incident_id.slice(0, 8) })}</Badge>
           )}
@@ -521,35 +522,5 @@ export function AlertsListPage() {
         )}
       </Card>
     </div>
-  );
-}
-
-function QuickChip({
-  active,
-  ai,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  ai?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 transition-colors",
-        active
-          ? ai
-            ? "border-ai/60 bg-ai/15 text-ai"
-            : "border-accent/60 bg-accent-soft text-accent"
-          : "border-line text-muted hover:text-fg",
-      )}
-    >
-      {children}
-    </button>
   );
 }
