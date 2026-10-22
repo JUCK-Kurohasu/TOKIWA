@@ -666,6 +666,8 @@ def post_batch(base_url: str, token: str, batch: list[Event], timeout: float) ->
         raise SystemExit(
             f"seed_demo: cannot reach {base_url}: {exc.reason} (is `tokiwa serve` running?)"
         ) from exc
+    except OSError as exc:  # connection reset / timeout after the request was sent
+        raise SystemExit(f"seed_demo: connection to {base_url} failed: {exc}") from exc
 
 
 def _unknown_keys(sent: Any, parsed: Any, path: str = "") -> list[str]:
