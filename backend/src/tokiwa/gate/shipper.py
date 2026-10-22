@@ -111,20 +111,31 @@ class EventShipper:
 
     # ------------------------------------------------------------------ consumer side (background task)
     async def run(self) -> None:
+        """Full batches go out as soon as they fill up; a partial batch waits at most ``flush_interval``.
+
+        (Draining the queue to empty on every wake-up would turn a busy gate into dozens of tiny POSTs per
+        second -- one DB transaction each on the server.)
+        """
         loop = asyncio.get_running_loop()
         while True:
-            with contextlib.suppress(TimeoutError):
+            timed_out = False
+            try:
                 await asyncio.wait_for(self._wakeup.wait(), timeout=self.flush_interval)
+            except TimeoutError:
+                timed_out = True
             self._wakeup.clear()
             if not self._queue or loop.time() < self._retry_at:
                 continue
-            await self.flush()
+            await self.flush(partial=timed_out)
 
-    async def flush(self) -> int:
-        """Send queued events now (in batches). Returns the number delivered. Never raises."""
+    async def flush(self, *, partial: bool = True) -> int:
+        """Send queued events now, in batches. ``partial=False`` sends full batches only.
+
+        Returns the number of events delivered. Never raises.
+        """
         delivered = 0
         async with self._send_lock:
-            while self._queue:
+            while self._queue and (partial or len(self._queue) >= self.batch_size):
                 n = min(self.batch_size, len(self._queue))
                 batch = [self._queue.popleft() for _ in range(n)]
                 outcome = await self._send(batch)

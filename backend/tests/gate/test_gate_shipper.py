@@ -124,6 +124,36 @@ async def test_background_loop_flushes_on_interval_and_batch(fake_server: FakeSe
     assert _ids(fake_server) == [0, 1]
 
 
+async def test_full_batches_only_unless_partial(fake_server: FakeServer) -> None:
+    shipper, client = _shipper(fake_server, batch_size=3)
+    async with client:
+        for i in range(7):
+            shipper.submit(_event(i))
+        assert await shipper.flush(partial=False) == 6  # two full batches; the remainder waits
+        assert len(shipper) == 1
+        assert await shipper.flush() == 1
+    assert [len(b["events"]) for b in fake_server.batches] == [3, 3, 1]
+
+
+async def test_busy_loop_does_not_fragment_batches(fake_server: FakeServer) -> None:
+    shipper, client = _shipper(fake_server, batch_size=10, flush_interval=5.0, max_queue=1000)
+    async with client:
+        task = asyncio.create_task(shipper.run())
+        try:
+            for i in range(35):
+                shipper.submit(_event(i))
+                await asyncio.sleep(0)  # let the shipper run between submissions
+            for _ in range(100):
+                if len(fake_server.events) >= 30:
+                    break
+                await asyncio.sleep(0.01)
+            assert [len(b["events"]) for b in fake_server.batches] == [10, 10, 10]
+            assert len(shipper) == 5  # partial batch waits for the (long) flush interval
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_backoff_skips_sends_while_server_is_down(fake_server: FakeServer) -> None:
     shipper, client = _shipper(fake_server, batch_size=1, flush_interval=0.05, max_backoff=60)
     async with client:
