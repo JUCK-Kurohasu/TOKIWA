@@ -74,7 +74,8 @@ class LLMSettings(BaseModel):
     model_deep: str = "claude-opus-5-5"
     effort_fast: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     effort_deep: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    max_output_tokens: int = 4096
+    # Thinking cannot be disabled on the deep model and counts against max_tokens.
+    max_output_tokens: int = 8000
     max_input_tokens_per_call: int = 24_000
     daily_budget_usd: float = 5.0
     # Server-side refusal fallback (security content can trip safety classifiers).
@@ -216,6 +217,10 @@ class CopilotSettings(BaseModel):
     enabled: bool = True
     max_tool_iterations: int = 8
     max_history_messages: int = 40
+    # Interactive Q&A with multi-step tool use benefits from the strong model; "fast" trades quality for cost.
+    tier: Literal["fast", "deep"] = "deep"
+    # Upper bound (chars of JSON) for one tool result handed to the LLM. Lists are trimmed to fit.
+    max_tool_result_chars: int = 12_000
 
 
 class Settings(BaseSettings):
