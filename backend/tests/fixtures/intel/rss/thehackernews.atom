@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>The Hacker News</title>
+  <id>tag:thehackernews.com,2026:feed</id>
+  <updated>2026-10-21T08:00:00Z</updated>
+  <link href="https://thehackernews.com/"/>
+  <entry>
+    <title>AI Agents Used to Chain Exploits Against Edge Devices</title>
+    <id>tag:thehackernews.com,2026:ai-agents-edge</id>
+    <link href="https://thehackernews.com/2026/10/ai-agents-edge-devices.html"/>
+    <updated>2026-10-21T07:30:00Z</updated>
+    <published>2026-10-21T07:00:00Z</published>
+    <summary type="html">&lt;p&gt;Researchers observed LLM-driven tooling exploiting CVE-2024-3400 within minutes of disclosure.&lt;/p&gt;</summary>
+    <category term="AI Security"/>
+    <category term="Vulnerability"/>
+  </entry>
+</feed>

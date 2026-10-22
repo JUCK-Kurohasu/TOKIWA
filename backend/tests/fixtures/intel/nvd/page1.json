@@ -1,0 +1,212 @@
+{
+  "resultsPerPage": 2,
+  "startIndex": 0,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-10-22T03:12:45.123",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2024-3400",
+        "sourceIdentifier": "psirt@paloaltonetworks.com",
+        "published": "2024-04-12T08:15:06.230",
+        "lastModified": "2026-10-21T16:53:46.187",
+        "vulnStatus": "Analyzed",
+        "cveTags": [],
+        "cisaExploitAdd": "2024-04-12",
+        "cisaActionDue": "2024-04-19",
+        "cisaRequiredAction": "Apply mitigations per vendor instructions as they become available.",
+        "cisaVulnerabilityName": "Palo Alto Networks PAN-OS Command Injection Vulnerability",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "A command injection as a result of arbitrary file creation vulnerability in the GlobalProtect feature of Palo Alto Networks PAN-OS software for specific PAN-OS versions and distinct feature configurations may enable an unauthenticated attacker to execute arbitrary code with root privileges on the firewall."
+          },
+          {
+            "lang": "es",
+            "value": "Una vulnerabilidad de inyección de comandos en la función GlobalProtect del software PAN-OS de Palo Alto Networks..."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV40": [
+            {
+              "source": "psirt@paloaltonetworks.com",
+              "type": "Secondary",
+              "cvssData": {
+                "version": "4.0",
+                "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:A/AU:Y/R:U/V:C/RE:H/U:Red",
+                "baseScore": 10.0,
+                "baseSeverity": "CRITICAL"
+              }
+            }
+          ],
+          "cvssMetricV31": [
+            {
+              "source": "psirt@paloaltonetworks.com",
+              "type": "Secondary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                "baseScore": 10.0,
+                "baseSeverity": "CRITICAL",
+                "attackVector": "NETWORK",
+                "attackComplexity": "LOW",
+                "privilegesRequired": "NONE",
+                "userInteraction": "NONE",
+                "scope": "CHANGED",
+                "confidentialityImpact": "HIGH",
+                "integrityImpact": "HIGH",
+                "availabilityImpact": "HIGH"
+              },
+              "exploitabilityScore": 3.9,
+              "impactScore": 6.0
+            },
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "baseScore": 9.8,
+                "baseSeverity": "CRITICAL",
+                "attackVector": "NETWORK",
+                "attackComplexity": "LOW",
+                "privilegesRequired": "NONE",
+                "userInteraction": "NONE",
+                "scope": "UNCHANGED",
+                "confidentialityImpact": "HIGH",
+                "integrityImpact": "HIGH",
+                "availabilityImpact": "HIGH"
+              },
+              "exploitabilityScore": 3.9,
+              "impactScore": 5.9
+            }
+          ]
+        },
+        "weaknesses": [
+          {
+            "source": "psirt@paloaltonetworks.com",
+            "type": "Secondary",
+            "description": [{"lang": "en", "value": "CWE-20"}]
+          },
+          {
+            "source": "nvd@nist.gov",
+            "type": "Primary",
+            "description": [{"lang": "en", "value": "CWE-77"}, {"lang": "en", "value": "NVD-CWE-Other"}]
+          }
+        ],
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:o:paloaltonetworks:pan-os:10.2.0:-:*:*:*:*:*:*",
+                    "matchCriteriaId": "D1E1A5A8-6F2E-4E4F-9A3B-2B7A1C1D0001"
+                  },
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:o:paloaltonetworks:pan-os:*:*:*:*:*:*:*:*",
+                    "versionStartIncluding": "11.0.0",
+                    "versionEndExcluding": "11.0.4",
+                    "matchCriteriaId": "D1E1A5A8-6F2E-4E4F-9A3B-2B7A1C1D0002"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "references": [
+          {
+            "url": "https://security.paloaltonetworks.com/CVE-2024-3400",
+            "source": "psirt@paloaltonetworks.com",
+            "tags": ["Vendor Advisory"]
+          },
+          {
+            "url": "https://unit42.paloaltonetworks.com/cve-2024-3400/",
+            "source": "psirt@paloaltonetworks.com",
+            "tags": ["Exploit", "Third Party Advisory"]
+          }
+        ]
+      }
+    },
+    {
+      "cve": {
+        "id": "CVE-2024-6387",
+        "sourceIdentifier": "secalert@redhat.com",
+        "published": "2024-07-01T13:15:10.017",
+        "lastModified": "2026-10-20T11:02:00.000",
+        "vulnStatus": "Modified",
+        "cveTags": [],
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "A security regression (CVE-2006-5051) was discovered in OpenSSH's server (sshd). There is a race condition which can lead sshd to handle some signals in an unsafe manner."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "source": "secalert@redhat.com",
+              "type": "Secondary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "baseScore": 8.1,
+                "baseSeverity": "HIGH"
+              },
+              "exploitabilityScore": 2.2,
+              "impactScore": 5.9
+            }
+          ]
+        },
+        "weaknesses": [
+          {
+            "source": "secalert@redhat.com",
+            "type": "Primary",
+            "description": [{"lang": "en", "value": "CWE-364"}]
+          }
+        ],
+        "configurations": [
+          {
+            "operator": "AND",
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+                    "versionStartIncluding": "8.5",
+                    "versionEndExcluding": "9.8",
+                    "matchCriteriaId": "A3F1B2C4-0000-4000-8000-000000000001"
+                  }
+                ]
+              },
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {
+                    "vulnerable": false,
+                    "criteria": "cpe:2.3:o:debian:debian_linux:12.0:*:*:*:*:*:*:*",
+                    "matchCriteriaId": "A3F1B2C4-0000-4000-8000-000000000002"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "references": [
+          {"url": "https://access.redhat.com/security/cve/CVE-2024-6387", "source": "secalert@redhat.com"},
+          {"url": "https://www.openssh.com/txt/release-9.8", "source": "af854a3a-2127-422b-91ae-364da2661108", "tags": ["Release Notes"]}
+        ]
+      }
+    }
+  ]
+}

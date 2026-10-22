@@ -1,0 +1,101 @@
+{
+  "resultsPerPage": 1,
+  "startIndex": 2,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-10-22T03:12:52.456",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2021-44228",
+        "sourceIdentifier": "security@apache.org",
+        "published": "2021-12-10T10:15:09.143",
+        "lastModified": "2026-10-19T08:00:00.000",
+        "vulnStatus": "Modified",
+        "cveTags": [],
+        "cisaExploitAdd": "2021-12-10",
+        "cisaActionDue": "2021-12-24",
+        "cisaRequiredAction": "For all affected software assets for which updates exist, the only acceptable remediation actions are: 1) Apply updates; OR 2) remove affected assets from agency networks.",
+        "cisaVulnerabilityName": "Apache Log4j2 Remote Code Execution Vulnerability",
+        "descriptions": [
+          {
+            "lang": "en",
+            "value": "Apache Log4j2 2.0-beta9 through 2.15.0 (excluding security releases 2.12.2, 2.12.3, and 2.3.1) JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints."
+          }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "cvssData": {
+                "version": "3.1",
+                "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                "baseScore": 10.0,
+                "baseSeverity": "CRITICAL"
+              },
+              "exploitabilityScore": 3.9,
+              "impactScore": 6.0
+            }
+          ],
+          "cvssMetricV2": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "cvssData": {
+                "version": "2.0",
+                "vectorString": "AV:N/AC:M/Au:N/C:C/I:C/A:C",
+                "baseScore": 9.3
+              },
+              "baseSeverity": "HIGH",
+              "exploitabilityScore": 8.6,
+              "impactScore": 10.0,
+              "acInsufInfo": false
+            }
+          ]
+        },
+        "weaknesses": [
+          {
+            "source": "security@apache.org",
+            "type": "Primary",
+            "description": [{"lang": "en", "value": "CWE-502"}, {"lang": "en", "value": "CWE-400"}, {"lang": "en", "value": "CWE-20"}]
+          },
+          {
+            "source": "nvd@nist.gov",
+            "type": "Secondary",
+            "description": [{"lang": "en", "value": "CWE-917"}]
+          }
+        ],
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:a:apache:log4j:*:*:*:*:*:*:*:*",
+                    "versionStartIncluding": "2.13.0",
+                    "versionEndExcluding": "2.15.0",
+                    "matchCriteriaId": "B1C2D3E4-0000-4000-8000-000000000003"
+                  },
+                  {
+                    "vulnerable": true,
+                    "criteria": "cpe:2.3:a:apache:log4j:2.0:beta9:*:*:*:*:*:*",
+                    "matchCriteriaId": "B1C2D3E4-0000-4000-8000-000000000004"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "references": [
+          {"url": "https://logging.apache.org/log4j/2.x/security.html", "source": "security@apache.org", "tags": ["Vendor Advisory"]},
+          {"url": "https://github.com/advisories/GHSA-jfh8-c2jp-5v3q", "source": "af854a3a-2127-422b-91ae-364da2661108"}
+        ]
+      }
+    }
+  ]
+}
