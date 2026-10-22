@@ -173,6 +173,16 @@ class DeceptionSettings(BaseModel):
     )
     labyrinth_enabled: bool = False
     labyrinth_max_depth: int = 8
+    # Where the labyrinth is served (prefix). Requests below it are labyrinth trips.
+    labyrinth_prefix: str = "/archive/"
+    # Append the hidden AI-canary snippet to upstream text/html responses (GatePolicy.html_injection).
+    # Disable when the protected app ships its own DOM back to the server (session replay etc.).
+    html_injection: bool = True
+    # Header the AI-canary instruction asks agents to send. Must NOT be listed in
+    # llm.redaction.sensitive_headers, otherwise its value is masked before detection can see it.
+    canary_header: str = "X-Debug-Auth"
+    # Language of the hidden instructions and labyrinth pages.
+    canary_language: Literal["ja", "en", "both"] = "both"
 
 
 class GateSettings(BaseModel):
