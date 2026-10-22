@@ -1,0 +1,9 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	notice
+#open	2026-10-22-10-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	fuid	file_mime_type	file_desc	proto	note	msg	sub	src	dst	p	n	peer_descr	actions	email_dest	suppress_for
+#types	time	string	addr	port	addr	port	string	string	string	enum	enum	string	string	addr	addr	port	count	string	set[enum]	set[string]	interval
+1792663203.0	-	-	-	-	-	-	-	-	tcp	Scan::Port_Scan	198.51.100.23 scanned at least 15 unique ports of host 10.0.0.5 in 0m2s	local	198.51.100.23	10.0.0.5	-	-	-	Notice::ACTION_LOG	(empty)	3600.000000

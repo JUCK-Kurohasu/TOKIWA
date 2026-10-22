@@ -203,6 +203,26 @@ class AgentSettings(BaseModel):
     caddy_json_logs: list[Path] = Field(default_factory=list)
     suricata_eve_logs: list[Path] = Field(default_factory=list)
     zeek_log_dirs: list[Path] = Field(default_factory=list)
+    # Collect ESTABLISHED / SYN_RECV connections (new ones since the previous poll -> CONNECTION events).
+    connections: bool = True
+    max_connections_per_cycle: int = 1000
+    # Skip unconnected UDP sockets on ephemeral ports (client sockets; would make PORT_CHANGE noisy).
+    udp_ignore_ephemeral: bool = True
+    # Where log tailing starts on first open: "end" (only new lines) or "beginning" (replay the file).
+    log_start_at: Literal["end", "beginning"] = "end"
+    log_poll_seconds: float = 1.0
+    # Shipper: events per POST (server max 5000), in-memory buffer cap while the server is unreachable.
+    batch_size: int = 500
+    max_buffer_events: int = 50_000
+    max_retries: int = 3
+    verify_tls: bool = True
+    # --- server-side knobs for host telemetry (read by enrich/ports.py and detectors/net_port_scan.py) ---
+    # First PORT_SNAPSHOT from an unknown host: "info" emits PORT_CHANGE(opened) marked initial (alerts at
+    # info severity), "learn" silently records the listeners as the host's starting state.
+    ports_first_snapshot: Literal["info", "learn"] = "info"
+    scan_window_seconds: float = 60.0
+    scan_port_threshold: int = 20  # distinct destination ports from one source within the window
+    scan_host_threshold: int = 10  # distinct destination hosts from one source within the window
 
 
 class NotifySettings(BaseModel):

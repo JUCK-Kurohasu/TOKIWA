@@ -1,0 +1,1 @@
+{"ts":"2026-10-22T10:00:10.000000Z","uid":"CJ2","id.orig_h":"203.0.113.99","id.orig_p":50000,"id.resp_h":"10.0.0.5","id.resp_p":8080,"method":"POST","host":"api.lab","uri":"/api/chat","version":"1.1","user_agent":"Claude-User","request_body_len":120,"response_body_len":50,"status_code":200,"username":"bob","password":"letmein","resp_mime_types":["application/json"]}
