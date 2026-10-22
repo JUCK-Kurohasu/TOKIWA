@@ -160,7 +160,8 @@ class LLMGateway:
                 None,
                 resp.usage,
                 started,
-                f"model refused (stop_reason={resp.stop_reason})",
+                f"model refused (stop_reason={resp.stop_reason})"
+                + (f": {resp.text[:500]}" if resp.text else ""),
                 resp.text,
                 resp.citations,
             )
@@ -235,6 +236,9 @@ class LLMGateway:
         """Returns (turn, status, error, call_id)."""
         model = self.model_for(tier)
         started = time.perf_counter()
+        turn: ChatTurn | None = None
+        err: str | None = None
+        usage = LLMUsage()
         try:
             await self.check_budget()
             turn = await self.provider.chat(
@@ -247,27 +251,28 @@ class LLMGateway:
                 cache=self.llm.prompt_cache,
             )
         except BudgetExceededError as exc:
-            status, err, turn, usage = LLMCallStatus.BUDGET_EXCEEDED, str(exc), None, LLMUsage()
+            status, err = LLMCallStatus.BUDGET_EXCEEDED, str(exc)
         except Exception as exc:
             log.warning("LLM chat failed (%s/%s): %s", purpose, model, exc)
-            status, err, turn, usage = LLMCallStatus.ERROR, f"{type(exc).__name__}: {exc}", None, LLMUsage()
+            status, err = LLMCallStatus.ERROR, f"{type(exc).__name__}: {exc}"
         else:
             usage = turn.usage
             status = LLMCallStatus.REFUSED if turn.refused else LLMCallStatus.OK
-            err = None
         latency = (time.perf_counter() - started) * 1000
-        cost = estimate_cost(model, usage, self.llm.pricing) if self.provider.name != "mock" else 0.0
+        served_model = turn.model if turn else model  # may differ from `model` after a server-side fallback
+        cost = estimate_cost(served_model, usage, self.llm.pricing) if self.provider.name != "mock" else 0.0
         call_id = await self._audit(
             purpose=purpose,
             tier=tier,
-            model=turn.model if turn else model,
+            model=served_model,
             prompt_version=prompt_version,
             status=status,
             usage=usage,
             cost=cost,
             latency=latency,
             related=related or {},
-            error=err,
+            # The returned `err` stays None for refusals (callers branch on status); the audit row gets the reason.
+            error=err or (f"model refused: {turn.text[:500]}" if turn is not None and turn.refused else None),
             request_text=json.dumps(
                 {"system": system, "messages": messages[-6:]}, ensure_ascii=False, default=str
             )[:50_000],
