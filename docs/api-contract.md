@@ -109,12 +109,20 @@
 | POST | /notify/channels/{id}/test | admin | → `{ok, error?}` |
 
 ## LLM（`routes/llm.py`）
-| GET | /llm/config | user | → `{provider, available, model_fast, model_deep, effort_fast, effort_deep, daily_budget_usd, spent_today_usd, output_language, enable_fallbacks, prompt_cache}` |
-| PUT | /llm/config | admin | 部分更新（settings_kv `llm.config` に保存し gateway を再構築）。API キーは書き込みのみ |
-| GET | /llm/usage | user | `?days=14` → `{days:[{date, cost_usd, calls, input_tokens, output_tokens, by_purpose:{}}]}` |
-| GET | /llm/calls | user | `?purpose&status&limit&offset` → `Page[LLMCall]` |
-| GET | /llm/calls/{id} | admin | → `LLMCallDetail` |
-| POST | /llm/test | admin | → `{ok, provider, model, latency_ms, error?}` |
+| Method | Path | 権限 | 入出力 |
+|---|---|---|---|
+| GET | /llm/config | user | → `LLMConfigOut` `{provider, active_provider, available, model_fast, model_deep, effort_fast, effort_deep, daily_budget_usd, spent_today_usd, output_language, enable_fallbacks, prompt_cache, max_output_tokens, max_input_tokens_per_call, request_timeout_seconds, anthropic_base_url, openai_base_url, anthropic_api_key_set, openai_api_key_set, overridden[]}` |
+| PUT | /llm/config | admin | `LLMConfigUpdate`（部分更新。省略=変更なし、`null`=静的設定に戻す。未知フィールドは 422）→ `LLMConfigOut`。settings_kv `llm.config` に保存し gateway を再構築。`anthropic_api_key` / `openai_api_key` は書き込み専用（`""`/`null` で削除） |
+| GET | /llm/usage | user | `?days=14`（1〜366, UTC 日単位, 古い順, 0 件の日も含む）→ `{days:[{date, cost_usd, calls, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, by_purpose:{purpose: cost_usd}, by_purpose_calls:{purpose: calls}}]}` |
+| GET | /llm/calls | user | `?purpose&status&limit&offset` → `Page[LLMCall]`（新しい順） |
+| GET | /llm/calls/{id} | admin | → `LLMCallDetail`（マスキング済み入力 `request_redacted` と `response_text`） |
+| POST | /llm/test | admin | `?tier=fast\|deep`（既定 fast）→ `{ok, provider, model, latency_ms, status, error?}`（最小の構造化呼び出し。予算・監査が適用される） |
+
+- `provider` は設定値（`auto|anthropic|openai_compat|mock`）、`active_provider` は実際に使われているプロバイダ（auto 解決後）。
+  フォームの往復では `provider` を使う。`overridden` は実行時オーバーレイで上書き中のフィールド名。
+- **API キーはどのレスポンスにも含まれない**（`*_api_key_set` の真偽のみ）。base URL は資格情報部分をマスクして返す。
+- `spent_today_usd` は直近 24 時間のローリング合計（予算判定と同じ）。`/llm/usage` の日付は UTC 暦日。
+- `effort_*` は `low|medium|high|xhigh|max`。`output_language` は `ja|en`。
 
 ## コパイロット（`routes/copilot.py`）
 | GET | /copilot/conversations | user | `?all=true`(admin のみ全ユーザー分) → `[{id,title,owner,context,created_at,updated_at}]` |
