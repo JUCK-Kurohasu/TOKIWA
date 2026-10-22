@@ -171,6 +171,17 @@ async def test_channel_specific_payloads(make_alert) -> None:  # type: ignore[no
     assert "embeds" in json.loads(discord.calls.last.request.content)
 
 
+async def test_failed_delivery_does_not_start_dedup_window(make_alert) -> None:  # type: ignore[no-untyped-def]
+    await _channel(ChannelKind.WEBHOOK, HOOK)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(HOOK).mock(return_value=httpx.Response(503))
+        await service.on_alert_created(make_alert(rule_id="a"))
+        route.mock(return_value=httpx.Response(200))
+        await service.on_alert_created(make_alert(rule_id="b"))  # same target, retried after the outage
+        await service.on_alert_created(make_alert(rule_id="c"))  # now suppressed
+    assert route.call_count == 2
+
+
 async def test_failed_channel_does_not_block_others(make_alert) -> None:  # type: ignore[no-untyped-def]
     await _channel(ChannelKind.WEBHOOK, HOOK)
     await _channel(ChannelKind.SLACK, SLACK)

@@ -201,7 +201,8 @@ async def dispatch(
     if not targets:
         return []
     results = [await _send(t, n, s) for t in targets]
-    if respect_dedup and n.dedup_key:
+    # Only a successful delivery starts the quiet window (an outage must not swallow the next one).
+    if respect_dedup and n.dedup_key and any(r.ok for r in results):
         _dedup.mark(n.dedup_key, n.severity, now)
     return results
 
