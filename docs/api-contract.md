@@ -117,11 +117,19 @@
 | POST | /llm/test | admin | → `{ok, provider, model, latency_ms, error?}` |
 
 ## コパイロット（`routes/copilot.py`）
-| GET | /copilot/conversations | user | → `[{id,title,created_at,updated_at}]` |
-| POST | /copilot/conversations | user | `{title?, context?}` → conversation |
-| GET | /copilot/conversations/{id} | user | → `{conversation, messages:[{id, role, content, created_at, tool_calls?}]}` |
-| DELETE | /copilot/conversations/{id} | user | |
-| POST | /copilot/conversations/{id}/messages | user | `{content}` → **SSE**: `data: {"type":"text"|"tool_call"|"tool_result"|"done"|"error", ...}` |
+| GET | /copilot/conversations | user | `?all=true`(admin のみ全ユーザー分) → `[{id,title,owner,context,created_at,updated_at}]` |
+| POST | /copilot/conversations | user | `{title?, context?:{incident_id?,alert_id?,session_id?,source_ip?,vuln_id?,asset_id?}}` → conversation (201) |
+| GET | /copilot/conversations/{id} | owner/admin | → `{conversation, messages:[{id, role, content, created_at, tool_calls?, tool_results?, llm_call_id?}]}` |
+| DELETE | /copilot/conversations/{id} | owner/admin | 204 |
+| POST | /copilot/conversations/{id}/messages | owner | `{content}`(1–8000 字) → **SSE**: `data: {"type":"text"|"tool_call"|"tool_result"|"done"|"error", ...}`（409=応答生成中, 503=copilot.enabled=false） |
+
+コパイロット補足（実装: `tokiwa/copilot/`）:
+- `role`: `user` / `assistant` / `tool`（ツール結果。`tool_results:[{tool_use_id,name,ok,summary}]`）/ `notice`（UI 表示専用。LLM 未設定・エラー・上限到達。LLM には再送しない）。他人の会話は 404。
+- SSE ペイロード: `text {text, final, message_id}` / `tool_call {id, name, input}` / `tool_result {id, name, ok, summary}`（データ本体は流さず要約のみ）/
+  `error {code: error|budget_exceeded|refused|max_tool_iterations|busy|internal, error, message_id?}` / `done {conversation_id, stop_reason: end_turn|llm_not_configured|refused|max_tool_iterations|error|busy, message_id, iterations, llm_call_ids}`。必ず `done` で終わる。
+- LLM 未設定（mock）時は設定案内を `text` で返し `stop_reason=llm_not_configured`。
+- ツール（参照専用のみ）: search_events, get_alert, list_alerts, get_incident, list_incidents, get_session, top_sources, lookup_vuln, list_vuln_matches, get_asset, list_actions。
+- 設定 `copilot.*`: `enabled`, `max_tool_iterations`(chat 呼び出し上限), `max_history_messages`, `tier`(fast|deep, 既定 deep), `max_tool_result_chars`(既定 12000)。
 
 ## システム（`routes/system.py`）・ストリーム（`routes/stream.py`）
 | GET | /system/info | user | → `SystemInfo` |
