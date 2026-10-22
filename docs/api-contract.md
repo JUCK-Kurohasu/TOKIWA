@@ -53,12 +53,12 @@
 | GET | /dashboard/timeline | user | `?hours=24` → `{buckets:[{ts, events, alerts, ai_alerts}]}` |
 
 ## ホスト・資産（`routes/hosts.py`, `routes/assets.py`）
-| GET | /hosts | user | → `[{host, ports_open, last_seen, deviations}]` |
-| GET | /hosts/ports | user | `?host` → `HostPort[]`（{host,protocol,bind_ip,port,pid,process_name,first_seen,last_seen,open,allowed}） |
-| GET | /hosts/baselines | user | → `PortBaseline[]` |
-| POST | /hosts/baselines | analyst | `{host?, protocol, port, process_name?, allow_public, note?}` → `PortBaseline` |
-| DELETE | /hosts/baselines/{id} | analyst | |
-| POST | /hosts/baselines/learn | analyst | `{host}` 現在の listener をベースライン化 → `PortBaseline[]` |
+| GET | /hosts | user | → `HostSummary[]` = `[{host, ports_open, last_seen, deviations}]`（deviations = どのベースラインにも許可されない open listener 数） |
+| GET | /hosts/ports | user | `?host&open` → `HostPort[]`（{id,host,protocol,bind_ip,port,pid,process_name,first_seen,last_seen,open,allowed}。closed も含む） |
+| GET | /hosts/baselines | user | `?host`（指定時は host と `*` の両方）→ `PortBaseline[]`（{id,host,protocol,port,process_name,allow_public,note,created_at}） |
+| POST | /hosts/baselines | analyst | `PortBaselineIn` = `{host?, protocol, port, process_name?, allow_public, note?}` → `PortBaseline`（host 省略は `*`、protocol は tcp/udp に正規化、同一キーは upsert） |
+| DELETE | /hosts/baselines/{id} | analyst | → 204（無ければ 404） |
+| POST | /hosts/baselines/learn | analyst | `{host}` 現在の open listener のうち未許可のものをベースライン化 → **作成した** `PortBaseline[]`（全 IF バインドは allow_public=true。未知ホストは 404） |
 | GET | /assets | user | `?q&kind` → `Page[Asset]` |
 | POST | /assets | analyst | `AssetIn` → `Asset` |
 | GET/PATCH/DELETE | /assets/{id} | user/analyst | |
