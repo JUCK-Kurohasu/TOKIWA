@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/*
+ * TOKIWA theme. 常磐色 (tokiwa-iro, #007B43) is the brand accent.
+ * Use semantic tokens (bg-surface, text-muted, border-line, text-accent ...) instead of raw colors.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", "Noto Sans JP", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+
+  --color-bg: var(--tk-bg);
+  --color-surface: var(--tk-surface);
+  --color-surface-2: var(--tk-surface-2);
+  --color-line: var(--tk-line);
+  --color-fg: var(--tk-fg);
+  --color-muted: var(--tk-muted);
+  --color-accent: var(--tk-accent);
+  --color-accent-fg: var(--tk-accent-fg);
+  --color-accent-soft: var(--tk-accent-soft);
+
+  --color-sev-info: #64748b;
+  --color-sev-low: #38bdf8;
+  --color-sev-medium: #facc15;
+  --color-sev-high: #fb923c;
+  --color-sev-critical: #ef4444;
+  --color-ai: #c084fc;
+}
+
+:root {
+  --tk-bg: #f6f8f7;
+  --tk-surface: #ffffff;
+  --tk-surface-2: #eef3f0;
+  --tk-line: #d9e2dd;
+  --tk-fg: #0f1a15;
+  --tk-muted: #5b6b63;
+  --tk-accent: #007b43;
+  --tk-accent-fg: #ffffff;
+  --tk-accent-soft: #d6efe2;
+}
+
+.dark {
+  --tk-bg: #070c0a;
+  --tk-surface: #0e1613;
+  --tk-surface-2: #142019;
+  --tk-line: #22312a;
+  --tk-fg: #e3ece7;
+  --tk-muted: #8a9c93;
+  --tk-accent: #1fbf72;
+  --tk-accent-fg: #04140b;
+  --tk-accent-soft: #0f2e1f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--tk-bg);
+  color: var(--tk-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tk-line) transparent;
+}
