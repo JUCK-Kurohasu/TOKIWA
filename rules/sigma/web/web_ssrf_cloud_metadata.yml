@@ -1,0 +1,42 @@
+title: SSRF - Cloud Metadata or Internal Scheme in Request
+id: d76230ce-dd7a-4d84-a073-d8de5d91b70b
+status: experimental
+description: |
+  Detects server-side request forgery attempts: cloud instance metadata endpoints (169.254.169.254,
+  metadata.google.internal, Alibaba 100.100.100.200, ECS 169.254.170.2, AWS IPv6 fd00:ec2::254) or non-HTTP
+  schemes (gopher://, dict://) inside parameters/body, and requests whose path is a metadata API path (open-proxy
+  abuse).
+references:
+  - https://owasp.org/www-community/attacks/Server_Side_Request_Forgery
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.credential_access
+  - attack.t1552.005
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_param:
+    - cs-uri-query|contains: &ssrf
+        - '169.254.169.254'
+        - 'metadata.google.internal'
+        - '100.100.100.200'
+        - '169.254.170.2'
+        - 'fd00:ec2::254'
+        - 'gopher://'
+        - 'dict://'
+    - request_body|contains: *ssrf
+  selection_path:
+    cs-uri-stem|startswith:
+      - '/latest/meta-data'
+      - '/latest/api/token'
+      - '/latest/user-data'
+      - '/computeMetadata/v1'
+      - '/metadata/instance'
+  condition: 1 of selection_*
+falsepositives:
+  - Internal infrastructure tooling that legitimately references metadata endpoints in request bodies
+level: high

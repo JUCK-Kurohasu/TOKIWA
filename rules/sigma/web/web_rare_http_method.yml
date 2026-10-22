@@ -1,0 +1,31 @@
+title: Rare or Diagnostic HTTP Method
+id: 6abbe658-5712-45ec-b908-05238670a5f0
+status: experimental
+description: |
+  Detects HTTP methods that normal browsers and API clients do not send (TRACE/TRACK/DEBUG, WebDAV verbs).
+  Scanners and agents use them to fingerprint servers and find misconfigurations (XST, WebDAV write access).
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1595.002
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    cs-method:
+      - 'TRACE'
+      - 'TRACK'
+      - 'DEBUG'
+      - 'PROPFIND'
+      - 'PROPPATCH'
+      - 'MKCOL'
+      - 'MOVE'
+      - 'COPY'
+      - 'LOCK'
+      - 'UNLOCK'
+  condition: selection
+falsepositives:
+  - Legitimate WebDAV clients (file sync, CalDAV/CardDAV) if you serve WebDAV
+level: low

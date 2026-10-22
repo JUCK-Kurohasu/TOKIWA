@@ -1,0 +1,34 @@
+title: Server-Side Template Injection Probe
+id: 6d8d9e73-625b-4bdc-83f8-2444de57ff5c
+status: experimental
+description: |
+  Detects classic SSTI probes ({{7*7}}, ${7*7}, <%= 7*7 %>, #{7*7}) and Jinja2/Python sandbox-escape gadgets
+  (__class__.__mro__, __globals__, {{config ...) in the URI or body. Note the escaped \* - in Sigma an
+  unescaped * is a wildcard.
+references:
+  - https://portswigger.net/web-security/server-side-template-injection
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    - c-uri|contains: &ssti
+        - '{{7\*7}}'
+        - '${7\*7}'
+        - '<%= 7\*7 %>'
+        - '#{7\*7}'
+        - "{{7\\*'7'}}"
+        - '{{config'
+        - '__class__.__mro__'
+        - '__globals__'
+        - '__subclasses__()'
+    - request_body|contains: *ssti
+  condition: selection
+falsepositives:
+  - Developer tooling that posts template source code (template editors, CMS theme editors)
+level: high

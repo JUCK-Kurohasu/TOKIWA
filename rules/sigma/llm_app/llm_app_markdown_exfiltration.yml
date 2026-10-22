@@ -1,0 +1,26 @@
+title: Prompt Injection - Markdown Image Data Exfiltration
+id: e1bb5984-fc86-4321-a27f-a23f73906c1f
+status: experimental
+description: |
+  Detects prompts (often indirect injections hidden in documents/web pages) that make the model emit a markdown
+  image whose URL carries a query parameter - when the chat UI renders it, the browser sends conversation data
+  to the attacker's server. Also catches explicit "send/append the conversation to <url>" instructions.
+references:
+  - https://owasp.org/www-project-top-10-for-large-language-model-applications/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.exfiltration
+  - attack.t1567
+logsource:
+  category: llm_app
+  product: tokiwa
+detection:
+  selection_markdown:
+    prompt|re: '!\[[^\]\n]{0,200}\]\(https?://[^)\s]{1,300}[?&][^)\s=]{1,64}='
+  selection_instruction:
+    prompt|re|i: '\b(send|append|post|upload|exfiltrate|forward)\s+(the\s+|this\s+|our\s+|all\s+)*(conversation|chat\s+history|messages|previous\s+messages|user\s+data)\s+to\s+https?://'
+  condition: 1 of selection_*
+falsepositives:
+  - Prompts that legitimately include markdown images with query strings (e.g. pasted README files)
+level: high

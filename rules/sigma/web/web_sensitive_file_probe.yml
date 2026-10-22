@@ -1,0 +1,51 @@
+title: Sensitive File or Endpoint Probe
+id: 8db5e4e5-c68f-4807-943a-3e79810ba1af
+status: experimental
+description: |
+  Detects requests for secrets, VCS metadata, backups and diagnostic endpoints (/.env, /.git/config,
+  /.aws/credentials, backup.sql, /actuator/env, /server-status ...). Wordlist scanners and LLM agents probe these
+  early because a single hit often yields credentials.
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1595.003
+  - attack.credential_access
+  - attack.t1552.001
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    cs-uri-stem|endswith:
+      - '/.env'
+      - '/.env.local'
+      - '/.env.production'
+      - '/.env.bak'
+      - '/.git/config'
+      - '/.git/HEAD'
+      - '/.svn/entries'
+      - '/.aws/credentials'
+      - '/.ssh/id_rsa'
+      - '/id_rsa'
+      - '/.htpasswd'
+      - '/.npmrc'
+      - '/.docker/config.json'
+      - '/.DS_Store'
+      - '/wp-config.php.bak'
+      - '/wp-config.php~'
+      - '/backup.sql'
+      - '/dump.sql'
+      - '/database.sql'
+      - '/backup.zip'
+      - '/backup.tar.gz'
+      - '/server-status'
+      - '/actuator/env'
+      - '/actuator/heapdump'
+      - '/phpinfo.php'
+  condition: selection
+falsepositives:
+  - Monitoring that polls /server-status or actuator endpoints from internal hosts
+level: medium

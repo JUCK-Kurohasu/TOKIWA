@@ -1,0 +1,38 @@
+title: MCP Endpoint Probe / Tool Enumeration
+id: fe70cd03-6ba1-4c5b-8f00-1cee7afac28b
+status: experimental
+description: |
+  Detects Model Context Protocol (MCP) discovery: requests to typical MCP endpoint paths and JSON-RPC calls
+  that enumerate or invoke tools/resources/prompts (tools/list, tools/call, resources/list, prompts/list) or
+  perform an MCP initialize handshake. Agents probe exposed MCP servers to find tools they can abuse.
+references:
+  - https://modelcontextprotocol.io/specification
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.discovery
+  - attack.t1046
+  - tokiwa.category.ai_agent
+  - tokiwa.ai_score.60
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_path:
+    cs-uri-stem:
+      - '/mcp'
+      - '/mcp/'
+      - '/mcp/sse'
+      - '/mcp/messages'
+      - '/api/mcp'
+  selection_jsonrpc:
+    request_body|re: '"method"\s*:\s*"(tools/(list|call)|resources/(list|read)|prompts/(list|get))"'
+  selection_initialize:
+    request_body|contains|all:
+      - '"initialize"'
+      - 'protocolVersion'
+      - 'clientInfo'
+  condition: 1 of selection_*
+falsepositives:
+  - Your own MCP clients talking to MCP servers you intentionally expose
+level: medium

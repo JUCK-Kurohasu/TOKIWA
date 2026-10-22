@@ -1,0 +1,34 @@
+# TODO(verify): MITRE ATLAS ids (AML.T0051 LLM Prompt Injection) - re-check against the current ATLAS matrix.
+title: Prompt Injection - Instruction Override Phrase
+id: aaafde64-7c6a-4d49-8730-f78076715eb2
+status: experimental
+description: |
+  Detects the classic direct prompt-injection phrasing that tries to make a protected LLM application drop its
+  instructions ("ignore all previous instructions", "disregard the above rules", 「以前の指示を無視」...).
+  Applies to llm_app events and to HTTP bodies sent to protected LLM app paths (detection.llm_app_paths).
+references:
+  - https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  - https://atlas.mitre.org/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - atlas.aml.t0051
+  - tokiwa.category.prompt_injection
+logsource:
+  category: llm_app
+  product: tokiwa
+detection:
+  selection_en:
+    prompt|re|i: '\b(ignore|disregard|forget|override)\s+(all\s+|any\s+|every\s+)?(of\s+)?(the\s+|your\s+|my\s+)?(previous|prior|above|earlier|preceding|original|system)\s+(instructions?|prompts?|rules|directions|guidelines)'
+  selection_ja:
+    prompt|contains:
+      - '前の指示を無視'
+      - '以前の指示を無視'
+      - 'これまでの指示を無視'
+      - 'すべての指示を無視'
+      - '上記の指示を無視'
+      - 'システムプロンプトを無視'
+  condition: 1 of selection_*
+falsepositives:
+  - Users discussing prompt injection itself (security training, red-team exercises)
+level: high
