@@ -1,0 +1,2 @@
+# Lint deploy/*.py with the backend's ruff settings regardless of the directory ruff is run from.
+extend = "../backend/pyproject.toml"
