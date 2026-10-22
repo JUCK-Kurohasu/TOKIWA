@@ -46,12 +46,13 @@ from tokiwa.config import get_settings
 from tokiwa.db.models.detection import RuleRow
 from tokiwa.db.models.intel import AdvisoryRow, AssetRow, VulnMatchRow, VulnRow
 from tokiwa.db.session import session_scope
-from tokiwa.intel.matcher import LoopLocks
+from tokiwa.intel.matcher import LoopLocks, parse_cpe
 from tokiwa.intel.prompts import ADVISORY_PROMPT, advisory_system, build_advisory_user
 from tokiwa.llm.base import LLMPurpose, LLMTier, StructuredRequest
 from tokiwa.llm.gateway import get_gateway
 from tokiwa.llm.mock import register_mock_responder
 from tokiwa.runtime import on_startup, periodic
+from tokiwa.schemas.common import Severity
 from tokiwa.schemas.intel import Advisory, AdvisoryAnalysis, MatchStatus, Priority, ProposedRule, VulnRecord
 from tokiwa.schemas.system import RuleSource, RuleStatus
 from tokiwa.util import new_id, short_hash, utcnow
@@ -412,10 +413,69 @@ async def _matched_assets(vuln_id: str) -> list[AssetContext]:
     return list(seen.values())
 
 
-async def _load_vuln(vuln_id: str) -> VulnRecord | None:
+_AFFECTED_PROMPT_KEYS = (
+    "vendor",
+    "product",
+    "version",
+    "cpe",
+    "ecosystem",
+    "versionStartIncluding",
+    "versionStartExcluding",
+    "versionEndIncluding",
+    "versionEndExcluding",
+    "introduced",
+    "fixed",
+    "last_affected",
+    "versions",
+)
+_SEVERITIES = frozenset(s.value for s in Severity)
+
+
+def vuln_record_from_row(row: VulnRow) -> VulnRecord:
+    """Lenient ``VulnRow`` -> ``VulnRecord``.
+
+    Feeds may store CPE-only ``affected`` entries (``SoftwareItem.product`` is required) or non-canonical
+    severities; one odd row must not break advisory generation.
+    """
+    affected: list[dict[str, Any]] = []
+    for a in row.affected or []:
+        if not isinstance(a, dict):
+            continue
+        product = a.get("product")
+        if not product:
+            cpe = parse_cpe(a.get("cpe"))
+            product = cpe.product if cpe is not None and cpe.product not in ("*", "-", "") else None
+        if not product:
+            continue
+        item = {k: a[k] for k in ("vendor", "version", "cpe", "ecosystem") if isinstance(a.get(k), str)}
+        affected.append({**item, "product": str(product)})
+    data: dict[str, Any] = {
+        name: getattr(row, name) for name in VulnRecord.model_fields if name != "affected"
+    }
+    severity = str(data.get("severity") or "").lower()
+    data["severity"] = severity if severity in _SEVERITIES else None
+    return VulnRecord.model_validate({**data, "affected": affected})
+
+
+def _affected_for_prompt(raw: list[Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for a in raw or []:
+        if isinstance(a, dict):
+            item = {k: a[k] for k in _AFFECTED_PROMPT_KEYS if a.get(k) not in (None, "", [])}
+            if item:
+                out.append(item)
+        if len(out) >= 20:
+            break
+    return out
+
+
+async def _load_vuln(vuln_id: str) -> tuple[VulnRecord, list[dict[str, Any]]] | None:
+    """(record, raw affected entries incl. version ranges) or None."""
     async with session_scope() as session:
         row = await session.get(VulnRow, vuln_id)
-        return VulnRecord.model_validate(row) if row is not None else None
+        if row is None:
+            return None
+        return vuln_record_from_row(row), _affected_for_prompt(row.affected)
 
 
 async def find_recent_advisory(vuln_id: str, asset_ids: list[str], priority: Priority) -> Advisory | None:
@@ -447,7 +507,7 @@ async def find_recent_advisory(vuln_id: str, asset_ids: list[str], priority: Pri
     return None
 
 
-def _vuln_prompt_dict(v: VulnRecord) -> dict[str, Any]:
+def _vuln_prompt_dict(v: VulnRecord, affected: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "id": v.id,
         "aliases": v.aliases[:10],
@@ -464,7 +524,7 @@ def _vuln_prompt_dict(v: VulnRecord) -> dict[str, Any]:
         "kev_due_date": v.kev_due_date,
         "kev_ransomware": v.kev_ransomware,
         "cwe": v.cwe[:10],
-        "affected": [a.model_dump(exclude_none=True) for a in v.affected[:20]],
+        "affected": affected,
         "references": v.references[:20],
     }
 
@@ -480,9 +540,10 @@ async def generate_advisory(vuln_id: str, *, force: bool = False) -> tuple[Advis
     Raises ``LookupError`` when the vulnerability is unknown.
     """
     settings = get_settings()
-    vuln = await _load_vuln(vuln_id)
-    if vuln is None:
+    loaded = await _load_vuln(vuln_id)
+    if loaded is None:
         raise LookupError(f"unknown vulnerability {vuln_id}")
+    vuln, raw_affected = loaded
     async with _locks.get(f"advisory:{vuln_id}"):
         assets = await _matched_assets(vuln_id)
         asset_ids = sorted(a.id for a in assets)
@@ -500,7 +561,7 @@ async def generate_advisory(vuln_id: str, *, force: bool = False) -> tuple[Advis
             tier=LLMTier.DEEP,
             system=advisory_system(lang),
             user=build_advisory_user(
-                vuln=_vuln_prompt_dict(vuln),
+                vuln=_vuln_prompt_dict(vuln, raw_affected),
                 assets=[a.prompt_dict() for a in assets],
                 context={
                     "rule_priority": floor.value,
@@ -699,8 +760,8 @@ async def advise_for_vulns(vuln_ids: Iterable[str]) -> list[Advisory]:
     out: list[Advisory] = []
     for vid in dict.fromkeys(vuln_ids):
         try:
-            vuln = await _load_vuln(vid)
-            if vuln is None or not _is_urgent(vuln, threshold):
+            loaded = await _load_vuln(vid)
+            if loaded is None or not _is_urgent(loaded[0], threshold):
                 continue
             if not await _matched_assets(vid):
                 continue
@@ -738,7 +799,7 @@ async def advise_pending(limit: int = MAX_PENDING_PER_RUN) -> list[Advisory]:
             if vids
             else []
         )
-        vulns = [VulnRecord.model_validate(r) for r in rows]
+        vulns = [vuln_record_from_row(r) for r in rows]
     vulns.sort(
         key=lambda v: (
             PRIORITY_RANK[rule_priority(v, True, threshold)[0]],
