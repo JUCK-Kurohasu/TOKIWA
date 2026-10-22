@@ -74,7 +74,8 @@ class LLMSettings(BaseModel):
     model_deep: str = "claude-opus-5-5"
     effort_fast: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     effort_deep: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    max_output_tokens: int = 4096
+    # Thinking cannot be disabled on the deep model and counts against max_tokens.
+    max_output_tokens: int = 8000
     max_input_tokens_per_call: int = 24_000
     daily_budget_usd: float = 5.0
     # Server-side refusal fallback (security content can trip safety classifiers).
