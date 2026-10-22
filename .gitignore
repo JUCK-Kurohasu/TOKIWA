@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Runtime data
+data/
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+tokiwa.yaml
+.env
+.env.*
+!.env.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Eval outputs
+eval/runs/
+eval/reports/*.json
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Claude Code agent worktrees
+.claude/worktrees/
