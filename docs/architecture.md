@@ -141,7 +141,9 @@ TOKIWA/
 
 `bus.py` の docstring が正本。主要トピック: `event.ingested`, `alert.created`, `alert.updated`,
 `incident.created`, `incident.updated`, `action.proposed`, `action.updated`, `deception.tripped`,
-`intel.vuln_matched`, `intel.advisory`, `llm.call`。SSE (`/api/v1/stream`) はこれをそのまま中継する。
+`intel.vuln_matched`, `intel.advisory`, `llm.call`。SSE (`/api/v1/stream`) は UI 向けのトピック
+（`alert.*`, `incident.*`, `action.*`, `deception.tripped`, `intel.advisory`, `llm.call`）を中継し、
+`event.ingested` は件数のみ（`{"count": n}`）に間引く（生テレメトリはストリームに流さない）。
 
 ## 7. 安全設計（LLM）
 

@@ -14,7 +14,7 @@ from collections.abc import Callable, Coroutine
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,13 +36,8 @@ def _bearer(authorization: str | None) -> str | None:
     return value.strip()
 
 
-async def get_current_user(
-    session: DbSession,
-    authorization: Annotated[str | None, Header()] = None,
-    access_token: Annotated[str | None, Query(include_in_schema=False)] = None,
-) -> User:
-    """JWT from the Authorization header (or ?access_token= for EventSource/SSE which cannot set headers)."""
-    token = _bearer(authorization) or access_token
+async def user_from_token(session: AsyncSession, token: str | None) -> User:
+    """Resolve a user JWT. Shared by header auth and the SSE stream (which must use a query parameter)."""
     if not token or token.startswith(API_TOKEN_PREFIX):
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED, "not authenticated", headers={"WWW-Authenticate": "Bearer"}
@@ -57,6 +52,18 @@ async def get_current_user(
     if row is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
     return User.model_validate(row)
+
+
+async def get_current_user(
+    session: DbSession,
+    authorization: Annotated[str | None, Header()] = None,
+) -> User:
+    """JWT from the Authorization header only.
+
+    The ``?access_token=`` query form is accepted solely by ``GET /api/v1/stream`` (EventSource cannot set
+    headers); accepting it everywhere would leak JWTs into access logs, proxies and browser history.
+    """
+    return await user_from_token(session, _bearer(authorization))
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

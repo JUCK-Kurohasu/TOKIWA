@@ -1,0 +1,1 @@
+{"ts":1792663200.5,"uid":"CJ1","id.orig_h":"10.0.0.7","id.orig_p":40000,"id.resp_h":"10.0.0.5","id.resp_p":5432,"proto":"tcp","service":"postgresql","duration":1.25,"orig_bytes":300,"resp_bytes":900,"conn_state":"SF","local_orig":true,"local_resp":true,"orig_pkts":10,"resp_pkts":8}

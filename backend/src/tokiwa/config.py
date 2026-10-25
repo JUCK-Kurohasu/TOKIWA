@@ -156,8 +156,27 @@ class ResponseSettings(BaseModel):
     default_ttl_minutes: int = 60
     max_ttl_minutes: int = 60 * 24 * 7
     nftables_enabled: bool = False
+    # nft binary used by the nftables_block executor (fixed argv template, never a shell).
+    nftables_binary: str = "nft"
     # Never block these (CIDRs). Protects against self-lockout.
     protected_cidrs: list[str] = Field(default_factory=lambda: ["127.0.0.0/8", "::1/128"])
+    # Also treat this server's own interface addresses as protected.
+    protect_server_addresses: bool = True
+    # Reject private / ULA / link-local targets (e.g. management networks). Off by default: lab attackers
+    # usually live on private networks.
+    block_private_targets: bool = False
+    # Refuse targets broader than these prefixes (e.g. 0.0.0.0/0) for gate/nftables actions.
+    min_prefix_v4: int = 16
+    min_prefix_v6: int = 48
+    default_rate_limit_rpm: int = 60
+    default_tarpit_delay_ms: int = 2000
+    # webhook executor: named endpoints. Actions select a *name* (params.endpoint), never a URL.
+    webhook_urls: dict[str, str] = Field(default_factory=dict)
+    # Allowed destination hosts ("example.com" exact, ".example.com" suffix). Empty = any host.
+    webhook_allowed_hosts: list[str] = Field(default_factory=list)
+    # SSRF guard: refuse destinations resolving to private / loopback / link-local / reserved addresses.
+    webhook_block_private: bool = True
+    webhook_timeout_seconds: float = 10.0
 
 
 class DeceptionSettings(BaseModel):
@@ -204,6 +223,26 @@ class AgentSettings(BaseModel):
     caddy_json_logs: list[Path] = Field(default_factory=list)
     suricata_eve_logs: list[Path] = Field(default_factory=list)
     zeek_log_dirs: list[Path] = Field(default_factory=list)
+    # Collect ESTABLISHED / SYN_RECV connections (new ones since the previous poll -> CONNECTION events).
+    connections: bool = True
+    max_connections_per_cycle: int = 1000
+    # Skip unconnected UDP sockets on ephemeral ports (client sockets; would make PORT_CHANGE noisy).
+    udp_ignore_ephemeral: bool = True
+    # Where log tailing starts on first open: "end" (only new lines) or "beginning" (replay the file).
+    log_start_at: Literal["end", "beginning"] = "end"
+    log_poll_seconds: float = 1.0
+    # Shipper: events per POST (server max 5000), in-memory buffer cap while the server is unreachable.
+    batch_size: int = 500
+    max_buffer_events: int = 50_000
+    max_retries: int = 3
+    verify_tls: bool = True
+    # --- server-side knobs for host telemetry (read by enrich/ports.py and detectors/net_port_scan.py) ---
+    # First PORT_SNAPSHOT from an unknown host: "info" emits PORT_CHANGE(opened) marked initial (alerts at
+    # info severity), "learn" silently records the listeners as the host's starting state.
+    ports_first_snapshot: Literal["info", "learn"] = "info"
+    scan_window_seconds: float = 60.0
+    scan_port_threshold: int = 20  # distinct destination ports from one source within the window
+    scan_host_threshold: int = 10  # distinct destination hosts from one source within the window
 
 
 class NotifySettings(BaseModel):
@@ -211,6 +250,20 @@ class NotifySettings(BaseModel):
     default_webhook_url: str | None = None
     default_min_severity: Literal["info", "low", "medium", "high", "critical"] = "high"
     public_ui_url: str | None = None
+    # Message language: Japanese, English, or both (ja first).
+    language: Literal["ja", "en", "both"] = "both"
+    # Same target (source IP / incident / action target) is notified at most once per N minutes,
+    # unless the severity went up.
+    dedup_minutes: int = 10
+    # Send approval requests for new response proposals (action.proposed).
+    notify_action_proposals: bool = True
+    # Allowed destination hosts for webhook/slack/discord ("example.com" exact, ".example.com" suffix).
+    # Empty = any host.
+    allowed_hosts: list[str] = Field(default_factory=list)
+    # SSRF guard: refuse destinations resolving to private / loopback / link-local / reserved addresses.
+    # Disable for lab receivers on a private network.
+    block_private_destinations: bool = True
+    http_timeout_seconds: float = 10.0
 
 
 class CopilotSettings(BaseModel):
