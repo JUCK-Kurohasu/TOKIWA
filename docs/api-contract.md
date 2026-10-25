@@ -7,6 +7,7 @@
 共通:
 - 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。センサーは `X-Tokiwa-Token: tkw_...`。
 - 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`。
+  バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
 - 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。
 - ロール: viewer=閲覧, analyst=アラート/インシデント/対処の操作, admin=ユーザー/トークン/設定。
 
@@ -18,19 +19,22 @@
 | POST | /auth/login | public | `LoginRequest` → `TokenResponse` |
 | GET | /auth/me | user | → `User` |
 | GET | /users | admin | → `User[]` |
-| POST | /users | admin | `UserCreate` → `User` |
-| DELETE | /users/{id} | admin | 自分自身は削除不可 |
+| POST | /users | admin | `UserCreate` → `User`（201。重複 username は 409） |
+| PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409） |
+| DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409） |
 | GET | /tokens | admin | → `ApiToken[]` |
-| POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（平文は一度だけ） |
-| DELETE | /tokens/{id} | admin | revoke |
+| POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |
+| DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
+
+users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
 
 ## 取り込み（`routes/ingest.py` 実装済）
 | POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult` |
 
 ## イベント（`routes/events.py`）
-| GET | /events | user | `?kind&dataset&source_ip&session_id&host&q&since&until&limit&offset` → `Page[Event]`（新しい順） |
+| GET | /events | user | `?kind&dataset&source_ip&session_id&host&q&since&until&limit&offset` → `Page[Event]`（新しい順。`q` は HTTP path / UA の部分一致・大小無視） |
 | GET | /events/{id} | user | → `Event` |
-| GET | /events/stats/timeline | user | `?hours=24&bucket_minutes=60` → `{buckets:[{ts, total, by_kind:{}}]}` |
+| GET | /events/stats/timeline | user | `?hours=24&bucket_minutes=60` → `EventTimeline {bucket_minutes, buckets:[{ts, total, by_kind:{}}]}`（hours ≤ 168、バケット ≤ 2000、ts はエポック整列のバケット開始） |
 
 ## アラート（`routes/alerts.py`）
 | GET | /alerts | user | `?status&severity&category&source_ip&q&min_ai_score&incident_id&limit&offset` → `Page[Alert]` |
@@ -50,7 +54,12 @@
 
 ## ダッシュボード（`routes/dashboard.py`）
 | GET | /dashboard/summary | user | → `{alerts_24h:{total, by_severity:{}}, open_incidents, ai_sessions_24h, events_24h, llm_cost_today_usd, llm_budget_usd, pending_actions, kev_matches, top_sources:[{ip,count,ai_score}], top_rules:[{rule_id,title,count}], recent_incidents: Incident[]}` |
-| GET | /dashboard/timeline | user | `?hours=24` → `{buckets:[{ts, events, alerts, ai_alerts}]}` |
+| GET | /dashboard/timeline | user | `?hours=24&bucket_minutes?` → `DashboardTimeline {bucket_minutes, buckets:[{ts, events, alerts, ai_alerts}]}`（bucket 省略時は ≤ 36 本になる幅を自動選択） |
+
+スキーマは `schemas/dashboard.py`（`DashboardSummary` / `DashboardTimeline`）。定義: alerts_24h = last_seen が 24h 以内、
+open_incidents = resolved / false_positive 以外、ai_sessions_24h = classification=ai_agent または ai_score ≥ `detection.ai_agent_threshold`、
+ai_alerts = category=ai_agent または ai_score ≥ 同閾値、llm_cost_today_usd = ゲートウェイの予算判定と同じ直近 24h 合計、
+top_* の count = アラートの重複排除カウント合計。テーブルが空でも 0 を返す。応答は 5 秒メモリキャッシュ。
 
 ## ホスト・資産（`routes/hosts.py`, `routes/assets.py`）
 | GET | /hosts | user | → `[{host, ports_open, last_seen, deviations}]` |
@@ -142,7 +151,11 @@
 ## システム（`routes/system.py`）・ストリーム（`routes/stream.py`）
 | GET | /system/info | user | → `SystemInfo` |
 | GET | /system/jobs | user | → `JobInfo[]` |
-| POST | /system/jobs/{name}/run | admin | → `JobInfo` |
-| GET | /audit | admin | `?limit&offset` → `Page[AuditEntry]` |
+| POST | /system/jobs/{name}/run | admin | → `JobInfo`（バックグラウンド起動して即返す。実行中なら二重起動しない。未知は 404） |
+| GET | /audit | admin | `?action&actor&limit&offset` → `Page[AuditEntry]`（新しい順） |
 | GET | /stream | user(`?access_token`) | **SSE**: `data: {"topic": "...", "data": {...}}`（alert/incident/action/deception/llm.call） |
+
+stream の詳細: 接続直後にコメント `: connected`、15 秒ごとに `: ping` コメント。中継トピックは `alert.*` / `incident.*` /
+`action.*` / `deception.tripped` / `intel.advisory` / `llm.call`（`request_redacted`・`response_text` は除外）/
+`event.ingested`（`{"count": n}` のみ）。`?access_token=` の値は uvicorn アクセスログでマスクされる。
 | GET | /health | public | 実装済 |
