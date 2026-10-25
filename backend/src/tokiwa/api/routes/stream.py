@@ -25,7 +25,7 @@ from pydantic_core import to_jsonable_python
 from sse_starlette import EventSourceResponse, ServerSentEvent
 from starlette.background import BackgroundTask
 
-from tokiwa.api.deps import get_current_user
+from tokiwa.api.deps import _bearer, user_from_token
 from tokiwa.bus import bus
 from tokiwa.db.session import session_scope
 from tokiwa.schemas.system import User
@@ -93,7 +93,7 @@ async def _stream_user(
     ] = None,
 ) -> User:
     async with session_scope() as session:
-        return await get_current_user(session, authorization, access_token)
+        return await user_from_token(session, _bearer(authorization) or access_token)
 
 
 async def _relay(queue: asyncio.Queue[tuple[str, Any]]) -> AsyncIterator[ServerSentEvent]:
