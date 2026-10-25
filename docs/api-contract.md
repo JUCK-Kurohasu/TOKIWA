@@ -98,11 +98,12 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 
 ## 対処（`routes/response.py`）・Gate ポリシー（`routes/gate.py`）
 | GET | /response/actions | user | `?status&incident_id&limit&offset` → `Page[ResponseAction]` |
-| POST | /response/actions | analyst | `ActionProposal` → `ResponseAction`（status=proposed） |
+| GET | /response/actions/{id} | user | → `ResponseAction` |
+| POST | /response/actions | analyst | `ActionProposal` → `ResponseAction`（status=proposed。重複は既存を返す。検証エラー 422） |
 | POST | /response/actions/{id}/approve | analyst | → `ResponseAction` |
 | POST | /response/actions/{id}/reject | analyst | `{reason?}` → `ResponseAction` |
 | POST | /response/actions/{id}/revert | analyst | → `ResponseAction` |
-| GET | /gate/policy | token:gate | → `GatePolicy` |
+| GET | /gate/policy | token:gate | → `GatePolicy`（`ETag: "<version>"`、`If-None-Match` 一致で 304） |
 
 ## デセプション（`routes/deception.py`）
 | GET | /deception/assets | user | → `DeceptionAsset[]` |

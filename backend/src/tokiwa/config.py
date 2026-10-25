@@ -156,8 +156,27 @@ class ResponseSettings(BaseModel):
     default_ttl_minutes: int = 60
     max_ttl_minutes: int = 60 * 24 * 7
     nftables_enabled: bool = False
+    # nft binary used by the nftables_block executor (fixed argv template, never a shell).
+    nftables_binary: str = "nft"
     # Never block these (CIDRs). Protects against self-lockout.
     protected_cidrs: list[str] = Field(default_factory=lambda: ["127.0.0.0/8", "::1/128"])
+    # Also treat this server's own interface addresses as protected.
+    protect_server_addresses: bool = True
+    # Reject private / ULA / link-local targets (e.g. management networks). Off by default: lab attackers
+    # usually live on private networks.
+    block_private_targets: bool = False
+    # Refuse targets broader than these prefixes (e.g. 0.0.0.0/0) for gate/nftables actions.
+    min_prefix_v4: int = 16
+    min_prefix_v6: int = 48
+    default_rate_limit_rpm: int = 60
+    default_tarpit_delay_ms: int = 2000
+    # webhook executor: named endpoints. Actions select a *name* (params.endpoint), never a URL.
+    webhook_urls: dict[str, str] = Field(default_factory=dict)
+    # Allowed destination hosts ("example.com" exact, ".example.com" suffix). Empty = any host.
+    webhook_allowed_hosts: list[str] = Field(default_factory=list)
+    # SSRF guard: refuse destinations resolving to private / loopback / link-local / reserved addresses.
+    webhook_block_private: bool = True
+    webhook_timeout_seconds: float = 10.0
 
 
 class DeceptionSettings(BaseModel):
@@ -211,6 +230,20 @@ class NotifySettings(BaseModel):
     default_webhook_url: str | None = None
     default_min_severity: Literal["info", "low", "medium", "high", "critical"] = "high"
     public_ui_url: str | None = None
+    # Message language: Japanese, English, or both (ja first).
+    language: Literal["ja", "en", "both"] = "both"
+    # Same target (source IP / incident / action target) is notified at most once per N minutes,
+    # unless the severity went up.
+    dedup_minutes: int = 10
+    # Send approval requests for new response proposals (action.proposed).
+    notify_action_proposals: bool = True
+    # Allowed destination hosts for webhook/slack/discord ("example.com" exact, ".example.com" suffix).
+    # Empty = any host.
+    allowed_hosts: list[str] = Field(default_factory=list)
+    # SSRF guard: refuse destinations resolving to private / loopback / link-local / reserved addresses.
+    # Disable for lab receivers on a private network.
+    block_private_destinations: bool = True
+    http_timeout_seconds: float = 10.0
 
 
 class CopilotSettings(BaseModel):
