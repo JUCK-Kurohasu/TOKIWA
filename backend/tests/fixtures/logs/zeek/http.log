@@ -1,0 +1,9 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	http
+#open	2026-10-22-10-00-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	trans_depth	method	host	uri	referrer	version	user_agent	origin	request_body_len	response_body_len	status_code	status_msg	info_code	info_msg	tags	username	password	proxied	orig_fuids	orig_filenames	orig_mime_types	resp_fuids	resp_filenames	resp_mime_types
+#types	time	string	addr	port	addr	port	count	string	string	string	string	string	string	string	count	count	count	string	count	string	set[enum]	string	string	set[string]	vector[string]	vector[string]	vector[string]	vector[string]	vector[string]	vector[string]
+1792663202.5	CHTTP1	203.0.113.10	52000	10.0.0.5	80	1	GET	app.lab	/search?q=a\x09b&session=abcdef123	-	1.1	Mozilla/5.0 (X11; Linux x86_64)	-	0	1024	200	OK	-	-	(empty)	alice	s3cr3tpass	-	-	-	-	FxYz	-	text/html
