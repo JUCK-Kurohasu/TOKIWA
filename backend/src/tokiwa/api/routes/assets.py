@@ -51,9 +51,7 @@ def _normalize_ips(ips: list[str]) -> list[str]:
         try:
             value = str(ipaddress.ip_network(s, strict=False)) if "/" in s else str(ipaddress.ip_address(s))
         except ValueError as exc:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, f"invalid IP address or CIDR: {raw!r}"
-            ) from exc
+            raise HTTPException(422, f"invalid IP address or CIDR: {raw!r}") from exc
         if value not in out:
             out.append(value)
     return out
@@ -63,7 +61,7 @@ def _clean_software(items: list[SoftwareItem]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for sw in items:
         if not sw.product or not sw.product.strip():
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "software.product must not be empty")
+            raise HTTPException(422, "software.product must not be empty")
         out.append(sw.model_dump(mode="json", exclude_none=True))
     return out
 
@@ -74,7 +72,7 @@ def _values(data: dict[str, Any]) -> dict[str, Any]:
     for key, value in data.items():
         if key == "name":
             if value is None or not str(value).strip():
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "name must not be empty")
+                raise HTTPException(422, "name must not be empty")
             values[key] = str(value).strip()
         elif key == "ips":
             values[key] = _normalize_ips(value or [])
@@ -82,7 +80,7 @@ def _values(data: dict[str, Any]) -> dict[str, Any]:
             values[key] = _clean_software([SoftwareItem.model_validate(s) for s in (value or [])])
         elif key in ("kind", "criticality"):
             if value is None:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{key} must not be null")
+                raise HTTPException(422, f"{key} must not be null")
             values[key] = str(value.value if hasattr(value, "value") else value)
         elif key == "tags":
             values[key] = [str(t).strip() for t in (value or []) if str(t).strip()]
