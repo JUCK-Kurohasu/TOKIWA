@@ -1,12 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ShieldHalf } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { Navigate, useLocation, useNavigate } from "react-router";
 import { ApiError, api } from "@/api/client";
-import { Button, ErrorState, Input, Label } from "@/components/ui";
+import { Button, ErrorState, Input, Label, Spinner } from "@/components/ui";
+import { publicRedirect, useAuthStatus } from "@/lib/authGate";
 import { useLocal } from "@/lib/i18n";
 import type { AppRoute } from "@/routes";
-import { type AuthUser, authStore } from "@/stores/auth";
+import { type AuthUser, authStore, useAuth } from "@/stores/auth";
 
 type TokenResponse = { access_token: string; user: AuthUser };
 
@@ -117,8 +118,26 @@ function CredentialsForm({ mode }: { mode: "login" | "setup" }) {
   );
 }
 
+/** Sends /login to /setup on a fresh install and /setup away once an admin exists (see lib/authGate). */
+function useAuthPageRedirect(mode: "login" | "setup"): { pending: boolean; to: string | null } {
+  const status = useAuthStatus();
+  const { isAuthenticated } = useAuth();
+  return { pending: status.isLoading, to: publicRedirect(mode, status.data, isAuthenticated) };
+}
+
+function PendingFrame() {
+  return (
+    <div className="flex min-h-full items-center justify-center bg-bg p-6">
+      <Spinner />
+    </div>
+  );
+}
+
 function LoginPage() {
   const L = useLocal(strings);
+  const { pending, to } = useAuthPageRedirect("login");
+  if (pending) return <PendingFrame />;
+  if (to) return <Navigate to={to} replace />;
   return (
     <AuthFrame title={L.login} subtitle={L.loginHint}>
       <CredentialsForm mode="login" />
@@ -128,6 +147,9 @@ function LoginPage() {
 
 function SetupPage() {
   const L = useLocal(strings);
+  const { pending, to } = useAuthPageRedirect("setup");
+  if (pending) return <PendingFrame />;
+  if (to) return <Navigate to={to} replace />;
   return (
     <AuthFrame title={L.setup} subtitle={L.setupHint}>
       <CredentialsForm mode="setup" />

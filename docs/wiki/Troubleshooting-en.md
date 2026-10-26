@@ -9,6 +9,20 @@ The UI has not been built, or where to serve it from is not configured. After `c
 start the server with `TOKIWA_SERVER__STATIC_DIR=../frontend/dist`. During development, `make dev` (UI on :5173) also works.
 In the Docker image, check that you haven't overridden `TOKIWA_SERVER__STATIC_DIR` (default `/app/frontend/dist`).
 
+**The login screen appears instead of the admin setup screen on first start**
+The first-time admin setup screen (/setup) is shown only while the server's database has no users at all. Check the state first.
+
+```bash
+curl -s http://localhost:8788/api/v1/auth/status
+```
+
+- `{"setup_required":false,...}` → the database already has a user (data from an earlier setup is still there).
+  Log in with that account, wipe it with "I want to reset everything" below, or create another admin as described above.
+- `{"setup_required":true,...}` → reopen `http://localhost:8788/` in the browser. Older versions of the UI stayed on the login screen
+  when `/login` was opened directly, even when setup was needed (it now redirects to /setup).
+- No connection → the server is not running (`cd backend && uv run tokiwa serve`). Older versions of the UI also showed the login screen
+  when the API was unreachable (it now shows "Cannot reach the server").
+
 **I forgot the admin password**
 With the same configuration as the server, run `uv run tokiwa user create <new name> --role admin` to create another admin,
 then change the original account's password with "Reset password" under **Settings → Users**.
@@ -86,8 +100,22 @@ Turn off buffering for SSE (`/api/v1/stream`) and set a long read timeout (see t
 
 ## Data
 
-**I want to start over**
-Stop the server and delete the data directory (`backend/data/` when running from source; the volume when using Docker).
+**I want to reset everything (start over)**
+⚠️ This deletes all events, alerts, users, API tokens and the signing key. Sensors need new tokens afterwards.
+
+```bash
+# Running from source: stop the server first
+rm -rf backend/data            # or wherever TOKIWA_SERVER__DATA_DIR / TOKIWA_DATABASE__URL point
+
+# Docker Compose (deploy/compose.yaml): -v also deletes the volumes (tokiwa-data, postgres-data)
+docker compose -f deploy/compose.yaml down -v && make up
+
+# Lab (lab/compose.yaml): the lab tokens are recreated too
+docker compose -f lab/compose.yaml down -v && docker compose -f lab/compose.yaml up --build -d
+```
+
+With an external PostgreSQL, drop and recreate the database. After the restart the UI opens on the setup screen.
+Old login data left in the browser becomes invalid because the signing key changes (clear the site data if you like).
 
 **I get errors after upgrading**
 v0.1 has no automatic schema migration. Check the release notes and `HANDOFF.md` for schema changes and,
