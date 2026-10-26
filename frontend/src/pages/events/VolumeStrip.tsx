@@ -78,7 +78,8 @@ export function VolumeStrip({
               onClick={(state) => {
                 const idx = state?.activeTooltipIndex;
                 const i = typeof idx === "number" ? idx : Number(idx);
-                if (Number.isFinite(i) && data[i]) onPick(data[i].t, data[i].t + bucketMinutes * 60_000);
+                if (Number.isFinite(i) && data[i])
+                  onPick(data[i].t, data[i].t + (q.data?.bucket_minutes ?? bucketMinutes) * 60_000);
               }}
             >
               <XAxis

@@ -103,7 +103,9 @@ export function TimelineCard() {
     const d = payload?.[0]?.payload;
     if (!active || !d) return null;
     return (
-      <ChartTooltipBox title={formatDateTime(new Date(d.t).toISOString())}>
+      <ChartTooltipBox
+        title={`${formatDateTime(new Date(d.t).toISOString())}${q.data?.bucket_minutes ? ` (+${q.data.bucket_minutes}m)` : ""}`}
+      >
         <TooltipRow color={p.accent} label={L.events} value={formatNumber(d.events)} />
         <TooltipRow color={p.neutral} label={L.other} value={formatNumber(d.other)} />
         <TooltipRow color={p.ai} label={L.ai} value={formatNumber(d.ai)} />
