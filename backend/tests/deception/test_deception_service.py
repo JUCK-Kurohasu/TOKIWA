@@ -283,3 +283,15 @@ async def test_respond_deploy_canary_contract(client: httpx.AsyncClient) -> None
     assert f"/api/internal/{a.token}*" in {r.path for r in routes}
     assert html is not None and a.token in html
     await asyncio.sleep(0)
+
+
+@pytest.mark.usefixtures("db")
+async def test_respond_revert_contract_disable_and_delete() -> None:
+    a = await service.create_asset(DeceptionAssetIn(kind=DeceptionKind.AI_CANARY, name="deploy_canary"))
+    assert a.token in (await service.get_index()).tokens
+    off = await service.disable_asset(a.id, actor="policy")
+    assert off is not None and not off.enabled
+    assert a.token not in (await service.get_index()).tokens
+    assert await service.disable_asset(new_id()) is None
+    assert await service.delete_asset(a.id)
+    assert await service.get_asset(a.id) is None

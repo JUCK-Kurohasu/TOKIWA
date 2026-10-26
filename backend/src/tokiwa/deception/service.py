@@ -5,6 +5,8 @@ Public API (keep signatures stable - other modules use them):
 - ``create_asset(data: DeceptionAssetIn, *, actor=None) -> DeceptionAsset``
   Used by the respond module's ``deploy_canary`` executor. Generates the token when omitted.
   Raises :class:`DeceptionError` (a ``ValueError``; ``.status_code`` 422 / 409) on invalid input.
+- ``delete_asset(asset_id, *, actor=None) -> bool`` / ``disable_asset(asset_id, *, actor=None) -> DeceptionAsset | None``
+  Revert of ``deploy_canary`` (False / None when the asset does not exist).
 - ``get_index() -> DeceptionIndex``   token / decoy-path lookup for the ``deception.trip`` detector
 - ``gate_decoys()``                   rendered ``DecoyRoute`` list + HTML injection (``deception.policy``)
 
@@ -389,6 +391,11 @@ async def delete_asset(asset_id: str, *, actor: str | None = None) -> bool:
             await record_audit(actor, "deception.asset.delete", asset_id, details, session=s)
     invalidate()
     return True
+
+
+async def disable_asset(asset_id: str, *, actor: str | None = None) -> DeceptionAsset | None:
+    """Stop serving/detecting an asset but keep it (reversible). Used by respond's deploy_canary revert."""
+    return await update_asset(asset_id, DeceptionAssetUpdate(enabled=False), actor=actor)
 
 
 async def preview_asset(asset_id: str, path: str | None = None) -> DeceptionPreview | None:
