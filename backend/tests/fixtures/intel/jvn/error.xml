@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns="http://purl.org/rss/1.0/"
+         xmlns:status="http://jvndb.jvn.jp/myjvn/Status"
+         xml:lang="ja">
+  <status:Status version="3.3" method="getVulnOverviewList" lang="ja" retCd="1" errCd="1001" errMsg="Invalid parameter: maxCountItem" totalRes="0" totalResRet="0" firstRes="0" feed="hnd"/>
+</rdf:RDF>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Cybersecurity Advisories</title>
+    <link>https://www.cisa.gov/news-events/cybersecurity-advisories</link>
+    <description>CISA cybersecurity advisories</description>
+    <item>
+      <title>CISA Adds One Known Exploited Vulnerability to Catalog</title>
+      <link>https://www.cisa.gov/news-events/alerts/2026/10/20/cisa-adds-one-known-exploited-vulnerability-catalog</link>
+      <description>&lt;p&gt;CISA has added one new vulnerability to its KEV Catalog: &lt;a href="https://www.cve.org/CVERecord?id=CVE-2026-10001"&gt;CVE-2026-10001&lt;/a&gt; Example Gateway Authentication Bypass Vulnerability.&lt;/p&gt;</description>
+      <pubDate>Mon, 20 Oct 2026 12:00:00 EDT</pubDate>
+      <category>Alert</category>
+    </item>
+    <item>
+      <title>CISA Adds One Known Exploited Vulnerability to Catalog</title>
+      <link>https://www.cisa.gov/news-events/alerts/2026/10/20/cisa-adds-one-known-exploited-vulnerability-catalog#duplicate</link>
+      <description>Duplicate entry (same URL apart from the fragment) to exercise url_hash de-duplication.</description>
+      <pubDate>Mon, 20 Oct 2026 12:00:00 EDT</pubDate>
+    </item>
+  </channel>
+</rss>

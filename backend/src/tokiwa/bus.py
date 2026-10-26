@@ -10,6 +10,7 @@ Topics (payloads are Pydantic models or dicts, documented in docs/architecture.m
 - ``action.proposed``     ResponseAction
 - ``action.updated``      ResponseAction         approved / active / expired / reverted ...
 - ``deception.tripped``   dict                   {asset_id, event_id, source_ip}
+- ``intel.vuln_updated``  VulnRecord             KEV added / EPSS spike (data.update_reasons)
 - ``intel.vuln_matched``  VulnMatch
 - ``intel.advisory``      Advisory
 - ``llm.call``            LLMCall                audit record written
