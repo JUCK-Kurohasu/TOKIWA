@@ -70,9 +70,13 @@ async def test_eval_run_end_to_end(settings: Settings, small_dataset: Path, tmp_
     assert m["latency"]["events"] == doc["dataset"]["events"]
     assert "AI attribution" in (run1 / "report.md").read_text(encoding="utf-8")
 
-    # same dataset without the detector -> regression against run1
+    # same dataset with every detector disabled -> regression against run1 (with all modules integrated the
+    # real detectors also catch the attacks, so merely dropping the test detector no longer regresses)
+    from tokiwa.detect.base import registered_detectors
+
+    all_off = {det_id: False for det_id in registered_detectors()}
     run2 = tmp_path / "runs" / "r2"
-    doc2 = await run_evaluation(small_dataset, run2, ReplayOptions(), compare=run1)
+    doc2 = await run_evaluation(small_dataset, run2, ReplayOptions(detector_overrides=all_off), compare=run1)
     cmp_doc = doc2["comparison"]
     assert cmp_doc["has_regression"] and "detection.attack_session_rate" in cmp_doc["regressions"]
     assert "Regression check" in (run2 / "report.md").read_text(encoding="utf-8")

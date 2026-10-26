@@ -76,9 +76,26 @@ class EventBus:
         self._queues.discard(q)
 
     async def drain(self, timeout: float = 10.0) -> None:
+        """Wait until no handler task is pending, including tasks spawned by handlers while draining.
+
+        Done tasks are pruned explicitly: since Python 3.12 ``asyncio.gather`` returns without yielding when
+        every child is already done, so waiting on the set until the done-callbacks remove them would spin
+        forever without giving the loop a chance to run those callbacks (or the timeout).
+        """
         async with asyncio.timeout(timeout):
-            while self._tasks:
+            while True:
+                self._prune_done()
+                if not self._tasks:
+                    await asyncio.sleep(0)  # let just-scheduled callbacks/handlers run, then re-check
+                    self._prune_done()
+                    if not self._tasks:
+                        return
+                    continue
                 await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    def _prune_done(self) -> None:
+        for t in [t for t in self._tasks if t.done()]:
+            self._tasks.discard(t)
 
 
 bus = EventBus()
