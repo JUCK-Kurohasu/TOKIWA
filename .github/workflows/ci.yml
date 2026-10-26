@@ -110,3 +110,5 @@ jobs:
         run: docker run --rm -i hadolint/hadolint:v2.15.1 hadolint - < deploy/Dockerfile
       - name: shellcheck
         run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh deploy/*.sh
+      - name: wiki consistency (docs/wiki, all languages)
+        run: python3 scripts/check_wiki.py docs/wiki

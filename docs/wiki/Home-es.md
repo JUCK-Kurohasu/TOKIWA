@@ -67,7 +67,7 @@ TOKIWA es una herramienta de defensa. Los siguientes compromisos se cumplen medi
 | Elemento | Estado |
 |---|---|
 | Pruebas automatizadas del backend (unas 1280), compilación del frontend, compilación de la imagen Docker y pruebas de humo | ✅ Se ejecutan continuamente en CI |
-| Flujo completo en local (simulador de ataques → Gate → detección → incidente → aprobación → Gate devuelve 403 → reversión) | ✅ Comprobado (LLM simulado) |
+| Flujo completo en local (simulador de ataques → Gate → detección → incidente → aprobación → Gate devuelve 403 → reversión) | ✅ Comprobado (LLM simulado, mock) |
 | Calidad y costo del triaje con un LLM real (Claude) | ⏳ Aún no evaluado |
 | Arranque del laboratorio Docker con `lab/compose.yaml` | ⏳ Aún no verificado |
 | Obtención de datos reales de los feeds de vulnerabilidades | ⏳ Aún no verificado (validado con datos de prueba basados en las especificaciones) |

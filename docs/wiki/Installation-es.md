@@ -21,7 +21,7 @@ make up                  # = docker compose -f deploy/compose.yaml --env-file .e
 
 1. Cree el primer administrador en <http://localhost:8788/setup> (con la CLI:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`; la contraseña se introduce de forma interactiva).
-2. Si usa un LLM, escriba `ANTHROPIC_API_KEY=...` en `.env` (si no se define, funciona con el LLM simulado).
+2. Si usa un LLM, escriba `ANTHROPIC_API_KEY=...` en `.env` (si no se define, funciona con el LLM simulado, mock).
 3. Por defecto solo se publica en `127.0.0.1:8788`. Para exponerlo en la LAN se usa `TOKIWA_BIND=0.0.0.0` en `.env`, pero
    **no lo publique sin TLS**: coloque delante el proxy inverso que se describe más adelante.
 

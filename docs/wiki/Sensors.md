@@ -55,7 +55,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 ### 主な設定
 
-設定の優先順位は「CLI フラグ > 環境変数 `TOKIWA_GATE__*` / `tokiwa.yaml` > 既定値」です。
+設定の優先順位は「CLI フラグ > 環境変数 `TOKIWA_GATE__*` > `tokiwa.yaml` > 既定値」です。
 
 | 設定 | CLI | 既定 | 説明 |
 |---|---|---|---|

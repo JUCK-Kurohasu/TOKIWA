@@ -55,7 +55,7 @@ Then change your DNS or load balancer so that users reach the Gate (:8080) from 
 
 ### Main settings
 
-Settings take precedence in this order: "CLI flags > environment variables `TOKIWA_GATE__*` / `tokiwa.yaml` > defaults".
+Settings take precedence in this order: "CLI flags > environment variables `TOKIWA_GATE__*` > `tokiwa.yaml` > defaults".
 
 | Setting | CLI | Default | Description |
 |---|---|---|---|
