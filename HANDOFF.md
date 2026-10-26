@@ -7,7 +7,7 @@
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
-GitHub Wiki に同期する（初回のみ Wiki の有効化と最初のページ作成が必要。§5）。
+GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
 
 ## 0. 次のセッションはここから — 第 2 波の始め方
 
@@ -144,8 +144,6 @@ G（実 LLM 評価）は私が予算を伝えるまで実行しないこと。
 - AI カナリアの文言の強さ・言語、robots.txt / llms.txt カナリアの有効化（既定 OFF。アプリ本来のファイルを置き換える）、
   デセプションの法務確認（docs/deception.md に TODO(verify)）。
 - 対処の二者承認（提案者≠承認者）を必須にするか。
-- **Wiki の初回準備**（ユーザー作業）: Settings → Features → Wikis を有効化し、Wiki タブで最初のページを 1 つ作る
-  （GitHub はそれまで `<repo>.wiki.git` を作らない）。その後 Actions → Wiki → Run workflow で同期。
 
 ## 6. 既知の制約・注意
 
