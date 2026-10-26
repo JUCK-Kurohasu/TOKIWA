@@ -26,8 +26,8 @@ export TOKIWA_INTEL__NVD_API_KEY=...       # 可选
 export TOKIWA_INTEL__GITHUB_TOKEN=...      # 可选
 ```
 
-> ⚠️ JVN 已公告将在 2026 年 4 月以后对 MyJVN 进行改版。以旧数据源为前提的获取方式可能已无法使用，
-> 真实数据下的运行情况尚未验证。
+> ⚠️ IPA 已公告从 2026 年 4 月起对 JVN iPedia / MyJVN 进行改版（JSON 数据源、CVSS v4、API 速率限制）。
+> 以旧数据源为前提的获取方式可能已无法使用。公告的具体内容和真实数据下的运行情况均尚未验证。
 
 ## 使用方法
 

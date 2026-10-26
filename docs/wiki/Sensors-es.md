@@ -55,7 +55,7 @@ A continuación, cambie el destino del DNS o del balanceador de carga para que l
 
 ### Ajustes principales
 
-El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `TOKIWA_GATE__*` / `tokiwa.yaml` > valor por defecto".
+El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `TOKIWA_GATE__*` > `tokiwa.yaml` > valor por defecto".
 
 | Ajuste | CLI | Por defecto | Descripción |
 |---|---|---|---|

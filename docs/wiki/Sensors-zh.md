@@ -55,7 +55,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 ### 主要设置
 
-设置的优先级为“CLI 参数 > 环境变量 `TOKIWA_GATE__*` / `tokiwa.yaml` > 默认值”。
+设置的优先级为“CLI 参数 > 环境变量 `TOKIWA_GATE__*` > `tokiwa.yaml` > 默认值”。
 
 | 设置 | CLI | 默认 | 说明 |
 |---|---|---|---|

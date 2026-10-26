@@ -26,8 +26,8 @@ export TOKIWA_INTEL__NVD_API_KEY=...       # Optional
 export TOKIWA_INTEL__GITHUB_TOKEN=...      # Optional
 ```
 
-> ⚠️ For JVN, a revamp of MyJVN from April 2026 onward has been announced. Fetching that relies on the old feeds may no longer work, and
-> operation with real data is not yet verified.
+> ⚠️ IPA has announced a revamp of JVN iPedia / MyJVN starting in April 2026 (JSON feeds, CVSS v4, API rate limits).
+> Fetching that relies on the old feeds may no longer work. Neither the announcement's details nor operation with real data are verified yet.
 
 ## How to use it
 
