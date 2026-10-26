@@ -88,6 +88,34 @@ class LLMSettings(BaseModel):
     redaction: RedactionSettings = Field(default_factory=RedactionSettings)
 
 
+class WebDetectionSettings(BaseModel):
+    """detect-web: knobs for ``tokiwa.detect.detectors.web_*`` (catalog: docs/detection/web.md)."""
+
+    # Per-field cap before decoding (ReDoS / CPU guard). Gate captures 4 KiB of body by default.
+    max_inspect_chars: int = 8192
+    # web.error_burst: 4xx storm from one source (directory brute force)
+    error_burst_window_seconds: float = 60.0
+    error_burst_min_errors: int = 30
+    error_burst_min_ratio: float = 0.6
+    error_burst_min_unique_paths: int = 15
+    # web.credential_stuffing: auth failures against login-like paths
+    login_path_regex: str = (
+        r"(?:^|/)(?:login|log-in|signin|sign-in|sign_in|logon|auth|authenticate|session|sessions|token"
+        r"|wp-login\.php|xmlrpc\.php|j_security_check)(?:$|[/.?;_-])"
+    )
+    credential_window_seconds: float = 300.0
+    credential_fail_statuses: list[int] = Field(default_factory=lambda: [401, 403])
+    credential_min_failures: int = 10
+    credential_min_unique_users: int = 4
+    # web.request_flood: sustained requests/second from one source
+    flood_window_seconds: float = 10.0
+    flood_max_rps: float = 20.0
+    # web.rare_method: methods that never alert (add WebDAV verbs here for DAV deployments)
+    allowed_methods: list[str] = Field(
+        default_factory=lambda: ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    )
+
+
 class DetectionSettings(BaseModel):
     disabled_detectors: list[str] = Field(default_factory=list)
     sigma_rule_dirs: list[Path] = Field(default_factory=lambda: [Path("../rules/sigma")])
@@ -97,6 +125,7 @@ class DetectionSettings(BaseModel):
     session_idle_timeout_seconds: int = 1800
     # Score (0..1) above which a session is considered AI-agent driven.
     ai_agent_threshold: float = 0.7
+    web: WebDetectionSettings = Field(default_factory=WebDetectionSettings)
 
 
 class TriageSettings(BaseModel):
