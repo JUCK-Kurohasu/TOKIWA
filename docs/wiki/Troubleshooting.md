@@ -9,6 +9,20 @@ UI がビルドされていないか、配信先が設定されていません�
 `TOKIWA_SERVER__STATIC_DIR=../frontend/dist` を付けてサーバーを起動します。開発中は `make dev`（UI は :5173）でも構いません。
 Docker イメージでは `TOKIWA_SERVER__STATIC_DIR` を上書きしていないか確認してください（既定 `/app/frontend/dist`）。
 
+**初回なのに管理者登録画面ではなくログイン画面が出る**
+初回の管理者登録画面（/setup）は、サーバーの DB にユーザーが 1 人もいないときだけ表示されます。まず状態を確認します。
+
+```bash
+curl -s http://localhost:8788/api/v1/auth/status
+```
+
+- `{"setup_required":false,...}` → DB に既にユーザーがいます（以前セットアップしたデータが残っている）。
+  そのアカウントでログインするか、下の「完全にリセットしたい」で消すか、上の手順で別の管理者を作ります。
+- `{"setup_required":true,...}` → ブラウザで `http://localhost:8788/` を開き直してください。古いバージョンの UI は、
+  `/login` を直接開くとセットアップが必要でもログイン画面のままでした（現在は /setup に転送されます）。
+- 接続できない → サーバーが動いていません（`cd backend && uv run tokiwa serve`）。古いバージョンの UI は、
+  API に繋がらないときもログイン画面を表示していました（現在は「サーバーに接続できません」と表示されます）。
+
 **管理者のパスワードを忘れた**
 サーバーと同じ設定で `uv run tokiwa user create <新しい名前> --role admin` を実行して別の管理者を作り、
 **設定 → ユーザー** の「パスワード再設定」で元のアカウントのパスワードを変更します。
@@ -86,8 +100,22 @@ SSE（`/api/v1/stream`）のバッファリングを切り、読み取りタイ�
 
 ## データ
 
-**最初からやり直したい**
-サーバーを止めて、データディレクトリ（ソースから動かしている場合は `backend/data/`、Docker ではボリューム）を削除します。
+**完全にリセットしたい（最初からやり直す）**
+⚠️ イベント・アラート・ユーザー・API トークン・署名鍵がすべて消えます。センサーにはトークンを作り直して設定し直す必要があります。
+
+```bash
+# ソースから動かしている場合: サーバーを止めてから
+rm -rf backend/data            # TOKIWA_SERVER__DATA_DIR / TOKIWA_DATABASE__URL を変えている場合はその場所
+
+# Docker Compose（deploy/compose.yaml）: -v でボリューム（tokiwa-data, postgres-data）も削除
+docker compose -f deploy/compose.yaml down -v && make up
+
+# ラボ（lab/compose.yaml）: ラボ用トークンも作り直される
+docker compose -f lab/compose.yaml down -v && docker compose -f lab/compose.yaml up --build -d
+```
+
+外部の PostgreSQL を使っている場合は、データベースを削除して作り直します。再起動後に UI を開くとセットアップ画面になります。
+ブラウザに残った古いログイン情報は、署名鍵が変わるので無効になります（気になる場合はサイトデータを削除）。
 
 **アップグレード後にエラーが出る**
 v0.1 にはスキーマの自動移行がありません。リリースノートや `HANDOFF.md` でスキーマの変更を確認し、

@@ -9,6 +9,20 @@ UI 尚未构建，或者没有设置提供 UI 的目录。执行 `cd frontend &&
 附加 `TOKIWA_SERVER__STATIC_DIR=../frontend/dist` 启动服务器。开发期间也可以使用 `make dev`（UI 在 :5173）。
 使用 Docker 镜像时，请检查是否覆盖了 `TOKIWA_SERVER__STATIC_DIR`（默认 `/app/frontend/dist`）。
 
+**首次启动时出现的是登录界面，而不是管理员注册界面**
+首次的管理员注册界面（/setup）只会在服务器数据库中一个用户都没有时显示。请先确认状态。
+
+```bash
+curl -s http://localhost:8788/api/v1/auth/status
+```
+
+- `{"setup_required":false,...}` → 数据库中已经有用户（以前设置过的数据仍然保留）。
+  请使用该账户登录，或按下面“想完全重置”的步骤清除数据，或按上面的步骤创建另一个管理员。
+- `{"setup_required":true,...}` → 请在浏览器中重新打开 `http://localhost:8788/`。旧版本的 UI 在直接打开 `/login` 时，
+  即使需要初始设置也会停留在登录界面（现在会跳转到 /setup）。
+- 无法连接 → 服务器没有运行（`cd backend && uv run tokiwa serve`）。旧版本的 UI 在无法连接 API 时也会显示登录界面
+  （现在会显示 **Cannot reach the server**（无法连接到服务器））。
+
 **忘记了管理员密码**
 在与服务器相同的设置下执行 `uv run tokiwa user create <新名称> --role admin` 创建另一个管理员，
 然后在 **Settings → Users**（设置 → 用户）中通过 **Reset password**（重置密码）修改原账户的密码。
@@ -86,8 +100,22 @@ NVD 没有 API 密钥时获取速率限制较严格，GitHub 也是有令牌时�
 
 ## 数据
 
-**想从头开始**
-停止服务器，然后删除数据目录（从源码运行时为 `backend/data/`，Docker 中为卷）。
+**想完全重置（从头开始）**
+⚠️ 事件、告警、用户、API 令牌和签名密钥都会被删除。之后需要为传感器重新创建并配置令牌。
+
+```bash
+# 从源码运行时：先停止服务器
+rm -rf backend/data            # 如果修改过 TOKIWA_SERVER__DATA_DIR / TOKIWA_DATABASE__URL，则删除对应位置
+
+# Docker Compose（deploy/compose.yaml）：-v 会同时删除卷（tokiwa-data、postgres-data）
+docker compose -f deploy/compose.yaml down -v && make up
+
+# 实验环境（lab/compose.yaml）：实验用令牌也会重新创建
+docker compose -f lab/compose.yaml down -v && docker compose -f lab/compose.yaml up --build -d
+```
+
+使用外部 PostgreSQL 时，请删除并重新创建数据库。重启后打开 UI 会进入初始设置界面。
+浏览器中残留的旧登录信息会因为签名密钥变化而失效（如有需要可清除站点数据）。
 
 **升级后出现错误**
 v0.1 没有 Schema 的自动迁移。请通过发布说明或 `HANDOFF.md` 检查 Schema 的变更，

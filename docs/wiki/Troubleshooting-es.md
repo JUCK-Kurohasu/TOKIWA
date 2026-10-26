@@ -9,6 +9,20 @@ La interfaz no está compilada o no se ha configurado desde dónde servirla. Tra
 arranque el servidor con `TOKIWA_SERVER__STATIC_DIR=../frontend/dist`. Durante el desarrollo también puede usar `make dev` (la interfaz en :5173).
 En la imagen Docker, compruebe que no haya sobrescrito `TOKIWA_SERVER__STATIC_DIR` (por defecto `/app/frontend/dist`).
 
+**Aparece la pantalla de inicio de sesión en lugar de la de registro del administrador en el primer arranque**
+La pantalla de configuración inicial del administrador (/setup) solo se muestra mientras la base de datos del servidor no tenga ningún usuario. Compruebe primero el estado.
+
+```bash
+curl -s http://localhost:8788/api/v1/auth/status
+```
+
+- `{"setup_required":false,...}` → la base de datos ya tiene un usuario (quedan datos de una configuración anterior).
+  Inicie sesión con esa cuenta, bórrela con "Restablecer todo" más abajo o cree otro administrador como se indica arriba.
+- `{"setup_required":true,...}` → vuelva a abrir `http://localhost:8788/` en el navegador. Las versiones anteriores de la interfaz se quedaban
+  en la pantalla de inicio de sesión al abrir `/login` directamente, aunque hiciera falta la configuración inicial (ahora redirige a /setup).
+- Sin conexión → el servidor no está en marcha (`cd backend && uv run tokiwa serve`). Las versiones anteriores de la interfaz también mostraban
+  la pantalla de inicio de sesión cuando la API no respondía (ahora muestra **Cannot reach the server** (No se puede conectar con el servidor)).
+
 **Ha olvidado la contraseña del administrador**
 Con la misma configuración que el servidor, ejecute `uv run tokiwa user create <nuevo nombre> --role admin` para crear otro administrador
 y cambie la contraseña de la cuenta original con **Reset password** (Restablecer contraseña) en **Settings → Users** (Configuración → Usuarios).
@@ -86,8 +100,22 @@ Desactive el búfer para SSE (`/api/v1/stream`) y alargue el tiempo de espera de
 
 ## Datos
 
-**Empezar desde cero**
-Detenga el servidor y elimine el directorio de datos (`backend/data/` si lo ejecuta desde el código fuente; con Docker, el volumen).
+**Restablecer todo (empezar desde cero)**
+⚠️ Se eliminan todos los eventos, alertas, usuarios, tokens de API y la clave de firma. Después hay que crear y configurar tokens nuevos para los sensores.
+
+```bash
+# Desde el código fuente: detenga antes el servidor
+rm -rf backend/data            # o la ubicación de TOKIWA_SERVER__DATA_DIR / TOKIWA_DATABASE__URL si las cambió
+
+# Docker Compose (deploy/compose.yaml): -v también elimina los volúmenes (tokiwa-data, postgres-data)
+docker compose -f deploy/compose.yaml down -v && make up
+
+# Laboratorio (lab/compose.yaml): también se vuelven a crear los tokens del laboratorio
+docker compose -f lab/compose.yaml down -v && docker compose -f lab/compose.yaml up --build -d
+```
+
+Con un PostgreSQL externo, elimine y vuelva a crear la base de datos. Tras reiniciar, la interfaz abre la pantalla de configuración inicial.
+Los datos de inicio de sesión antiguos que queden en el navegador dejan de ser válidos porque cambia la clave de firma (borre los datos del sitio si lo prefiere).
 
 **Aparecen errores después de actualizar**
 v0.1 no tiene migración automática del esquema. Revise los cambios de esquema en las notas de la versión o en `HANDOFF.md` y,
