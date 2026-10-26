@@ -207,6 +207,11 @@ def _record_state(rec: VulnRecord) -> State:
         affected=[a.model_dump() for a in rec.affected],
         references=list(rec.references),
     )
+    if st["severity"] is None and rec.cvss_score is not None:
+        # Keep score and severity consistent per source; otherwise a higher-precedence score could end up
+        # paired with a lower-precedence source's severity.
+        derived = severity_from_score(rec.cvss_score)
+        st["severity"] = derived.value if derived else None
     src = rec.sources[0] if rec.sources else "unknown"
     prov = {g: src for g in GROUP_FIELDS if _has(g, st)}
     st["data"] = {**{k: v for k, v in rec.data.items() if k != PROV_KEY}, PROV_KEY: prov}
