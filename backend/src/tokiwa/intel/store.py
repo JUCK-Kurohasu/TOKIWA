@@ -59,7 +59,13 @@ from tokiwa.config import get_settings
 from tokiwa.db.models.intel import AssetRow, IntelItemRow, VulnMatchRow, VulnRow
 from tokiwa.db.session import session_scope
 from tokiwa.intel.base import IntelItemIn
-from tokiwa.intel.sources._common import is_cve, normalize_vuln_id, severity_from_score, unique
+from tokiwa.intel.sources._common import (
+    is_cve,
+    normalize_vuln_id,
+    severity_from_score,
+    software_from_cpe,
+    unique,
+)
 from tokiwa.schemas.intel import IntelItem, SoftwareItem, VulnRecord
 from tokiwa.util import new_id, sha256_hex, utcnow
 
@@ -228,11 +234,32 @@ def _affected_key(a: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
+def _valid_affected(a: Any) -> dict[str, Any] | None:
+    """``SoftwareItem.product`` is required (``VulnRecord.model_validate`` fails otherwise). Entries written by
+    other modules with only a CPE get the product derived from it; entries without either are dropped."""
+    if not isinstance(a, dict):
+        return None
+    if a.get("product"):
+        return a
+    derived = software_from_cpe(str(a.get("cpe") or ""))
+    if derived is None:
+        return None
+    return {
+        **a,
+        "product": derived.product,
+        "vendor": a.get("vendor") or derived.vendor,
+        "version": a.get("version") or derived.version,
+    }
+
+
 def _union_affected(*lists: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, ...]] = set()
     out: list[dict[str, Any]] = []
     for lst in lists:
-        for a in lst or []:
+        for raw in lst or []:
+            a = _valid_affected(raw)
+            if a is None:
+                continue
             key = _affected_key(a)
             if key in seen:
                 continue

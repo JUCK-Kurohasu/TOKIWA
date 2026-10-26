@@ -194,3 +194,26 @@ async def test_query_vulns_filters_and_default_order() -> None:
         assert [v.id for v in (await query_vulns(s, matched=True))[0]] == ["CVE-2024-3"]
         assert [v.id for v in (await query_vulns(s, q="OpenSSH"))[0]] == ["CVE-2024-3"]
         assert (await query_vulns(s, limit=2, offset=4))[1] == 5
+
+
+async def test_affected_entries_always_have_product() -> None:
+    """Rows written by other modules may hold CPE-only entries; merging must keep VulnRecord-valid data."""
+    async with session_scope() as s:
+        s.add(
+            VulnRow(
+                id="CVE-2024-7",
+                sources=["research"],
+                affected=[
+                    {"cpe": "cpe:2.3:a:openbsd:openssh:9.7:*:*:*:*:*:*:*"},
+                    {"vendor": "x"},  # nothing to derive a product from -> dropped
+                ],
+            )
+        )
+    await upsert(rec("CVE-2024-7", "nvd", affected=[SoftwareItem(product="openssh", vendor="openbsd")]))
+    row = await load("CVE-2024-7")
+    assert row is not None and all(a.get("product") for a in row.affected)
+    vuln = VulnRecord.model_validate(row)
+    assert {(a.vendor, a.product, a.version) for a in vuln.affected} == {
+        ("openbsd", "openssh", "9.7"),
+        ("openbsd", "openssh", None),
+    }
