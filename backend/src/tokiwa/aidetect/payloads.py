@@ -472,10 +472,19 @@ def edit_similarity(a: str, b: str, cap: int = 128) -> float:
 
 
 def payload_similarity(a: str, b: str) -> float:
-    """Cheap similarity for successive payloads: trigram Jaccard (fast) on the signatures."""
+    """Cheap similarity for successive payloads on their signatures (trigram sets, fast).
+
+    ``max(Jaccard, 0.85 * overlap coefficient)``: Jaccard alone punishes payloads that *grow* by appending
+    (``laptop'`` -> ``laptop' OR '1'='1' --``), which is the most common way an agent mutates; the overlap
+    coefficient (containment) keeps such pairs related while unrelated values stay near 0.
+    """
     if a == b:
         return 1.0
-    return jaccard(shingles(a), shingles(b))
+    sa, sb = shingles(a), shingles(b)
+    if not sa or not sb:
+        return 0.0
+    inter = len(sa & sb)
+    return max(inter / len(sa | sb), 0.85 * inter / min(len(sa), len(sb)))
 
 
 def shannon_entropy(text: str | None) -> float:

@@ -26,6 +26,8 @@ from tokiwa.schemas.events import Event, EventKind
 
 MIN_ENUM_STRONG = 3
 MIN_ENUM_WEAK = 5
+# Share of new routes after discovery that must exist (non-404). Wordlist scanners mostly miss.
+MIN_HIT_RATE = 0.5
 REALERT_EVERY = 5
 MAX_SEEN = 2048
 STATE_TTL_S = 3600.0
@@ -36,6 +38,7 @@ class _Source:
     t: float | None = None
     kind: str | None = None
     enum_ids: list[str] = field(default_factory=list)
+    misses: int = 0
     alerted: int = 0
 
     def active(self, now: float) -> bool:
@@ -84,11 +87,13 @@ class SemanticReconDetector(Detector):
                 st.strong = _Source(t=t, kind=kind)
                 st.disc_ids = [*st.disc_ids, event.id][-5:]
             elif kind in ("robots", "sitemap") or (kind in ("js", "source_map") and not has_ref):
+                keep = st.weak.active(t)
                 st.weak = _Source(
                     t=t,
                     kind=kind,
-                    alerted=st.weak.alerted if st.weak.active(t) else 0,
-                    enum_ids=st.weak.enum_ids if st.weak.active(t) else [],
+                    alerted=st.weak.alerted if keep else 0,
+                    enum_ids=st.weak.enum_ids if keep else [],
+                    misses=st.weak.misses if keep else 0,
                 )
                 st.disc_ids = [*st.disc_ids, event.id][-5:]
             if len(st.seen) < MAX_SEEN:
@@ -99,13 +104,18 @@ class SemanticReconDetector(Detector):
         is_new = template not in st.seen
         if len(st.seen) < MAX_SEEN:
             st.seen.add(template)
-        if not is_new or has_ref or h.status == 404:
+        if not is_new or has_ref:
             return out
         for src, strong, minimum in ((st.strong, True, MIN_ENUM_STRONG), (st.weak, False, MIN_ENUM_WEAK)):
             if not src.active(t):
                 continue
+            if h.status == 404:
+                src.misses += 1
+                break
             src.enum_ids.append(event.id)
             n = len(src.enum_ids)
+            if n / (n + src.misses) < MIN_HIT_RATE:
+                break
             if n >= minimum and (src.alerted == 0 or n - src.alerted >= REALERT_EVERY):
                 src.alerted = n
                 out.append(self._enum_alert(event, key, src, st.disc_ids, strong=strong))
