@@ -46,7 +46,7 @@
 
 ## アクターセッション（`routes/sessions.py`）
 | GET | /sessions | user | `?min_ai_score&classification&source_ip&limit&offset` → `Page[ActorSession]` |
-| GET | /sessions/{id} | user | → `{session: ActorSession, events: Event[] (最大200), timeline:[{t, path, status, gap_ms}]}` |
+| GET | /sessions/{id} | user | → `{session: ActorSession, events: Event[] (最大200), timeline:[{t, path, status, gap_ms, method, kind, event_id, error, band}]}`（`gap_ms` = 直前の HTTP 要求からの ms、`band` = burst/mid/think/long。`features.indicators/scores` は docs/detection/ai-attacks.md） |
 
 ## ダッシュボード（`routes/dashboard.py`）
 | GET | /dashboard/summary | user | → `{alerts_24h:{total, by_severity:{}}, open_incidents, ai_sessions_24h, events_24h, llm_cost_today_usd, llm_budget_usd, pending_actions, kev_matches, top_sources:[{ip,count,ai_score}], top_rules:[{rule_id,title,count}], recent_incidents: Incident[]}` |
