@@ -84,3 +84,6 @@ docker compose -f lab/compose.yaml up --build
 トークン切れ・アカウント切替に備え、**作業の区切りごとに HANDOFF.md を更新**する:
 「やったこと / 現在の状態（動く・動かない）/ 失敗した試み / 次の一手 / 要判断事項」。
 詳細な作業ログは `docs/handoff/YYYY-MM-DD-<topic>.md` に追記してよい。
+
+利用者向けの使い方（コマンド・設定・画面・手順）を変えたら、`docs/wiki/`（GitHub Wiki の正本。日本語が既定、
+`-en` / `-zh` / `-es` が翻訳）も同じ PR で更新し、`python3 scripts/check_wiki.py` を通す（`docs/wiki/README.md`）。

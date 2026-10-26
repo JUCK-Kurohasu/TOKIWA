@@ -1,0 +1,38 @@
+# Publish docs/wiki/ to the GitHub wiki whenever it changes on main.
+# docs/wiki/ is the source of truth (reviewed in pull requests); direct wiki edits are overwritten.
+# Prerequisite (once): enable the wiki and create any first page in the web UI so that <repo>.wiki.git exists.
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - "scripts/publish-wiki.sh"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish wiki
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # pushing to <repo>.wiki.git needs contents: write on the repository's own token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check docs/wiki consistency
+        run: python3 scripts/check_wiki.py docs/wiki
+      - name: Mirror docs/wiki to the wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish-wiki.sh docs/wiki

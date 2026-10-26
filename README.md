@@ -59,6 +59,7 @@ uv run tokiwa agent run --token tkw_...                  # ホストセンサー
 
 ## ドキュメント
 
+- **使い方（Wiki・日本語 / English / 中文 / Español）**: [TOKIWA Wiki](https://github.com/JUCK-Kurohasu/TOKIWA/wiki)（ソースは [`docs/wiki/`](docs/wiki/)）
 - [要件定義 v0.2](docs/requirements.md) / [アーキテクチャ](docs/architecture.md) / [API 契約](docs/api-contract.md)
 - [設計判断（ADR）](docs/decisions/) / [タスク仕様](docs/tasks/)
 - 開発者・AI エージェント向け: [AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md) / [HANDOFF.md](HANDOFF.md)
