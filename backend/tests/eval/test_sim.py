@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import statistics
 from collections import Counter
 
@@ -39,7 +40,7 @@ async def test_profile_behaviours() -> None:
     assert {e.labels["attack"] for e in by["benign_browser"]} == {"none"}
     # scanner: constant fast cadence
     ts = [e.timestamp.timestamp() for e in by["scanner"]]
-    gaps = [b - a for a, b in zip(ts, ts[1:], strict=False)]
+    gaps = [b - a for a, b in itertools.pairwise(ts)]
     assert statistics.median(gaps) < 0.1 and statistics.pstdev(gaps) < 0.05
     # AI agent: tool UA, discovers unlinked API routes, follows the canary, mutates after errors, bursts + gaps
     ai = by["ai_agent"]
@@ -50,7 +51,7 @@ async def test_profile_behaviours() -> None:
     assert canary and canary[0].http and "x-debug-auth" in canary[0].http.headers
     assert Counter(e.labels["attack"] for e in ai)["sqli"] >= 2
     ai_ts = [e.timestamp.timestamp() for e in ai]
-    ai_gaps = [b - a for a, b in zip(ai_ts, ai_ts[1:], strict=False)]
+    ai_gaps = [b - a for a, b in itertools.pairwise(ai_ts)]
     assert min(ai_gaps) < 0.05 and max(ai_gaps) > 2.0
     # LLM app attacker targets the chat endpoint
     assert {e.http.path for e in by["llm_app_attacker"] if e.labels["attack"] != "none" and e.http} == {
