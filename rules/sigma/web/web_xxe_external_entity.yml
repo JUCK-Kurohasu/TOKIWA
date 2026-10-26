@@ -1,0 +1,28 @@
+title: XML External Entity Injection
+id: bedfc4cb-c715-4f73-9fdc-2faf787dda75
+status: experimental
+description: Detects XML bodies (or XML in parameters) that declare an external entity (<!DOCTYPE ... <!ENTITY ... SYSTEM).
+references:
+  - https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_body:
+    request_body|contains|all:
+      - '<!DOCTYPE'
+      - '<!ENTITY'
+      - 'SYSTEM'
+  selection_query:
+    cs-uri-query|contains|all:
+      - '<!ENTITY'
+      - 'SYSTEM'
+  condition: 1 of selection_*
+falsepositives:
+  - Legacy SOAP/XML integrations that use internal DTDs with SYSTEM identifiers
+level: high

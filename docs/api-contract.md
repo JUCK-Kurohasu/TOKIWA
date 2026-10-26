@@ -69,30 +69,33 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | DELETE | /hosts/baselines/{id} | analyst | → 204（無ければ 404） |
 | POST | /hosts/baselines/learn | analyst | `{host}` 現在の open listener のうち未許可のものをベースライン化 → **作成した** `PortBaseline[]`（全 IF バインドは allow_public=true。未知ホストは 404） |
 | GET | /assets | user | `?q&kind` → `Page[Asset]` |
-| POST | /assets | analyst | `AssetIn` → `Asset` |
-| GET/PATCH/DELETE | /assets/{id} | user/analyst | |
+| POST | /assets | analyst | `AssetIn` → `Asset`（201。作成後にバックグラウンドで脆弱性照合） |
+| GET/PATCH/DELETE | /assets/{id} | user/analyst | PATCH は部分更新（software 変更で再照合）、DELETE は 204（一致も削除） |
 
 ## 検知・ルール（`routes/detectors.py`, `routes/rules.py`）
 | GET | /detectors | user | → `DetectorInfo[]` |
 | PATCH | /detectors/{id} | analyst | `{enabled}` → `DetectorInfo` |
-| GET | /rules | user | `?status&source` → `Page[Rule]` |
-| POST | /rules | analyst | `RuleIn` → `Rule`（Sigma 検証エラーは 422） |
-| GET/PATCH/DELETE | /rules/{id} | user/analyst | |
+| GET | /rules | user | `?status&source&q&limit&offset` → `Page[Rule]`（`meta`: sigma_id, level, tags, mitre, category, logsource, kinds, falsepositives; builtin は rule_key, path） |
+| POST | /rules | analyst | `RuleIn` → `Rule`（Sigma 検証エラーは 422 `{detail: "invalid Sigma rule: ..."}`、Sigma id 重複は 409） |
+| GET/PATCH/DELETE | /rules/{id} | user/analyst | PATCH `{content?, status?}` → `Rule`。builtin は content 変更・削除不可（409、status のみ可）。DELETE → 204 |
 | POST | /rules/validate | analyst | `{content}` → `{valid, errors[], title?}` |
-| POST | /rules/{id}/approve | analyst | proposed → active |
+| POST | /rules/{id}/approve | analyst | proposed → active（再検証。proposed 以外は 409） |
+| POST | /rules/reload | analyst | `rules/sigma` を再同期して再読込 → `{active_rules, errors: {source: [msg]}}` |
 
 ## インテル（`routes/intel.py`）
 | GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&limit&offset` → `Page[VulnRecord]` |
 | GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}` |
-| GET | /intel/matches | user | `?status` → `Page[VulnMatch]`（asset 名付き: `asset_name`） |
+| GET | /intel/matches | user | `?status&asset_id&vuln_id&kev&min_confidence` → `Page[VulnMatch]`（追加: `asset_name, asset_criticality, vuln_title, kev, epss, cvss_score`。KEV→EPSS→confidence 順） |
 | PATCH | /intel/matches/{id} | analyst | `{status}` |
-| GET | /intel/advisories | user | `?priority&status` → `Page[Advisory]` |
+| POST | /intel/matches/rescan | analyst | 全資産×全脆弱性を再照合 → `{evaluated_vulns, matches, new, updated, closed}` |
+| GET | /intel/advisories | user | `?priority&status&vuln_id&since` → `Page[Advisory]`（新しい順） |
 | GET | /intel/advisories/{id} | user | → `Advisory` |
-| POST | /intel/advisories/generate | analyst | `{vuln_id}` → `Advisory` |
+| POST | /intel/advisories/generate | analyst | `{vuln_id, force?}` → `Advisory`（7 日以内の同等アドバイザリがあればそれを返す。force で再生成） |
 | PATCH | /intel/advisories/{id} | analyst | `{status}` |
 | GET | /intel/news | user | `?source&q` → `Page[IntelItem]` |
 | GET | /intel/research | user | → `Page[ResearchReport]` |
-| POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport` |
+| GET | /intel/research/{id} | user | → `ResearchReport` |
+| POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport`（topic 省略時は設定の全トピックを 1 回で。LLM 失敗は 503） |
 | GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records}]` |
 | POST | /intel/sync | analyst | `{source?}` → `{started: true}` |
 
@@ -106,11 +109,13 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | GET | /gate/policy | token:gate | → `GatePolicy`（`ETag: "<version>"`、`If-None-Match` 一致で 304） |
 
 ## デセプション（`routes/deception.py`）
-| GET | /deception/assets | user | → `DeceptionAsset[]` |
-| POST | /deception/assets | analyst | `DeceptionAssetIn` → `DeceptionAsset` |
-| PATCH/DELETE | /deception/assets/{id} | analyst | |
-| GET | /deception/trips | user | → `Page[Event]`（kind=deception） |
-| GET | /deception/preview/{id} | analyst | → `{path, content_type, body}`（レンダリング結果） |
+| GET | /deception/assets | user | `?kind&enabled` → `DeceptionAsset[]` |
+| POST | /deception/assets | analyst | `DeceptionAssetIn` → `DeceptionAsset`（422 検証 / 409 重複） |
+| GET | /deception/assets/{id} | user | → `DeceptionAsset` |
+| PATCH | /deception/assets/{id} | analyst | `DeceptionAssetUpdate`（`schemas/deception.py`。`token: null` でローテーション） |
+| DELETE | /deception/assets/{id} | analyst | 204 |
+| GET | /deception/trips | user | `?asset_id&source_ip&limit&offset` → `Page[Event]`（トリップしたイベント。`deception` 情報付き） |
+| GET | /deception/preview/{id} | analyst | `?path` → `DeceptionPreview`（`{asset_id, path, content_type, body, status_code, headers, served, extra_paths}`） |
 
 ## 通知（`routes/notify.py`）
 | GET | /notify/channels | admin | → `NotificationChannel[]`（秘密はマスク） |

@@ -1,0 +1,36 @@
+title: API Schema Discovery (OpenAPI / Swagger)
+id: 52b1c390-1b3e-43ac-aa72-8ad1bd56f75a
+status: experimental
+description: |
+  Detects requests for machine-readable API descriptions (openapi.json, swagger.json, /v3/api-docs ...).
+  LLM agents fetch these to plan attacks ("semantic reconnaissance"): one schema tells them every endpoint and
+  parameter. Low severity alone; it gains weight when correlated with probing of the listed endpoints.
+references:
+  - https://spec.openapis.org/oas/latest.html
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1594
+  - tokiwa.ai_score.40
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    cs-uri-stem|endswith:
+      - '/openapi.json'
+      - '/openapi.yaml'
+      - '/openapi.yml'
+      - '/swagger.json'
+      - '/swagger.yaml'
+      - '/swagger-ui.html'
+      - '/v2/api-docs'
+      - '/v3/api-docs'
+      - '/api-docs'
+      - '/api-docs.json'
+      - '/.well-known/openapi.json'
+  condition: selection
+falsepositives:
+  - Developers and API gateways/portals loading the documentation of your public API
+level: low

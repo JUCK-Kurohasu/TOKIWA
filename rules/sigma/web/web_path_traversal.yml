@@ -1,0 +1,40 @@
+title: Path Traversal Attempt
+id: e9c1a34a-6610-4569-b5ae-1a23ce7790ad
+status: experimental
+description: |
+  Detects directory traversal sequences in the URL path or query (raw and URL-decoded, so %2e%2e%2f is
+  covered) and requests for well-known traversal targets (/etc/passwd, win.ini ...).
+references:
+  - https://owasp.org/www-community/attacks/Path_Traversal
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.discovery
+  - attack.t1083
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_sequence:
+    - cs-uri-stem|contains:
+        - '../'
+        - '..\'
+    - cs-uri-query|contains:
+        - '../'
+        - '..\'
+    - request_body|contains:
+        - '../../'
+        - '..\..\'
+  selection_target:
+    c-uri|contains:
+      - '/etc/passwd'
+      - '/etc/shadow'
+      - '/proc/self/environ'
+      - 'win.ini'
+      - 'boot.ini'
+  condition: 1 of selection_*
+falsepositives:
+  - Applications that accept relative paths in parameters (file managers, documentation viewers)
+level: high

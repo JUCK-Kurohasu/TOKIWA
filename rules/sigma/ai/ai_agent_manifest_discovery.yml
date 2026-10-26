@@ -1,0 +1,37 @@
+# TODO(verify): /.well-known/agent.json vs agent-card.json (A2A Agent Card) and /.well-known/mcp(.json)
+# (MCP server discovery) come from public proposals whose final paths may differ.
+title: AI Agent Manifest / LLM Discovery File Probe
+id: 5ff38c40-f947-4375-9af9-547e0bbac5c8
+status: experimental
+description: |
+  Detects requests for files that exist mainly for LLM agents: the ChatGPT plugin manifest
+  (/.well-known/ai-plugin.json), llms.txt / llms-full.txt, and agent/MCP discovery documents. Humans rarely
+  request these; autonomous agents and AI crawlers do, often as their very first step against a site.
+references:
+  - https://llmstxt.org/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1594
+  - tokiwa.category.ai_agent
+  - tokiwa.ai_score.50
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    cs-uri-stem|endswith:
+      - '/.well-known/ai-plugin.json'
+      - '/llms.txt'
+      - '/llms-full.txt'
+      - '/.well-known/llms.txt'
+      - '/.well-known/agent.json'
+      - '/.well-known/agent-card.json'
+      - '/.well-known/mcp.json'
+      - '/.well-known/mcp'
+  condition: selection
+falsepositives:
+  - Benign AI crawlers and AI assistants that read llms.txt on behalf of a user
+  - Your own agents discovering your own services
+level: low

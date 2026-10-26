@@ -1,0 +1,33 @@
+title: Log4Shell JNDI Lookup String
+id: 7f1fa436-88ca-4da3-88a1-e44c8dba1779
+status: experimental
+description: |
+  Detects Log4j JNDI lookup strings (CVE-2021-44228 "Log4Shell") and common obfuscations (${lower:...},
+  ${::-j}, nested ${${...}}) in the URI, User-Agent, Referer, Cookie or body.
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - cve.2021-44228
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    - c-uri|contains: &jndi
+        - '${jndi:'
+        - '${${'
+        - '${lower:'
+        - '${upper:'
+        - '${::-'
+    - c-useragent|contains: *jndi
+    - cs-referer|contains: *jndi
+    - cs-cookie|contains: *jndi
+    - request_body|contains: *jndi
+  condition: selection
+falsepositives:
+  - Security scanners run by your own team (still worth confirming the target is patched)
+level: critical

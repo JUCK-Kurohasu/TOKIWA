@@ -1,0 +1,33 @@
+title: Serialized Object Payload in Request
+id: 8702e466-1a81-4f21-83dc-0c5858a17114
+status: experimental
+description: |
+  Detects serialized object markers that indicate insecure-deserialization exploitation attempts: Java
+  (base64 "rO0AB" / hex "aced0005"), .NET BinaryFormatter (base64 "AAEAAAD/////") and PHP object notation
+  (O:<len>:"Class"). Base64 markers use |cased because base64 is case-sensitive.
+references:
+  - https://owasp.org/www-community/vulnerabilities/Insecure_Deserialization
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_b64:
+    - request_body|cased|contains: &b64
+        - 'rO0AB'
+        - 'AAEAAAD/////'
+    - cs-cookie|cased|contains: *b64
+    - cs-uri-query|cased|contains: *b64
+  selection_hex:
+    request_body|contains: 'aced0005'
+  selection_php:
+    - request_body|re: 'O:\d{1,4}:"[A-Za-z_\\][A-Za-z0-9_\\]{0,200}":\d{1,4}:\{'
+    - cs-cookie|re: 'O:\d{1,4}:"[A-Za-z_\\][A-Za-z0-9_\\]{0,200}":\d{1,4}:\{'
+  condition: 1 of selection_*
+falsepositives:
+  - Internal Java RMI/HTTP invokers or PHP session handlers that legitimately exchange serialized objects
+level: high

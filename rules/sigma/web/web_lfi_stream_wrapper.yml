@@ -1,0 +1,35 @@
+title: Local File Inclusion via Stream Wrapper
+id: 6622a926-1e5b-4905-b8be-919682073137
+status: experimental
+description: |
+  Detects PHP/stream wrappers used for local/remote file inclusion and source disclosure
+  (php://filter, php://input, expect://, phar://, zip://, data://text/plain, file:///) in the URI or body.
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/11.1-Testing_for_Local_File_Inclusion
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_uri:
+    c-uri|contains:
+      - 'php://filter'
+      - 'php://input'
+      - 'expect://'
+      - 'phar://'
+      - 'zip://'
+      - 'data://text/plain'
+      - 'file:///'
+  selection_body:
+    request_body|contains:
+      - 'php://filter'
+      - 'expect://'
+      - 'phar://'
+  condition: 1 of selection_*
+falsepositives:
+  - Applications that accept file:// URLs by design (rare on internet-facing services)
+level: high

@@ -1,0 +1,33 @@
+title: SQL Injection - Time-Based Blind Probe
+id: be88336f-ab43-4572-b22f-f67eaae301df
+status: experimental
+description: |
+  Detects time-based blind SQL injection payloads (SLEEP / PG_SLEEP / BENCHMARK / WAITFOR DELAY /
+  DBMS_PIPE.RECEIVE_MESSAGE) in the query string or request body.
+references:
+  - https://owasp.org/www-community/attacks/Blind_SQL_Injection
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_query:
+    cs-uri-query|re|i:
+      - '\b(pg_)?sleep\s*\(\s*\d'
+      - '\bbenchmark\s*\(\s*\d+\s*,'
+      - '\bwaitfor\s+delay\b'
+      - '\bdbms_pipe\.receive_message\s*\('
+  selection_body:
+    request_body|re|i:
+      - '\b(pg_)?sleep\s*\(\s*\d'
+      - '\bbenchmark\s*\(\s*\d+\s*,'
+      - '\bwaitfor\s+delay\b'
+      - '\bdbms_pipe\.receive_message\s*\('
+  condition: 1 of selection_*
+falsepositives:
+  - Applications that pass SQL snippets in parameters by design (admin consoles, query builders)
+level: high

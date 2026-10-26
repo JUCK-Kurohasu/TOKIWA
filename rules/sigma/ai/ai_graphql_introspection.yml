@@ -1,0 +1,28 @@
+title: GraphQL Introspection Query
+id: 3c8aa795-ee7b-495a-9c73-70f15a08c006
+status: experimental
+description: |
+  Detects GraphQL introspection (__schema / IntrospectionQuery) in the body or query string. Like OpenAPI
+  discovery, introspection hands an agent the full attack surface in one request; production APIs usually
+  disable it.
+references:
+  - https://graphql.org/learn/introspection/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1594
+  - tokiwa.ai_score.40
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    - request_body|contains: &introspection
+        - '__schema'
+        - 'IntrospectionQuery'
+    - cs-uri-query|contains: *introspection
+  condition: selection
+falsepositives:
+  - GraphQL IDEs (GraphiQL, Apollo Sandbox) used by your developers
+level: medium
