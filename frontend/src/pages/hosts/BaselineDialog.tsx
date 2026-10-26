@@ -24,7 +24,8 @@ export const EMPTY_DRAFT: BaselineDraft = {
   note: "",
 };
 
-const PROTOCOLS = ["tcp", "udp", "tcp6", "udp6"];
+// The server normalizes tcp6/udp6 to tcp/udp (baselines are per transport, not address family).
+const PROTOCOLS = ["tcp", "udp"];
 
 export function BaselineDialog({
   open,

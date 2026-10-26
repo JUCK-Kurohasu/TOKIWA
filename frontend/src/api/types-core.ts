@@ -23,6 +23,12 @@ export interface UserCreate {
   role: Role;
 }
 
+/** PATCH /users/{id} (schemas/users.py). The last admin cannot be demoted (409). */
+export interface UserUpdate {
+  role?: Role;
+  password?: string;
+}
+
 export type ApiTokenScope = "ingest" | "gate" | "read";
 export const API_TOKEN_SCOPES: ApiTokenScope[] = ["ingest", "gate", "read"];
 
@@ -101,11 +107,14 @@ export interface DashboardTimelineBucket {
 }
 
 export interface DashboardTimeline {
+  /** Bucket width chosen by the server (auto when not requested). */
+  bucket_minutes: number;
   buckets: DashboardTimelineBucket[];
 }
 
-// ---------- events (routes/events.py) ----------
+// ---------- events (routes/events.py, schemas/dashboard.py) ----------
 export interface EventTimeline {
+  bucket_minutes: number;
   buckets: { ts: string; total: number; by_kind: Record<string, number> }[];
 }
 
@@ -130,10 +139,12 @@ export interface HostSummary {
   host: string;
   ports_open: number;
   last_seen: string | null;
+  /** Open listeners that no baseline allows. */
   deviations: number;
 }
 
 export interface HostPort {
+  id: string;
   host: string;
   protocol: string;
   bind_ip: string;
@@ -159,6 +170,7 @@ export interface PortBaseline {
   created_at: string;
 }
 
+/** Omitted/empty host = "*"; protocol is normalized to tcp/udp by the server; same key upserts. */
 export interface PortBaselineIn {
   host?: string | null;
   protocol: string;

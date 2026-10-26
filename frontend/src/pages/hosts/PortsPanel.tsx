@@ -43,7 +43,7 @@ const strings = {
     learn: "現状を学習",
     learnTitle: "現在の状態をベースラインとして学習",
     learnBody:
-      "ホスト {host} で現在開いているすべての listener をベースライン（許可リスト）に登録します。逸脱中のポートも許可扱いになるため、内容を確認してから実行してください。",
+      "ホスト {host} で現在開いている listener のうち、まだ許可されていないもの（逸脱）をベースラインに登録します。全インタフェースへのバインドは「公開可」として登録されます。逸脱が正当なものか確認してから実行してください。",
     learnRun: "学習を実行",
     learned: "{n} 件のベースラインを登録しました",
     cancel: "キャンセル",
@@ -80,7 +80,7 @@ const strings = {
     learn: "Learn current state",
     learnTitle: "Learn the current state as baseline",
     learnBody:
-      "Every listener currently open on {host} will be added to the baseline (allow-list). Deviating ports become allowed too, so review the list before running this.",
+      "Every open listener on {host} that is not yet allowed (a deviation) is added to the baseline. All-interface binds are added with public exposure allowed. Make sure the deviations are legitimate before running this.",
     learnRun: "Learn",
     learned: "Added {n} baseline entries",
     cancel: "Cancel",
@@ -154,6 +154,7 @@ export function PortsPanel({
     [portsQ.data, onlyDev, showClosed],
   );
   const openListeners = (portsQ.data ?? []).filter((p) => p.open).length;
+  const openDeviations = (portsQ.data ?? []).filter((p) => p.open && !p.allowed).length;
 
   const learn = useMutation({
     mutationFn: () => api.post<PortBaseline[]>("/hosts/baselines/learn", { host: selected }),
@@ -252,7 +253,7 @@ export function PortsPanel({
                   size="sm"
                   variant="outline"
                   onClick={() => setLearnOpen(true)}
-                  disabled={openListeners === 0}
+                  disabled={openDeviations === 0}
                 >
                   <GraduationCap className="h-3.5 w-3.5" />
                   {L.learn}
@@ -293,7 +294,7 @@ export function PortsPanel({
                     const pub = isPublicBind(p.bind_ip);
                     return (
                       <TR
-                        key={`${p.protocol}-${p.bind_ip}-${p.port}`}
+                        key={p.id ?? `${p.protocol}-${p.bind_ip}-${p.port}`}
                         className={cn(!p.allowed && "bg-sev-critical/[0.04]", !p.open && "opacity-60")}
                       >
                         <TD>
@@ -339,7 +340,7 @@ export function PortsPanel({
                                 onClick={() =>
                                   onAddBaseline({
                                     host: p.host || selected,
-                                    protocol: p.protocol,
+                                    protocol: p.protocol.replace(/6$/, ""),
                                     port: String(p.port),
                                     process_name: p.process_name ?? "",
                                     allow_public: pub,
@@ -381,8 +382,7 @@ export function PortsPanel({
       >
         <p className="text-sm">{L.learnBody.replace("{host}", selected)}</p>
         <p className="mt-2 text-xs text-muted">
-          {L.open}: {formatNumber(openListeners)} · {L.deviations}:{" "}
-          {formatNumber((portsQ.data ?? []).filter((p) => p.open && !p.allowed).length)}
+          {L.open}: {formatNumber(openListeners)} · {L.deviations}: {formatNumber(openDeviations)}
         </p>
         {learn.error && <ErrorState error={learn.error} />}
       </Dialog>

@@ -2,9 +2,10 @@
  * Notification channels (GET/POST /notify/channels, PATCH/DELETE /notify/channels/{id},
  * POST /notify/channels/{id}/test; admin). Secrets come back masked from the API and are never echoed.
  *
- * TODO(verify): config key names per channel kind are owned by the respond/notify module. The UI sends
- * `{url}` for webhook/slack/discord and `{smtp_host, smtp_port, smtp_username, smtp_password,
- * smtp_starttls, from_addr, to_addrs}` for email; the "extra JSON" field can add/override keys.
+ * Config shapes follow backend/src/tokiwa/notify/channels.py (extra keys are rejected there):
+ *   webhook: {url, headers?}   slack / discord: {url}
+ *   email:   {host, port, from_addr, to_addrs[], username?, password? | password_env?, starttls, ssl?}
+ * The optional "extra JSON" field is merged on top (e.g. webhook `headers`, email `ssl`).
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BellPlus, BellRing, CircleCheck, CircleX, Send, Trash2 } from "lucide-react";
@@ -67,6 +68,8 @@ const strings = {
     smtpUser: "ユーザー名",
     smtpPass: "パスワード",
     starttls: "STARTTLS を使う",
+    passwordEnv: "パスワードの環境変数名（任意）",
+    passwordEnvHint: "指定するとパスワードを DB に保存せず、サーバーの環境変数から読みます（推奨）",
     from: "送信元アドレス",
     to: "宛先（カンマ区切り）",
     emailErr: "SMTP ホスト・送信元・宛先を入力してください",
@@ -106,6 +109,9 @@ const strings = {
     smtpUser: "Username",
     smtpPass: "Password",
     starttls: "Use STARTTLS",
+    passwordEnv: "Password env var (optional)",
+    passwordEnvHint:
+      "When set, the password is read from the server environment instead of stored in the DB (recommended)",
     from: "From address",
     to: "Recipients (comma separated)",
     emailErr: "SMTP host, from and recipients are required",
@@ -138,6 +144,7 @@ interface Draft {
   smtp_username: string;
   smtp_password: string;
   smtp_starttls: boolean;
+  password_env: string;
   from_addr: string;
   to_addrs: string;
   extra: string;
@@ -154,6 +161,7 @@ const EMPTY: Draft = {
   smtp_username: "",
   smtp_password: "",
   smtp_starttls: true,
+  password_env: "",
   from_addr: "",
   to_addrs: "",
   extra: "",
@@ -174,9 +182,9 @@ function destination(ch: NotificationChannel): string {
   const c = ch.config ?? {};
   if (ch.kind === "email") {
     const to = c.to_addrs ?? c.to ?? c.recipients;
-    return Array.isArray(to) ? to.join(", ") : typeof to === "string" ? to : String(c.smtp_host ?? "-");
+    return Array.isArray(to) ? to.join(", ") : typeof to === "string" ? to : String(c.host ?? "-");
   }
-  const url = c.url ?? c.webhook_url;
+  const url = c.url;
   return typeof url === "string" ? url : "-";
 }
 
@@ -222,11 +230,13 @@ function CreateChannelDialog({
     if (!valid || extra === null) return;
     const config: Record<string, unknown> = isEmail
       ? {
-          smtp_host: d.smtp_host.trim(),
-          smtp_port: Number(d.smtp_port) || 587,
-          smtp_username: d.smtp_username.trim() || undefined,
-          smtp_password: d.smtp_password || undefined,
-          smtp_starttls: d.smtp_starttls,
+          host: d.smtp_host.trim(),
+          port: Number(d.smtp_port) || 587,
+          username: d.smtp_username.trim() || undefined,
+          // Prefer an env-var reference over storing the SMTP password in the DB.
+          password_env: d.password_env.trim() || undefined,
+          password: d.password_env.trim() ? undefined : d.smtp_password || undefined,
+          starttls: d.smtp_starttls,
           from_addr: d.from_addr.trim(),
           to_addrs: recipients,
         }
@@ -338,8 +348,20 @@ function CreateChannelDialog({
                   value={d.smtp_password}
                   onChange={(e) => setD({ ...d, smtp_password: e.target.value })}
                   autoComplete="new-password"
+                  disabled={!!d.password_env.trim()}
                 />
               </div>
+            </div>
+            <div>
+              <Label htmlFor="ch-penv">{L.passwordEnv}</Label>
+              <Input
+                id="ch-penv"
+                value={d.password_env}
+                onChange={(e) => setD({ ...d, password_env: e.target.value })}
+                placeholder="TOKIWA_SMTP_PASSWORD"
+                className="font-mono text-xs"
+              />
+              <p className="mt-1 text-[11px] text-muted">{L.passwordEnvHint}</p>
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -405,7 +427,7 @@ function CreateChannelDialog({
             rows={3}
             value={d.extra}
             onChange={(e) => setD({ ...d, extra: e.target.value })}
-            placeholder='{"username": "TOKIWA"}'
+            placeholder={d.kind === "email" ? '{"ssl": true, "port": 465}' : '{"headers": {"X-Env": "lab"}}'}
             className="font-mono text-xs"
             aria-invalid={extra === null}
           />
