@@ -66,11 +66,12 @@
 ## 検知・ルール（`routes/detectors.py`, `routes/rules.py`）
 | GET | /detectors | user | → `DetectorInfo[]` |
 | PATCH | /detectors/{id} | analyst | `{enabled}` → `DetectorInfo` |
-| GET | /rules | user | `?status&source` → `Page[Rule]` |
-| POST | /rules | analyst | `RuleIn` → `Rule`（Sigma 検証エラーは 422） |
-| GET/PATCH/DELETE | /rules/{id} | user/analyst | |
+| GET | /rules | user | `?status&source&q&limit&offset` → `Page[Rule]`（`meta`: sigma_id, level, tags, mitre, category, logsource, kinds, falsepositives; builtin は rule_key, path） |
+| POST | /rules | analyst | `RuleIn` → `Rule`（Sigma 検証エラーは 422 `{detail: "invalid Sigma rule: ..."}`、Sigma id 重複は 409） |
+| GET/PATCH/DELETE | /rules/{id} | user/analyst | PATCH `{content?, status?}` → `Rule`。builtin は content 変更・削除不可（409、status のみ可）。DELETE → 204 |
 | POST | /rules/validate | analyst | `{content}` → `{valid, errors[], title?}` |
-| POST | /rules/{id}/approve | analyst | proposed → active |
+| POST | /rules/{id}/approve | analyst | proposed → active（再検証。proposed 以外は 409） |
+| POST | /rules/reload | analyst | `rules/sigma` を再同期して再読込 → `{active_rules, errors: {source: [msg]}}` |
 
 ## インテル（`routes/intel.py`）
 | GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&limit&offset` → `Page[VulnRecord]` |
