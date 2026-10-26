@@ -1,0 +1,168 @@
+# TOKIWA lab: victim demo shop + TOKIWA Gate + TOKIWA server (+ optional host agent / nginx) + traffic simulator.
+#
+#   docker compose -f lab/compose.yaml up --build                     # server + gate + victim
+#   docker compose -f lab/compose.yaml --profile sim up sim           # simulated traffic -> gate
+#   SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim up sim
+#   docker compose -f lab/compose.yaml --profile ingest up sim-ingest # synthetic events straight to the ingest API
+#   docker compose -f lab/compose.yaml --profile agent up -d          # + nginx (JSON logs) + host agent
+#
+# UI/API: http://localhost:8788   Gate (in front of the victim): http://localhost:8080
+# The TOKIWA image is built from deploy/Dockerfile (owned by devops). See lab/README.md.
+
+name: tokiwa-lab
+
+x-tokiwa: &tokiwa
+  image: tokiwa:lab
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  init: true
+  networks: [labnet]
+
+services:
+  # One-shot: create the DB and the per-component ingest tokens (idempotent) under the data volume.
+  tokiwa-init:
+    <<: *tokiwa
+    command: ["sh", "/lab/scripts/init-tokens.sh"]
+    environment:
+      TOKIWA_HEALTHCHECK_URL: "none"
+    volumes:
+      - tokiwa-data:/data
+      - ./scripts:/lab/scripts:ro
+    restart: "no"
+
+  tokiwa:
+    <<: *tokiwa
+    command: ["serve"]
+    environment:
+      TOKIWA_LLM__PROVIDER: "${TOKIWA_LLM_PROVIDER:-mock}"   # set to auto + ANTHROPIC_API_KEY for a real LLM
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      TOKIWA_LLM__DAILY_BUDGET_USD: "${TOKIWA_LLM_BUDGET_USD:-1.0}"
+    volumes:
+      - tokiwa-data:/data
+    ports:
+      - "127.0.0.1:8788:8788"
+    depends_on:
+      tokiwa-init:
+        condition: service_completed_successfully
+
+  victim:
+    build: ./victim
+    image: tokiwa-lab-victim:latest
+    environment:
+      LAB_AI_CANARY: "${LAB_AI_CANARY:-1}"
+    networks: [labnet]
+    expose: ["3000"]
+
+  gate:
+    <<: *tokiwa
+    command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "gate", "run"]
+    environment:
+      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/gate.token
+      TOKIWA_TOKEN_ENV: TOKIWA_GATE__INGEST_TOKEN
+      TOKIWA_GATE__UPSTREAM: http://victim:3000
+      TOKIWA_GATE__SERVER_URL: http://tokiwa:8788
+      TOKIWA_GATE__LISTEN_HOST: 0.0.0.0
+      TOKIWA_GATE__LISTEN_PORT: "8080"
+      TOKIWA_GATE__SENSOR_ID: lab-gate
+      # Lab only: lets `tokiwa sim run --spoof-xff` emulate many distinct source IPs from one container.
+      TOKIWA_GATE__TRUST_FORWARDED_FOR: "true"
+      TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
+    volumes:
+      - tokiwa-data:/tokiwa-data:ro
+      - ./scripts:/lab/scripts:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      labnet:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      tokiwa-init:
+        condition: service_completed_successfully
+      tokiwa:
+        condition: service_started
+      victim:
+        condition: service_started
+
+  sim:
+    <<: *tokiwa
+    profiles: ["sim"]
+    command:
+      - sim
+      - run
+      - --profile
+      - "${SIM_PROFILE:-mixed}"
+      - --target
+      - http://gate:8080
+      - --seed
+      - "${SIM_SEED:-1}"
+      - --time-scale
+      - "${SIM_TIME_SCALE:-1.0}"
+      - --spoof-xff
+    environment:
+      TOKIWA_HEALTHCHECK_URL: "none"
+    depends_on:
+      gate:
+        condition: service_healthy
+
+  # Alternative when the Gate is not available: generate events offline and POST them to the ingest API.
+  sim-ingest:
+    <<: *tokiwa
+    profiles: ["ingest"]
+    command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "sim", "ingest", "--server", "http://tokiwa:8788",
+              "--profile", "${SIM_PROFILE:-mixed}", "--seed", "${SIM_SEED:-1}"]
+    environment:
+      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/sim.token
+      TOKIWA_TOKEN_ENV: TOKIWA_SIM_TOKEN
+      TOKIWA_HEALTHCHECK_URL: "none"
+    volumes:
+      - tokiwa-data:/tokiwa-data:ro
+      - ./scripts:/lab/scripts:ro
+    depends_on:
+      tokiwa:
+        condition: service_healthy
+
+  # Optional: nginx in front of the victim writing TOKIWA JSON access logs (format owned by sensors:
+  # lab/nginx/tokiwa-json.conf), shipped by the host agent.
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["agent"]
+    volumes:
+      - ./nginx/tokiwa-json.conf:/etc/nginx/conf.d/tokiwa-json.conf:ro
+      - ./proxy/nginx-site.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-logs:/var/log/nginx
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks: [labnet]
+    depends_on: [victim]
+
+  agent:
+    <<: *tokiwa
+    profiles: ["agent"]
+    command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "agent", "run"]
+    environment:
+      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/agent.token
+      TOKIWA_TOKEN_ENV: TOKIWA_AGENT__INGEST_TOKEN
+      TOKIWA_AGENT__SERVER_URL: http://tokiwa:8788
+      TOKIWA_AGENT__SENSOR_ID: lab-agent
+      TOKIWA_AGENT__NGINX_JSON_LOGS: '["/var/log/nginx/tokiwa-access.json"]'
+      TOKIWA_HEALTHCHECK_URL: "none"
+    volumes:
+      - tokiwa-data:/tokiwa-data:ro
+      - nginx-logs:/var/log/nginx:ro
+      - ./scripts:/lab/scripts:ro
+    depends_on:
+      tokiwa-init:
+        condition: service_completed_successfully
+      nginx:
+        condition: service_started
+
+networks:
+  labnet:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  tokiwa-data:
+  nginx-logs:
