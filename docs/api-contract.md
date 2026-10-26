@@ -108,11 +108,13 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | GET | /gate/policy | token:gate | → `GatePolicy`（`ETag: "<version>"`、`If-None-Match` 一致で 304） |
 
 ## デセプション（`routes/deception.py`）
-| GET | /deception/assets | user | → `DeceptionAsset[]` |
-| POST | /deception/assets | analyst | `DeceptionAssetIn` → `DeceptionAsset` |
-| PATCH/DELETE | /deception/assets/{id} | analyst | |
-| GET | /deception/trips | user | → `Page[Event]`（kind=deception） |
-| GET | /deception/preview/{id} | analyst | → `{path, content_type, body}`（レンダリング結果） |
+| GET | /deception/assets | user | `?kind&enabled` → `DeceptionAsset[]` |
+| POST | /deception/assets | analyst | `DeceptionAssetIn` → `DeceptionAsset`（422 検証 / 409 重複） |
+| GET | /deception/assets/{id} | user | → `DeceptionAsset` |
+| PATCH | /deception/assets/{id} | analyst | `DeceptionAssetUpdate`（`schemas/deception.py`。`token: null` でローテーション） |
+| DELETE | /deception/assets/{id} | analyst | 204 |
+| GET | /deception/trips | user | `?asset_id&source_ip&limit&offset` → `Page[Event]`（トリップしたイベント。`deception` 情報付き） |
+| GET | /deception/preview/{id} | analyst | `?path` → `DeceptionPreview`（`{asset_id, path, content_type, body, status_code, headers, served, extra_paths}`） |
 
 ## 通知（`routes/notify.py`）
 | GET | /notify/channels | admin | → `NotificationChannel[]`（秘密はマスク） |
