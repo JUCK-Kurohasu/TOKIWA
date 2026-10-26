@@ -73,19 +73,19 @@
 | POST | /rules/{id}/approve | analyst | proposed → active |
 
 ## インテル（`routes/intel.py`）
-| GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&limit&offset` → `Page[VulnRecord]` |
-| GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}` |
+| GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&source&severity&limit&offset` → `Page[VulnRecord]`（既定順: KEV→EPSS→CVSS→modified） |
+| GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}`（id は CVE または GHSA/JVNDB エイリアス） |
 | GET | /intel/matches | user | `?status` → `Page[VulnMatch]`（asset 名付き: `asset_name`） |
 | PATCH | /intel/matches/{id} | analyst | `{status}` |
 | GET | /intel/advisories | user | `?priority&status` → `Page[Advisory]` |
 | GET | /intel/advisories/{id} | user | → `Advisory` |
 | POST | /intel/advisories/generate | analyst | `{vuln_id}` → `Advisory` |
 | PATCH | /intel/advisories/{id} | analyst | `{status}` |
-| GET | /intel/news | user | `?source&q` → `Page[IntelItem]` |
+| GET | /intel/news | user | `?source&q&vuln_id` → `Page[IntelItem]`（`source=rss` は `rss:<host>` 全件） |
 | GET | /intel/research | user | → `Page[ResearchReport]` |
 | POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport` |
-| GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records}]` |
-| POST | /intel/sync | analyst | `{source?}` → `{started: true}` |
+| GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records, last_attempt, vulns_created, vulns_updated, items_created, duration_ms, running, attribution}]` |
+| POST | /intel/sync | analyst | `{source?}` → `{started: true, sources: string[]}`（未知 source は 404、実行中/有効ソースなしは 409） |
 
 ## 対処（`routes/response.py`）・Gate ポリシー（`routes/gate.py`）
 | GET | /response/actions | user | `?status&incident_id&limit&offset` → `Page[ResponseAction]` |
