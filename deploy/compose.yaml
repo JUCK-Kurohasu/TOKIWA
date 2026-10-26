@@ -1,0 +1,102 @@
+# TOKIWA — production-leaning Compose stack (Docker Engine 25+, Compose v2.24+).
+#
+#   cp .env.example .env                                         # at the repository root, then edit
+#   docker compose -f deploy/compose.yaml --env-file .env up -d --build
+#   open http://localhost:8788  ->  create the first admin on /setup
+#
+# Optional profiles (enable with --profile <name> or COMPOSE_PROFILES=<a>,<b> in .env):
+#   postgres  PostgreSQL instead of the default SQLite file (also set TOKIWA_DATABASE__URL, see .env.example)
+#   gate      TOKIWA Gate reverse proxy in front of an upstream app (needs an ingest token)
+#
+# The lab stack (victim app + simulator) lives in lab/compose.yaml. Details: docs/deploy.md.
+name: tokiwa
+
+x-tokiwa-image: &tokiwa-image
+  image: ${TOKIWA_IMAGE:-tokiwa:local}
+  init: true
+  restart: unless-stopped
+  env_file:
+    - path: ../.env
+      required: false
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  tokiwa:
+    <<: *tokiwa-image
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["serve"]
+    ports:
+      # Bound to loopback by default: put a TLS reverse proxy in front (docs/deploy.md) or set TOKIWA_BIND.
+      - "${TOKIWA_BIND:-127.0.0.1}:${TOKIWA_PORT:-8788}:8788"
+    volumes:
+      - tokiwa-data:/data
+      # Optional static config file (the image sets TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml):
+      # - ./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false # only when the postgres profile is enabled
+    stop_grace_period: 30s
+
+  postgres:
+    image: postgres:18.6-trixie
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tokiwa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-tokiwa}
+    volumes:
+      # PostgreSQL 18+ images keep data in a versioned subdirectory of /var/lib/postgresql.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    shm_size: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Not published on the host: only the tokiwa service reaches it over the compose network.
+
+  gate:
+    <<: *tokiwa-image
+    profiles: ["gate"]
+    command: ["gate", "run"]
+    environment:
+      TOKIWA_GATE__SERVER_URL: http://tokiwa:8788
+      TOKIWA_GATE__LISTEN_HOST: 0.0.0.0
+      TOKIWA_GATE__LISTEN_PORT: "8080"
+      TOKIWA_GATE__UPSTREAM: ${TOKIWA_GATE__UPSTREAM:-http://host.docker.internal:3000}
+      TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
+    tmpfs:
+      - /tmp
+      - /data # the gate keeps no state; avoids an anonymous volume for the image's VOLUME
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${TOKIWA_GATE_BIND:-0.0.0.0}:${TOKIWA_GATE_PORT:-8080}:8080"
+    depends_on:
+      tokiwa:
+        condition: service_healthy
+
+volumes:
+  tokiwa-data:
+  postgres-data:

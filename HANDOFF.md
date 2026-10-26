@@ -3,69 +3,89 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-10-22 08:15 UTC（セッション 1 / 統合担当）
-作業ブランチ: `claude/affectionate-knuth-1inglo`
+最終更新: 2026-10-26（セッション 1 / 統合担当）
+作業ブランチ: `claude/affectionate-knuth-1inglo`（main に PR #1〜#3 マージ済み、PR #4 で残りを統合中）
 
 ## 1. 現在の状態（サマリ）
 
-- **M0 基盤: 完了**。骨格（契約・拡張ポイント）・ドキュメント・フロントシェルが動く。
-  - `cd backend && uv run pytest` → 緑（スモークテスト）
-  - `uv run tokiwa serve` → API（/api/docs）と UI（frontend/dist があれば）を配信
-- **M1/M2: 並列エージェント（第 1 波, 18 タスク）で実装中**。各タスクの仕様は `docs/tasks/*.md`。
-  各エージェントの作業ログは `docs/handoff/` に追加される。
+- **第 1 波（18 モジュール）: 全て実装・統合済み**。`cd backend && uv run pytest` 緑（1,281 件・約 70 秒）、ruff クリーン、
+  `cd frontend && npm run typecheck && npm run lint && npm run build && npx vitest run` 緑。
+- **E2E（モック LLM）が通る**: `uv run tokiwa eval run --dataset ../eval/datasets/lab-mini.jsonl --llm mock --out <dir>`
+  - 攻撃セッション検知 5/5、正常セッション誤検知 0%、アラート適合率 100%（87 件）、AI アトリビューション P/R/AUC = 1.0、
+    取り込み→アラート p50 10ms、アラート→トリアージ p50 1.3s、31 検知器が稼働。
+  - **注意（過大評価）**: データセットは検知器と同じ仮説から合成したもの。実トラフィック・ARTEX での検証が未了。
+    human_attacker 2 セッション中 1 つが振る舞いスコアで benign 判定。モック LLM の actor 一致率は 13%（実 LLM 未評価）。
+- Docker: devops 担当がサンドボックスで dockerd を起動してイメージビルド・スモーク・compose（SQLite/PostgreSQL）まで確認済み。
+  ただし `lab/compose.yaml` の `up` と GitHub Actions 上の CI は未実行。
 
-## 2. 実装済み（骨格）
+## 2. モジュール一覧（すべて main または PR #4）
 
-| 領域 | ファイル | 備考 |
+| 領域 | 主なファイル | 作業ログ |
 |---|---|---|
-| 設定 | backend/src/tokiwa/config.py | env `TOKIWA_*`（ネストは `__`）+ `tokiwa.yaml`。モジュール別セクション |
-| スキーマ | backend/src/tokiwa/schemas/ | events / alerts / triage / intel / response / system |
-| DB | backend/src/tokiwa/db/ | SQLAlchemy async。全テーブル定義済（models/ は自動 import） |
-| パイプライン | pipeline/service.py | enrich → detect → store → alerts（重複排除）→ bus |
-| 検知エンジン | detect/base.py, engine.py, context.py | `@register_detector`、窓/状態ストア |
-| LLM | llm/base.py, gateway.py, mock.py, redact.py, prompting.py, pricing.py | ゲートウェイ（予算/監査/検証）、Mock、マスキング、非信頼データ封入 |
-| 実行時 | runtime.py, bus.py, plugins.py | `@on_startup` / `@periodic` / pub-sub / 自動検出 |
-| API | api/app.py, deps.py, routes/{health,auth,ingest}.py | 認証（JWT/API トークン）、取り込み |
-| CLI | cli.py | serve / user create / token create（他はモジュールが追加） |
-| フロント | frontend/src/ | ルート自動検出、AppShell、UI キット、i18n（ja/en）、API クライアント、ログイン/セットアップ |
+| 骨格（契約・拡張点） | config / schemas / db / bus / runtime / pipeline / detect/engine / llm/gateway | — |
+| Web 署名・レート検知（17） | detect/detectors/web_*.py, detect/web_common.py | docs/handoff/2026-10-22-detect-web.md |
+| Sigma（評価器・25 ルール・API） | detect/sigma/, rules/sigma/, routes/rules.py, detectors.py | …-sigma.md |
+| AI エージェント振る舞い検知（6） | aidetect/, enrich/sessionizer.py, detectors/ai_*.py, llm_app_*.py, routes/sessions.py | …-detect-ai.md |
+| センサー・ポート監視 | sensors/, enrich/ports.py, detectors/port_*.py, net_*.py, routes/hosts.py | …-sensors.md |
+| Gate | gate/ | …-gate.md, docs/gate.md |
+| Mirage（デセプション） | deception/, detectors/deception_trip.py, routes/deception.py | …-deception.md, docs/deception.md |
+| LLM プロバイダ | llm/anthropic_provider.py, openai_compat.py, settings.py, routes/llm.py | …-llm.md, docs/security/llm-safety.md |
+| 相関・トリアージ | correlate/, triage/, routes/alerts.py, incidents.py | …-triage-correlate.md |
+| インテル（フィード） | intel/sources/, store.py, sync.py, cli.py, routes/intel.py | …-intel-feeds.md |
+| インテル（照合・助言・リサーチ） | intel/matcher.py, advisor.py, research.py, routes/assets.py, intel_advice.py | …-intel-advisor.md |
+| 対処・Gate ポリシー・通知 | respond/, notify/, routes/response.py, gate.py, notify.py | …-respond.md, docs/response.md |
+| コパイロット | copilot/, routes/copilot.py | …-copilot.md |
+| API コア・SSE | routes/users,tokens,events,dashboard,system,audit,stream.py, api/pagination.py | …-api-core.md |
+| フロント（各画面） | frontend/src/pages/* | …-frontend-core/ops/intel.md |
+| ラボ・シミュレータ・評価 | eval/, lab/, eval/datasets/lab-mini.jsonl | …-lab-eval.md, docs/purple-team.md |
+| DevOps | deploy/, .github/workflows/ci.yml, Makefile, scripts/ | …-devops.md, docs/deploy.md |
 
-## 3. 進行中（第 1 波の担当一覧）
+## 3. 統合で入れた修正（このセッション）
 
-- PR #1（骨格）は main にマージ済み。第 1 波は PR #2（同ブランチ）で統合中。
-- **統合済み**: copilot, llm（`cd backend && uv run pytest` → 85 件 緑）
-- **実装中（16）**: detect-web / sigma / detect-ai / sensors / gate / deception / triage-correlate / intel-feeds /
-  intel-advisor / respond / api-core / frontend-core / frontend-ops / frontend-intel / lab-eval / devops
-- 各エージェントは `.claude/worktrees/agent-*`（ブランチ `worktree-agent-*`）で作業。利用制限で全員が一時中断
-  （08:10 UTC リセット後に再開指示済み）。**別セッションで引き継ぐ場合**: 各 worktree の `git status` /
-  `git log c4881e1..HEAD` で進捗を確認し、未完ならその worktree で `docs/tasks/<name>.md` の続きを実装 →
-  コミット → 統合ブランチへ `git merge --no-edit worktree-agent-<id>`。
-- worktree のブランチは古い main（0efcd24）から作られることがある。その場合は `git merge --ff-only c4881e1`
-  で骨格に追いつかせてから作業する（copilot/llm 担当はそうした）。
+- `fix(api)`: `?access_token=` を SSE ストリームのみに限定（JWT のログ漏えい防止）。
+- `fix(bus)`: `drain()` の無限スピン（Python 3.12+ の gather が完了済みタスクで即返る）→ 評価ハーネスがハングしていた。
+- `chore(config)`: `llm.max_output_tokens` 既定 8000（deep モデルは思考を無効化できず上限に含まれる）。
+- テストの頑健化（監査ログ件数、評価の回帰テスト）。
 
-## 4. 次の一手（優先順）
+## 4. 次の一手（第 2 波・優先順）
 
-1. 第 1 波の成果をマージし、全テスト・lint・ビルドを緑にする（統合）。
-2. E2E 確認: `tokiwa sim` で ai_agent プロファイルを流し、AI アトリビューション → インシデント → トリアージ →
-   対処提案 → 承認 → Gate ブロックまで通ること。
-3. 評価ハーネスで基準値を取り、`aidetect/scoring.py` の重みを調整。
-4. Alembic 導入（ADR-0002）。データ保持期間とパージジョブ。
+1. **実データでの検証**: `lab/compose.yaml` を実際に `up` → `tokiwa sim run` 全プロファイル → ARTEX をラボに向けた
+   パープルチーム演習（docs/purple-team.md）。その結果で `aidetect/scoring.py` の重みを調整（現状は合成データでのみ 100%）。
+2. **実 LLM 評価**（費用発生。要ユーザー承認と予算）: `tokiwa eval run --llm live --budget-usd <N>`。refusal 率・一致率・コスト。
+3. **フロント統合の後始末**: SSE フック一本化（`hooks/useLiveStream.ts` と `components/common/useOpsLive.ts`）、
+   重複コンポーネント（QueryView/DataState、OffsetPager/PagerBar、EventDetail/EventInspector 等）の統合、
+   `api/types-*.ts` を `types.ts` へ集約、ページの遅延読み込み（バンドル 1.27MB）、実バックエンドとの画面確認（Playwright）。
+4. **設定の整理**: Gate の CLI 専用 5 設定を `GateSettings` へ、sensors のサーバー側設定を `detection` へ移す、
+   空文字の `TOKIWA_*` を未設定扱いにする、各モジュールの定数（NVD 待機・閾値等）の設定化。
+5. **運用基盤**: Alembic 導入（ADR-0002）、データ保持期間とパージジョブ、mypy の既存 6 エラー（db/session.py,
+   detect/context.py, llm/gateway.py）解消と CI での必須化。
+6. **機能の残り**: Gate → `next-action`/`rsc` ヘッダ透過と `response_content_type` 記録（detect-web 依頼）、
+   多 IP パスワードスプレー検知、アクター横断の指紋統合（detect-ai）、対処の二者承認（respond）、
+   オフライン評価用のデセプション資産シード（lab-eval 依頼）、KEV ブーストの host→vuln_matches 経由（triage）。
 
 ## 5. 要判断事項（ユーザー）
 
-- ライセンス: Apache-2.0 を暫定採用（ADR-0005）。MIT に変えるなら公開前に。
-- 実 LLM での評価実行（費用が発生）: 予算上限を決めてから `tokiwa eval run --llm live`。
-- AI カナリアの文言（デコイに埋め込む隠し指示）の強さ・言語。
+- ライセンス: Apache-2.0 を暫定（ADR-0005）。
+- 実 LLM での評価実行の予算。
+- AI カナリアの文言の強さ・言語、robots.txt / llms.txt カナリアの有効化（既定 OFF。アプリ本来のファイルを置き換える）、
+  デセプションの法務確認（docs/deception.md に TODO(verify)）。
+- 対処の二者承認（提案者≠承認者）を必須にするか。
 
 ## 6. 既知の制約・注意
 
-- このクラウド環境からは NVD/KEV/EPSS/JVN/OSV 等の外部 API に出られない（プロキシで 403）。インテルのテストは fixture。
-- ARTEX-JP は `/home/user/artex-jp` に読み取り専用でクローン（AGPL-3.0 のためコードは複製しない）。
-- Anthropic SDK は `anthropic` 2.x（httpx2 ベース）。`messages.parse(output_format=...)` が使える。
+- このクラウド環境からは NVD/KEV/EPSS/JVN/OSV/GHSA に出られない → インテルは公式仕様ベースの fixture で検証。
+  **JVN は 2026-04 以降 MyJVN の刷新告知あり**（旧フィード前提の実装が使えない可能性。TODO(verify)）。
+- ARTEX-JP は `/home/user/artex-jp` に読み取り専用（AGPL-3.0 のためコード複製なし）。インポータは形式の相互運用のみ。
+- Anthropic SDK は 2.x（httpx2）。respx では SDK 通信を捕捉できない → httpx2 モックトランスポート。
+- 未検証の事実は各コード・作業ログに `TODO(verify)`（CVE-2025-55182 の内部フィールド名、AI クローラ UA 一覧、
+  MITRE ATLAS ID、A2A/MCP の .well-known パス 等）。
 
 ## 7. 失敗した試み・ハマりどころ
 
-- hatchling は `readme` にプロジェクト外パスを指定できない → `backend/README.md` を置いた。
-- ruff の E501 は formatter に任せて無効化（日本語 docstring が長くなるため）。
-- 18 体同時実行でアカウントのセッション利用制限に到達（約 1.5 時間で全員停止）。作業は worktree に残るので
-  SendMessage で再開できる。エージェントには「論理単位ごとにコミット」を指示済み。
-- anthropic SDK 2.x は httpx2 ベースのため respx では SDK 通信を捕捉できない → httpx2 のモックトランスポートを注入（llm 担当）。
+- hatchling は `readme` にプロジェクト外パスを指定できない → `backend/README.md`。
+- ruff の E501 は formatter に任せて無効化。
+- 16〜18 体同時実行で 5 時間枠の上限に 3 回、その後週次上限に到達。中断のたびに約 30 万トークンの文脈を読み直す
+  再開コストが発生する → 第 2 波は 4〜6 体程度に絞り、新しいセッションから始めるのが効率的。
+- worktree が骨格以前のコミット（0efcd24）から作られることがある → `git merge --ff-only <skeleton>` で追いつかせる。
+- エージェントのブランチ統合: `git merge --no-edit worktree-agent-<id>`。衝突は docs（api-contract/architecture）のみだった。
+- CI は `FORCE_COLOR=1` で動く → Typer/Rich の CLI 出力を文字列比較するテストは ANSI を除去してから判定する（`re.sub(r"\x1b\[[0-9;]*m", "", out)`）。ローカル再現は `FORCE_COLOR=1 uv run pytest`。

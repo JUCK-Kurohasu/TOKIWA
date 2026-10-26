@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +48,10 @@ def test_resolve_settings_precedence(tmp_path: Path) -> None:
 def test_gate_subcommand_is_registered() -> None:
     result = CliRunner().invoke(cli.app, ["gate", "run", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
+    # CI sets FORCE_COLOR=1, so Rich styles the help text; strip ANSI escapes before matching.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     for flag in ("--upstream", "--listen", "--server", "--token", "--trust-forwarded-for"):
-        assert flag in result.output
+        assert flag in plain
 
 
 def test_gate_run_starts_uvicorn(settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

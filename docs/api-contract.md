@@ -50,7 +50,7 @@ users / tokens の変更はすべて `audit_log` に記録（パスワード・�
 
 ## アクターセッション（`routes/sessions.py`）
 | GET | /sessions | user | `?min_ai_score&classification&source_ip&limit&offset` → `Page[ActorSession]` |
-| GET | /sessions/{id} | user | → `{session: ActorSession, events: Event[] (最大200), timeline:[{t, path, status, gap_ms}]}` |
+| GET | /sessions/{id} | user | → `{session: ActorSession, events: Event[] (最大200), timeline:[{t, path, status, gap_ms, method, kind, event_id, error, band}]}`（`gap_ms` = 直前の HTTP 要求からの ms、`band` = burst/mid/think/long。`features.indicators/scores` は docs/detection/ai-attacks.md） |
 
 ## ダッシュボード（`routes/dashboard.py`）
 | GET | /dashboard/summary | user | → `{alerts_24h:{total, by_severity:{}}, open_incidents, ai_sessions_24h, events_24h, llm_cost_today_usd, llm_budget_usd, pending_actions, kev_matches, top_sources:[{ip,count,ai_score}], top_rules:[{rule_id,title,count}], recent_incidents: Incident[]}` |
@@ -83,8 +83,8 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | POST | /rules/reload | analyst | `rules/sigma` を再同期して再読込 → `{active_rules, errors: {source: [msg]}}` |
 
 ## インテル（`routes/intel.py`）
-| GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&limit&offset` → `Page[VulnRecord]` |
-| GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}` |
+| GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&source&severity&limit&offset` → `Page[VulnRecord]`（既定順: KEV→EPSS→CVSS→modified） |
+| GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}`（id は CVE または GHSA/JVNDB エイリアス） |
 | GET | /intel/matches | user | `?status&asset_id&vuln_id&kev&min_confidence` → `Page[VulnMatch]`（追加: `asset_name, asset_criticality, vuln_title, kev, epss, cvss_score`。KEV→EPSS→confidence 順） |
 | PATCH | /intel/matches/{id} | analyst | `{status}` |
 | POST | /intel/matches/rescan | analyst | 全資産×全脆弱性を再照合 → `{evaluated_vulns, matches, new, updated, closed}` |
@@ -92,12 +92,12 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | GET | /intel/advisories/{id} | user | → `Advisory` |
 | POST | /intel/advisories/generate | analyst | `{vuln_id, force?}` → `Advisory`（7 日以内の同等アドバイザリがあればそれを返す。force で再生成） |
 | PATCH | /intel/advisories/{id} | analyst | `{status}` |
-| GET | /intel/news | user | `?source&q` → `Page[IntelItem]` |
+| GET | /intel/news | user | `?source&q&vuln_id` → `Page[IntelItem]`（`source=rss` は `rss:<host>` 全件） |
 | GET | /intel/research | user | → `Page[ResearchReport]` |
 | GET | /intel/research/{id} | user | → `ResearchReport` |
 | POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport`（topic 省略時は設定の全トピックを 1 回で。LLM 失敗は 503） |
-| GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records}]` |
-| POST | /intel/sync | analyst | `{source?}` → `{started: true}` |
+| GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records, last_attempt, vulns_created, vulns_updated, items_created, duration_ms, running, attribution}]` |
+| POST | /intel/sync | analyst | `{source?}` → `{started: true, sources: string[]}`（未知 source は 404、実行中/有効ソースなしは 409） |
 
 ## 対処（`routes/response.py`）・Gate ポリシー（`routes/gate.py`）
 | GET | /response/actions | user | `?status&incident_id&limit&offset` → `Page[ResponseAction]` |

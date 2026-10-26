@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns="http://purl.org/rss/1.0/"
+         xmlns:rss="http://purl.org/rss/1.0/"
+         xmlns:dc="http://purl.org/dc/elements/1.1/"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:sec="http://jvn.jp/rss/mod_sec/3.0/"
+         xmlns:marking="http://data-marking.mitre.org/Marking"
+         xmlns:status="http://jvndb.jvn.jp/myjvn/Status"
+         xml:lang="ja">
+  <channel rdf:about="https://jvndb.jvn.jp/apis/myjvn">
+    <title>JVNDB 脆弱性対策情報</title>
+    <link>https://jvndb.jvn.jp/apis/myjvn</link>
+    <description>JVNDB 脆弱性対策情報</description>
+    <dc:date>2026-10-22T10:00+09:00</dc:date>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-000101.html"/>
+        <rdf:li rdf:resource="https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-012345.html"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-000101.html">
+    <title>Example Web Console における複数の脆弱性</title>
+    <link>https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-000101.html</link>
+    <description>Example 社が提供する Example Web Console には、OS コマンドインジェクションおよびクロスサイトスクリプティングの脆弱性が存在します。</description>
+    <dc:creator>Information-technology Promotion Agency, Japan</dc:creator>
+    <sec:identifier>JVNDB-2026-000101</sec:identifier>
+    <sec:references source="JVN" id="JVN#12345678">https://jvn.jp/jp/JVN12345678/</sec:references>
+    <sec:references source="CVE" id="CVE-2026-20001">https://www.cve.org/CVERecord?id=CVE-2026-20001</sec:references>
+    <sec:references source="CVE" id="CVE-2026-20002">https://www.cve.org/CVERecord?id=CVE-2026-20002</sec:references>
+    <sec:cpe version="2.2" vendor="Example Corp." product="Example Web Console">cpe:/a:example:web_console</sec:cpe>
+    <sec:cvss score="9.8" severity="Critical" vector="CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" version="3.0" type="Base"/>
+    <sec:cvss score="10.0" severity="High" vector="AV:N/AC:L/Au:N/C:C/I:C/A:C" version="2.0" type="Base"/>
+    <dc:date>2026-10-21T14:15+09:00</dc:date>
+    <dcterms:issued>2026-10-20T14:15+09:00</dcterms:issued>
+    <dcterms:modified>2026-10-21T14:15+09:00</dcterms:modified>
+  </item>
+  <item rdf:about="https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-012345.html">
+    <title>Example ルーターにおける認証回避の脆弱性</title>
+    <link>https://jvndb.jvn.jp/ja/contents/2026/JVNDB-2026-012345.html</link>
+    <description>Example ルーターには、認証回避の脆弱性が存在します（CVE 未採番）。</description>
+    <sec:identifier>JVNDB-2026-012345</sec:identifier>
+    <sec:references source="JVN" id="JVNVU#99999999">https://jvn.jp/vu/JVNVU99999999/</sec:references>
+    <sec:cpe version="2.2" vendor="Example Corp." product="Example Router RT-100">cpe:/h:example:rt-100:1.0.2</sec:cpe>
+    <sec:cvss score="7.5" severity="High" vector="CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" version="3.0" type="Base"/>
+    <dc:date>2026-10-21T09:00+09:00</dc:date>
+    <dcterms:issued>2026-10-21T09:00+09:00</dcterms:issued>
+    <dcterms:modified>2026-10-21T09:00+09:00</dcterms:modified>
+  </item>
+  <status:Status version="3.3" method="getVulnOverviewList" lang="ja" retCd="0" retMax="50" errCd="" errMsg="" totalRes="3" totalResRet="2" firstRes="1" feed="hnd"/>
+</rdf:RDF>

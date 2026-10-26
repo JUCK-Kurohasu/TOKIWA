@@ -1,0 +1,33 @@
+# pre-commit hooks. Install once:  uvx pre-commit install     (or: pipx run pre-commit install)
+# Run on everything:               uvx pre-commit run --all-files
+# Biome uses frontend/node_modules, so run `npm ci` in frontend/ first.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1 # keep in sync with ruff in backend/uv.lock
+    hooks:
+      # Config: backend/pyproject.toml (scripts/ and deploy/ extend it via their ruff.toml).
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: biome
+        name: biome check (frontend)
+        entry: scripts/biome-precommit.sh
+        language: script
+        files: ^frontend/src/
+        types_or: [ts, tsx, javascript, jsx, json, css]

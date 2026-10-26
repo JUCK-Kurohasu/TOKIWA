@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.6.0",
+  "id": "GHSA-jfh8-c2jp-5v3q",
+  "modified": "2026-10-21T19:22:15Z",
+  "published": "2021-12-10T00:40:56Z",
+  "aliases": ["CVE-2021-44228"],
+  "summary": "Remote code injection in Log4j",
+  "details": "Logging untrusted data with log4j versions 2.0-beta9 through 2.14.1 can trigger a remote code execution via JNDI lookups.",
+  "severity": [
+    {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"}
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Maven",
+        "name": "org.apache.logging.log4j:log4j-core",
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core"
+      },
+      "ranges": [
+        {"type": "ECOSYSTEM", "events": [{"introduced": "2.13.0"}, {"fixed": "2.15.0"}]},
+        {"type": "ECOSYSTEM", "events": [{"introduced": "2.0-beta9"}, {"fixed": "2.3.1"}]}
+      ],
+      "versions": ["2.13.0", "2.13.1", "2.13.2", "2.13.3", "2.14.0", "2.14.1"],
+      "database_specific": {
+        "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2021/12/GHSA-jfh8-c2jp-5v3q/GHSA-jfh8-c2jp-5v3q.json"
+      }
+    }
+  ],
+  "references": [
+    {"type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"},
+    {"type": "WEB", "url": "https://logging.apache.org/log4j/2.x/security.html"}
+  ],
+  "database_specific": {
+    "cwe_ids": ["CWE-20", "CWE-400", "CWE-502", "CWE-917"],
+    "severity": "CRITICAL",
+    "github_reviewed": true,
+    "github_reviewed_at": "2021-12-10T00:40:41Z",
+    "nvd_published_at": "2021-12-10T10:15:09Z"
+  }
+}

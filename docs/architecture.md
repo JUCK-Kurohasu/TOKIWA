@@ -141,7 +141,7 @@ TOKIWA/
 
 `bus.py` の docstring が正本。主要トピック: `event.ingested`, `alert.created`, `alert.updated`,
 `incident.created`, `incident.updated`, `action.proposed`, `action.updated`, `deception.tripped`,
-`intel.vuln_matched`, `intel.advisory`, `llm.call`。SSE (`/api/v1/stream`) は UI 向けのトピック
+`intel.vuln_updated`（`VulnRecord`、`data.update_reasons` = kev_added / epss_spike）, `intel.vuln_matched`, `intel.advisory`, `llm.call`。SSE (`/api/v1/stream`) は UI 向けのトピック
 （`alert.*`, `incident.*`, `action.*`, `deception.tripped`, `intel.advisory`, `llm.call`）を中継し、
 `event.ingested` は件数のみ（`{"count": n}`）に間引く（生テレメトリはストリームに流さない）。
 
