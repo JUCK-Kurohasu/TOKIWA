@@ -276,7 +276,7 @@ _ATTACK_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
             "sqli",
             r"""['"]\s{0,3}(?:or|and)\s{1,3}[\w'"]{1,20}\s{0,3}(?:=|like\b|>|<)|\bunion\b.{0,40}?\bselect\b"""
             r"""|\b(?:sleep|benchmark|pg_sleep)\s{0,3}\(|\bwaitfor\s{1,3}delay\b|information_schema"""
-            r"""|['"]\s{0,3}(?:;|--|#)|\border\s{1,3}by\s{1,3}\d{1,3}\s{0,3}(?:--|#)|['"]\)+\s{0,3}(?:or|and)\b""",
+            r"""|['"]\s{0,3}(?:;|--|#|/\*)|\border\s{1,3}by\s{1,3}\d{1,3}\s{0,3}(?:--|#)|['"]\)+\s{0,3}(?:or|and)\b""",
         ),
         (
             "xss",
