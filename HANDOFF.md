@@ -88,3 +88,4 @@
   再開コストが発生する → 第 2 波は 4〜6 体程度に絞り、新しいセッションから始めるのが効率的。
 - worktree が骨格以前のコミット（0efcd24）から作られることがある → `git merge --ff-only <skeleton>` で追いつかせる。
 - エージェントのブランチ統合: `git merge --no-edit worktree-agent-<id>`。衝突は docs（api-contract/architecture）のみだった。
+- CI は `FORCE_COLOR=1` で動く → Typer/Rich の CLI 出力を文字列比較するテストは ANSI を除去してから判定する（`re.sub(r"\x1b\[[0-9;]*m", "", out)`）。ローカル再現は `FORCE_COLOR=1 uv run pytest`。
