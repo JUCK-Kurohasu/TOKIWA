@@ -151,7 +151,7 @@ async def test_fingerprint_collapses_payload_variants(
     for p in ("/static/../../etc/passwd", "/static/../../../etc/shadow", "/static/..%2f..%2fetc/passwd"):
         [d] = await det.process(make_http_event(p), DetectionContext(settings))
         fps.add(d.fingerprint)
-    assert fps == {"web.path_traversal|203.0.113.10|/static/{x}/etc"} or len(fps) <= 2
+    assert fps == {"web.path_traversal|203.0.113.10|/static/{x}/etc"}
 
 
 async def test_fragment_is_truncated_and_printable(
