@@ -41,3 +41,19 @@
 | frontend-intel.md | インテル・ルール・LLM・コパイロット・資産 | frontend/src/pages/{intel,rules,llm,copilot,assets} |
 | lab-eval.md | ラボ環境・トラフィックシミュレータ・評価 | lab/, eval/, backend/src/tokiwa/eval/ |
 | devops.md | Docker・CI・開発補助 | deploy/, .github/workflows/, scripts/ |
+
+上の 18 本は第 1 波（完了・main にマージ済み）。
+
+## 第 2 波（検証と運用仕上げ）
+
+進め方・担当範囲・起動テンプレートは **wave2-README.md** が正本（既存ファイルの修正が中心なので、担当範囲がより厳密）。
+
+| ファイル | フェーズ | 内容 |
+|---|---|---|
+| wave2-scoring-tuning.md | 1 | 評価データ拡充（回避型 AI エージェント等）、学習/検証/テスト分割での重み調整、アクター横断の指紋統合 |
+| wave2-frontend-consolidation.md | 1 | SSE フック・重複コンポーネント・型の統合、遅延読み込み、Playwright E2E |
+| wave2-config-ops.md | 1 | Gate/センサー設定の整理、空 env の扱い、Alembic、保持期間パージ、mypy の CI 必須化 |
+| wave2-feature-gaps.md | 1 | Gate 捕捉強化、パスワードスプレー検知、二者承認、デセプションのシード、KEV ブースト拡張 |
+| wave2-lab-validation.md | 2 | Docker ラボを実際に起動して一気通貫の E2E |
+| wave2-security-review.md | 2 | LLM 安全・認証・SSRF・デセプション・Gate の敵対的レビューと修正 |
+| wave2-live-llm-eval.md | 要承認 | 実 LLM での評価（ユーザーの予算承認が必要） |
