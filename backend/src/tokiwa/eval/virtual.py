@@ -209,8 +209,8 @@ class VirtualLab:
                 return _json(500, _SQL_ERROR)
             if sort not in SORT_FIELDS:
                 return _json(400, {"error": "invalid sort field", "allowed": list(SORT_FIELDS)})
-            items = [{"id": i + 1, "name": n} for i, n in enumerate(PRODUCT_NAMES)][:10]
-            return _json(200, {"items": items, "page": int(page), "total": len(PRODUCT_NAMES)})
+            rows = [{"id": i + 1, "name": n} for i, n in enumerate(PRODUCT_NAMES)][:10]
+            return _json(200, {"items": rows, "page": int(page), "total": len(PRODUCT_NAMES)})
         if path.startswith("/api/products/") and path.count("/") == 3:
             pid = path.rsplit("/", 1)[1]
             if pid.isdigit():

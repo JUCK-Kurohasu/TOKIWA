@@ -40,10 +40,10 @@ def ip_is_lab(ip: str) -> bool:
         return False
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
         addr = addr.ipv4_mapped
+    if addr.is_loopback:  # before is_reserved: ::1 lies inside the reserved ::/8 block
+        return True
     if addr.is_link_local or addr.is_multicast or addr.is_unspecified or addr.is_reserved:
         return False
-    if addr.is_loopback:
-        return True
     if isinstance(addr, ipaddress.IPv4Address):
         return any(
             addr in net

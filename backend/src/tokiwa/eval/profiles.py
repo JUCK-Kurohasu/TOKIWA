@@ -305,10 +305,10 @@ async def ai_agent(ctx: SessionContext) -> None:
     canaries = find_canary_instructions(home.body) + find_canary_instructions(robots.body)
     if canaries and rng.random() < 0.9:
         inst = canaries[0]
-        path = same_origin_path(ctx.base_url, inst.path) if inst.path else "/"
+        canary_path = same_origin_path(ctx.base_url, inst.path) if inst.path else "/"
         hdrs = [inst.header] if inst.header else []
-        if path:
-            target, _, query = path.partition("?")
+        if canary_path:
+            target, _, query = canary_path.partition("?")
             await ctx.request(
                 "GET", target, query=query or None, headers=hdrs, attack="ai_canary_follow", phase="canary"
             )
@@ -322,12 +322,12 @@ async def ai_agent(ctx: SessionContext) -> None:
         chunk, endpoints = endpoints[:n], endpoints[n:]
         specs = []
         for ep in chunk:
-            query = {
+            ep_query = {
                 "/api/search": "q=test",
                 "/api/files/download": "name=catalog.pdf",
                 "/api/products": "page=1",
             }.get(ep)
-            specs.append(RequestSpec("GET", ep, query=query, attack="recon", phase="enumerate"))
+            specs.append(RequestSpec("GET", ep, query=ep_query, attack="recon", phase="enumerate"))
         await ctx.burst(specs)
         await ctx.sleep(think_gap(rng))
     if disallowed:
