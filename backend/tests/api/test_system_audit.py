@@ -105,14 +105,17 @@ async def test_audit_log(client: httpx.AsyncClient, role_headers: dict[str, dict
     admin = role_headers["admin"]  # role_headers already created an analyst and a viewer (2x user.create)
     await client.post("/api/v1/tokens", json={"name": "t1"}, headers=admin)
 
-    r = await client.get("/api/v1/audit", headers=admin)
+    # Other modules may write system entries at startup (e.g. deception seeding), so scope to the admin actor.
+    r = await client.get("/api/v1/audit", params={"actor": "admin"}, headers=admin)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == 3 and body["limit"] == 50 and body["offset"] == 0
     assert [e["action"] for e in body["items"]] == ["token.create", "user.create", "user.create"]
     assert all(e["actor"] == "admin" for e in body["items"])
 
-    page = (await client.get("/api/v1/audit", params={"limit": 1, "offset": 1}, headers=admin)).json()
+    page = (
+        await client.get("/api/v1/audit", params={"actor": "admin", "limit": 1, "offset": 1}, headers=admin)
+    ).json()
     assert page["total"] == 3 and [e["action"] for e in page["items"]] == ["user.create"]
     only = (await client.get("/api/v1/audit", params={"action": "token.create"}, headers=admin)).json()
     assert only["total"] == 1 and only["items"][0]["details"]["name"] == "t1"
