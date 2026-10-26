@@ -6,6 +6,8 @@
 最終更新: 2026-10-26（セッション 1 / 統合担当・第 1 波クローズ）
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
+**利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
+GitHub Wiki に同期する（初回のみ Wiki の有効化と最初のページ作成が必要。§5）。
 
 ## 0. 次のセッションはここから — 第 2 波の始め方
 
@@ -142,8 +144,15 @@ G（実 LLM 評価）は私が予算を伝えるまで実行しないこと。
 - AI カナリアの文言の強さ・言語、robots.txt / llms.txt カナリアの有効化（既定 OFF。アプリ本来のファイルを置き換える）、
   デセプションの法務確認（docs/deception.md に TODO(verify)）。
 - 対処の二者承認（提案者≠承認者）を必須にするか。
+- **Wiki の初回準備**（ユーザー作業）: Settings → Features → Wikis を有効化し、Wiki タブで最初のページを 1 つ作る
+  （GitHub はそれまで `<repo>.wiki.git` を作らない）。その後 Actions → Wiki → Run workflow で同期。
 
 ## 6. 既知の制約・注意
+
+- **Wiki**: クラウドセッションの git プロキシはセッション対象のリポジトリしか認可しないため、セッションから
+  `<repo>.wiki.git` に直接 push できない → 同期は GitHub Actions（`GITHUB_TOKEN`, `contents: write`）で行う。
+  使い方・設定・CLI を変えたら `docs/wiki/` の日本語ページを直し、同じ PR で `-en` / `-zh` / `-es` にも反映、
+  `python3 scripts/check_wiki.py` で確認（CI の infra lint でも実行）。詳細は `docs/wiki/README.md`。
 
 - このクラウド環境からは NVD/KEV/EPSS/JVN/OSV/GHSA に出られない → インテルは公式仕様ベースの fixture で検証。
   **JVN は 2026-04 以降 MyJVN の刷新告知あり**（旧フィード前提の実装が使えない可能性。TODO(verify)）。
