@@ -1,9 +1,9 @@
 /** Users: list, create, delete (GET/POST /users, DELETE /users/{id}; admin). */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Trash2, UserPlus, Users } from "lucide-react";
+import { Eye, EyeOff, KeySquare, Trash2, UserPlus, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api } from "@/api/client";
-import { ROLES, type Role, type User, type UserCreate } from "@/api/types-core";
+import { ROLES, type Role, type User, type UserCreate, type UserUpdate } from "@/api/types-core";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
 import {
@@ -45,6 +45,12 @@ const strings = {
     selfDelete: "自分自身は削除できません",
     deleted: "ユーザーを削除しました",
     createdMsg: "ユーザーを作成しました",
+    roleChanged: "ロールを変更しました",
+    selfRole: "自分自身のロールはここでは変更できません",
+    resetPw: "パスワード再設定",
+    newPassword: "新しいパスワード",
+    pwChanged: "パスワードを変更しました",
+    save: "保存",
     empty: "ユーザーがいません",
     dialog: "ユーザーを追加",
     password: "パスワード",
@@ -74,6 +80,12 @@ const strings = {
     selfDelete: "You cannot delete yourself",
     deleted: "User deleted",
     createdMsg: "User created",
+    roleChanged: "Role updated",
+    selfRole: "You cannot change your own role here",
+    resetPw: "Reset password",
+    newPassword: "New password",
+    pwChanged: "Password changed",
+    save: "Save",
     empty: "No users",
     dialog: "Add user",
     password: "Password",
@@ -211,12 +223,24 @@ export function UsersTab({ flash }: { flash: Flash }) {
   const [open, setOpen] = useState(false);
   const q = useApiQuery<User[]>(["users"], "/users");
 
+  const [pwUser, setPwUser] = useState<User | null>(null);
+
   const del = useMutation({
     mutationFn: (id: string) => api.delete<unknown>(`/users/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["users"] });
       flash(L.deleted);
     },
+    onError: (e) => flash(errorMessage(e), "danger"),
+  });
+  const setRole = useMutation({
+    mutationFn: (v: { id: string; role: Role }) =>
+      api.patch<User>(`/users/${v.id}`, { role: v.role } satisfies UserUpdate),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["users"] });
+      flash(L.roleChanged);
+    },
+    // 409 = would demote the last admin
     onError: (e) => flash(errorMessage(e), "danger"),
   });
 
@@ -248,7 +272,7 @@ export function UsersTab({ flash }: { flash: Flash }) {
               <TH>{L.role}</TH>
               <TH className="hidden md:table-cell">{L.created}</TH>
               <TH>{L.lastLogin}</TH>
-              <TH className="w-[160px]" />
+              <TH className="w-[260px]" />
             </tr>
           </THead>
           <TBody>
@@ -263,7 +287,25 @@ export function UsersTab({ flash }: { flash: Flash }) {
                   )}
                 </TD>
                 <TD>
-                  <RoleBadge role={u.role} />
+                  {u.id === me ? (
+                    <span title={L.selfRole}>
+                      <RoleBadge role={u.role} />
+                    </span>
+                  ) : (
+                    <Select
+                      value={u.role}
+                      onChange={(e) => setRole.mutate({ id: u.id, role: e.target.value as Role })}
+                      disabled={setRole.isPending && setRole.variables?.id === u.id}
+                      className="h-7 font-mono text-xs"
+                      aria-label={`${L.role}: ${u.username}`}
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
                   {formatDateTime(u.created_at)}
@@ -271,7 +313,11 @@ export function UsersTab({ flash }: { flash: Flash }) {
                 <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(u.last_login)}>
                   {u.last_login ? timeAgo(u.last_login) : L.never}
                 </TD>
-                <TD className="text-right">
+                <TD className="whitespace-nowrap text-right">
+                  <Button size="sm" variant="ghost" onClick={() => setPwUser(u)}>
+                    <KeySquare className="h-3.5 w-3.5" />
+                    {L.resetPw}
+                  </Button>
                   <ConfirmButton
                     onConfirm={() => del.mutate(u.id)}
                     disabled={u.id === me}
@@ -295,6 +341,82 @@ export function UsersTab({ flash }: { flash: Flash }) {
           flash(L.createdMsg);
         }}
       />
+      <ResetPasswordDialog
+        user={pwUser}
+        onClose={() => setPwUser(null)}
+        onDone={() => {
+          setPwUser(null);
+          flash(L.pwChanged);
+        }}
+      />
     </Card>
+  );
+}
+
+function ResetPasswordDialog({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: User | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const L = useLocal(strings);
+  const [pw, setPw] = useState("");
+  const [touched, setTouched] = useState(false);
+  const ok = pw.length >= 10;
+  const m = useMutation({
+    mutationFn: (v: { id: string; password: string }) =>
+      api.patch<User>(`/users/${v.id}`, { password: v.password } satisfies UserUpdate),
+    onSuccess: () => {
+      setPw("");
+      setTouched(false);
+      onDone();
+    },
+  });
+  function close() {
+    setPw("");
+    setTouched(false);
+    m.reset();
+    onClose();
+  }
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    if (user && ok) m.mutate({ id: user.id, password: pw });
+  }
+  return (
+    <Dialog
+      open={!!user}
+      onClose={close}
+      title={`${L.resetPw}: ${user?.username ?? ""}`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={close}>
+            {L.cancel}
+          </Button>
+          <Button type="submit" form="pw-form" disabled={m.isPending}>
+            {L.save}
+          </Button>
+        </>
+      }
+    >
+      <form id="pw-form" onSubmit={submit} className="space-y-2" autoComplete="off">
+        <Label htmlFor="pw-new">{L.newPassword}</Label>
+        <Input
+          id="pw-new"
+          type="password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          autoComplete="new-password"
+          aria-invalid={touched && !ok}
+        />
+        <p className={touched && !ok ? "text-xs text-sev-critical" : "text-[11px] text-muted"}>
+          {touched && !ok ? L.passwordErr : L.passwordHint}
+        </p>
+        <MutationError error={m.error} />
+      </form>
+    </Dialog>
   );
 }
