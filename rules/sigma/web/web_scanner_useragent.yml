@@ -1,0 +1,43 @@
+title: Vulnerability Scanner User-Agent
+id: 004869cf-0236-45b7-875f-9f40dab81dca
+status: experimental
+description: |
+  Detects default User-Agent strings of common web vulnerability scanners and fuzzers. LLM agents frequently
+  drive these tools directly (sqlmap, nuclei, ffuf ...), so a hit is also a useful AI-attribution feature.
+references:
+  - https://attack.mitre.org/techniques/T1595/002/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1595.002
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    c-useragent|contains:
+      - 'sqlmap'
+      - 'nikto'
+      - 'nuclei'
+      - 'Fuzz Faster U Fool'
+      - 'gobuster'
+      - 'dirbuster'
+      - 'feroxbuster'
+      - 'wfuzz'
+      - 'wpscan'
+      - 'masscan'
+      - 'zgrab'
+      - 'Nmap Scripting Engine'
+      - 'acunetix'
+      - 'netsparker'
+      - 'Nessus'
+      - 'OpenVAS'
+      - 'commix'
+      - 'arachni'
+      - 'WhatWeb'
+      - '(Hydra)'
+  condition: selection
+falsepositives:
+  - Authorized vulnerability scans and penetration tests (allow-list the scanner source)
+level: medium

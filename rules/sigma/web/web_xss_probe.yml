@@ -1,0 +1,37 @@
+title: Cross-Site Scripting Probe
+id: 0eb136e3-5f0d-4279-8a01-97911b7d7ba9
+status: experimental
+description: |
+  Detects reflected/stored XSS probes in the query string (script/iframe/svg tags, event handlers,
+  javascript: URLs, document.cookie access) and script injection in request bodies.
+references:
+  - https://owasp.org/www-community/attacks/xss/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.execution
+  - attack.t1059.007
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_query:
+    cs-uri-query|contains:
+      - '<script'
+      - 'javascript:'
+      - 'onerror='
+      - 'onload='
+      - '<svg'
+      - '<iframe'
+      - 'document.cookie'
+      - 'String.fromCharCode('
+  selection_body:
+    request_body|contains:
+      - '<script'
+      - 'javascript:alert'
+      - 'onerror=alert'
+      - 'document.cookie'
+  condition: 1 of selection_*
+falsepositives:
+  - Rich-text editors / CMS that submit HTML with script or iframe embeds
+level: medium

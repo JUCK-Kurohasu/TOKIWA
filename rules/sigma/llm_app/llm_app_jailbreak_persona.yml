@@ -1,0 +1,34 @@
+# TODO(verify): MITRE ATLAS id (AML.T0054 LLM Jailbreak) - re-check against the current ATLAS matrix.
+title: Prompt Injection - Jailbreak Persona Template
+id: 6e5a5269-9245-4de2-99fd-2eca0bfa6240
+status: experimental
+description: |
+  Detects well-known jailbreak templates that ask the model to adopt an unrestricted persona ("Do Anything Now",
+  "DAN mode", "developer mode enabled", "you are no longer bound by ..."). Automated jailbreak tooling reuses
+  these templates heavily.
+references:
+  - https://owasp.org/www-project-top-10-for-large-language-model-applications/
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - atlas.aml.t0054
+logsource:
+  category: llm_app
+  product: tokiwa
+detection:
+  selection:
+    prompt|contains:
+      - 'do anything now'
+      - 'DAN mode'
+      - 'developer mode enabled'
+      - 'jailbreak mode'
+      - 'jailbroken mode'
+      - 'you are no longer bound by'
+      - 'without any restrictions or filters'
+      - 'act as an unrestricted'
+      - 'ignore your content policy'
+      - '制限を解除したモード'
+  condition: selection
+falsepositives:
+  - Security researchers or trainers discussing jailbreak techniques with the assistant
+level: medium

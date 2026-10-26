@@ -1,0 +1,26 @@
+title: SQL Injection - UNION SELECT in Request
+id: 63ff1f08-4ee1-462c-a4e1-dff453231a96
+status: experimental
+description: |
+  Detects UNION-based SQL injection probes (UNION [ALL] SELECT, including comment/space obfuscation such as
+  UNION/**/SELECT) in the query string or request body. Automated tools and LLM agents alike start SQLi
+  exploitation with UNION probes to enumerate columns.
+references:
+  - https://owasp.org/www-community/attacks/SQL_Injection
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_query:
+    cs-uri-query|re|i: 'union(\s|/\*[^*]*\*/|\+)+(all(\s|/\*[^*]*\*/|\+)+)?select\b'
+  selection_body:
+    request_body|re|i: 'union(\s|/\*[^*]*\*/|\+)+(all(\s|/\*[^*]*\*/|\+)+)?select\b'
+  condition: 1 of selection_*
+falsepositives:
+  - Search boxes or CMS posts where users legitimately type "union select" (e.g. SQL tutorials)
+level: high

@@ -1,0 +1,38 @@
+title: LLM Output Artifacts in Request Parameters
+id: d2d481f5-8c00-48b7-b5ee-7fdc9656fe94
+status: experimental
+description: |
+  Detects language-model chatter pasted verbatim into request parameters or bodies by an autonomous agent:
+  markdown code fences, refusal boilerplate ("As an AI language model", "I'm sorry, but I can"),
+  "Certainly! Here" preambles, or <thinking> tags. Requests to the protected LLM chat endpoints themselves are
+  excluded because such text is normal there.
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - tokiwa.category.ai_agent
+  - tokiwa.ai_score.70
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection_query:
+    cs-uri-query|contains: &artifacts
+      - '```'
+      - 'As an AI language model'
+      - "I'm sorry, but I can"
+      - 'Certainly! Here'
+      - '<thinking>'
+      - '</thinking>'
+  selection_body:
+    request_body|contains: *artifacts
+  filter_llm_app:
+    cs-uri-stem|startswith:
+      - '/api/chat'
+      - '/v1/chat/completions'
+      - '/chat'
+  condition: 1 of selection_* and not filter_llm_app
+falsepositives:
+  - Forums, ticketing or documentation sites where users paste LLM output or markdown code blocks
+level: medium

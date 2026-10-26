@@ -1,0 +1,40 @@
+# TODO(verify): Claude-User / Claude-SearchBot / Perplexity-User / Meta-ExternalAgent tokens are taken from
+# vendor crawler documentation as of 2025; re-check periodically, vendors rename them.
+title: LLM Crawler / AI Assistant User-Agent
+id: 76985714-f473-4431-9af4-18c11c2f33b4
+status: experimental
+description: |
+  Detects self-identifying AI crawlers and AI-assistant fetchers (OpenAI, Anthropic, Perplexity, Common Crawl,
+  ByteDance, Cohere, Meta). Informational: these are usually benign, but they show which content is being fed
+  to LLMs and give the AI-attribution model a labelled signal. Malicious agents typically spoof browser UAs
+  instead - see the behavioural ai.* detectors.
+author: TOKIWA
+date: 2026-10-22
+tags:
+  - attack.reconnaissance
+  - attack.t1594
+  - tokiwa.category.ai_agent
+  - tokiwa.ai_score.50
+logsource:
+  category: webserver
+  product: tokiwa
+detection:
+  selection:
+    c-useragent|contains:
+      - 'GPTBot'
+      - 'ChatGPT-User'
+      - 'OAI-SearchBot'
+      - 'ClaudeBot'
+      - 'Claude-User'
+      - 'Claude-SearchBot'
+      - 'anthropic-ai'
+      - 'PerplexityBot'
+      - 'Perplexity-User'
+      - 'CCBot'
+      - 'Bytespider'
+      - 'cohere-ai'
+      - 'Meta-ExternalAgent'
+  condition: selection
+falsepositives:
+  - Legitimate AI crawlers that respect robots.txt (expected on public sites)
+level: informational
