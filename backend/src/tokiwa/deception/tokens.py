@@ -9,7 +9,8 @@ what survives redaction, so every value generated here is built to never match a
   e-mail, IPv4, card (needs a word boundary before 13+ digits) and ``key=value`` patterns cannot fire;
 * fixed prefixes that differ from the vendor prefixes redact knows (``sk-``, ``ghp_``, ``xox?-``, ``AIza`` ...);
 * the fake AWS key id is ``AKIA`` + 20 chars = 24 chars. Real key ids are exactly 20 chars, so it can never be a
-  valid key id, and redact's ``\\bAKIA[0-9A-Z]{16}\\b`` cannot match (no word boundary after 16 chars).
+  valid key id, and redact's ``\\bAKIA[0-9A-Z]{16}\\b`` cannot match (no word boundary after 16 chars). The fake
+  secret is 42 chars (real: exactly 40).
 
 Values look like credentials but are not verifiable against any real service. Each asset stores one random
 ``token``; companion values (AWS secret, DB password, canary ...) are derived from it with a keyed HMAC so the
