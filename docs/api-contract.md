@@ -69,8 +69,8 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | DELETE | /hosts/baselines/{id} | analyst | → 204（無ければ 404） |
 | POST | /hosts/baselines/learn | analyst | `{host}` 現在の open listener のうち未許可のものをベースライン化 → **作成した** `PortBaseline[]`（全 IF バインドは allow_public=true。未知ホストは 404） |
 | GET | /assets | user | `?q&kind` → `Page[Asset]` |
-| POST | /assets | analyst | `AssetIn` → `Asset` |
-| GET/PATCH/DELETE | /assets/{id} | user/analyst | |
+| POST | /assets | analyst | `AssetIn` → `Asset`（201。作成後にバックグラウンドで脆弱性照合） |
+| GET/PATCH/DELETE | /assets/{id} | user/analyst | PATCH は部分更新（software 変更で再照合）、DELETE は 204（一致も削除） |
 
 ## 検知・ルール（`routes/detectors.py`, `routes/rules.py`）
 | GET | /detectors | user | → `DetectorInfo[]` |
@@ -84,15 +84,17 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 ## インテル（`routes/intel.py`）
 | GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&limit&offset` → `Page[VulnRecord]` |
 | GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}` |
-| GET | /intel/matches | user | `?status` → `Page[VulnMatch]`（asset 名付き: `asset_name`） |
+| GET | /intel/matches | user | `?status&asset_id&vuln_id&kev&min_confidence` → `Page[VulnMatch]`（追加: `asset_name, asset_criticality, vuln_title, kev, epss, cvss_score`。KEV→EPSS→confidence 順） |
 | PATCH | /intel/matches/{id} | analyst | `{status}` |
-| GET | /intel/advisories | user | `?priority&status` → `Page[Advisory]` |
+| POST | /intel/matches/rescan | analyst | 全資産×全脆弱性を再照合 → `{evaluated_vulns, matches, new, updated, closed}` |
+| GET | /intel/advisories | user | `?priority&status&vuln_id&since` → `Page[Advisory]`（新しい順） |
 | GET | /intel/advisories/{id} | user | → `Advisory` |
-| POST | /intel/advisories/generate | analyst | `{vuln_id}` → `Advisory` |
+| POST | /intel/advisories/generate | analyst | `{vuln_id, force?}` → `Advisory`（7 日以内の同等アドバイザリがあればそれを返す。force で再生成） |
 | PATCH | /intel/advisories/{id} | analyst | `{status}` |
 | GET | /intel/news | user | `?source&q` → `Page[IntelItem]` |
 | GET | /intel/research | user | → `Page[ResearchReport]` |
-| POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport` |
+| GET | /intel/research/{id} | user | → `ResearchReport` |
+| POST | /intel/research/run | analyst | `{topic?}` → `ResearchReport`（topic 省略時は設定の全トピックを 1 回で。LLM 失敗は 503） |
 | GET | /intel/sources | user | → `[{id, name, enabled, last_sync, last_error, records}]` |
 | POST | /intel/sync | analyst | `{source?}` → `{started: true}` |
 
