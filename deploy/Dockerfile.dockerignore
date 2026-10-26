@@ -1,0 +1,44 @@
+# Build-context filter for deploy/Dockerfile (BuildKit picks up <Dockerfile>.dockerignore automatically).
+# The context is the repository root; keep it small and free of local state / secrets.
+
+.git
+.github
+.claude
+**/.DS_Store
+**/*.swp
+.idea
+.vscode
+
+# Secrets and runtime state
+.env
+.env.*
+!.env.example
+**/secret.key
+**/tokiwa.yaml
+data
+backend/data
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Python build / tool artefacts
+**/__pycache__
+**/*.py[cod]
+backend/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info
+backend/dist
+backend/build
+
+# Frontend artefacts (rebuilt inside the image)
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Not needed in the image
+eval/runs
+eval/reports
+lab
+docs
