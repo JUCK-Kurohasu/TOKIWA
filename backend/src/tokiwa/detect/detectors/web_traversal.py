@@ -55,7 +55,7 @@ class PathTraversalDetector(WebSignatureDetector):
     signatures = (
         sig(
             "traversal.dotdot_multi",
-            r"\.\.[/\\]{1,2}\.\.(?:[/\\]|$)",
+            r"\.{2,4}[/\\]{1,2}\.{2,4}(?:[/\\]|$)",
             _H,
             confidence=0.85,
             view="lower",

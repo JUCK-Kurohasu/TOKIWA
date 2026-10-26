@@ -311,7 +311,7 @@ def _json_leaves(obj: Any, prefix: str, out: list[tuple[str, str]], depth: int) 
         out.append((prefix[:100], obj))
 
 
-_BOUNDARY = rx(r'boundary="?([^";,\s]{1,200})', "multipart.boundary")
+_BOUNDARY = rx(r'(?:B|b)oundary="?([^";,\s]{1,200})', "multipart.boundary")
 _PART_NAME = rx(r'\bname="([^"\r\n]{0,200})"', "multipart.name")
 _PART_FILENAME = rx(r'\bfilename="([^"\r\n]{0,500})"', "multipart.filename")
 _FORMISH = rx(r"^[\w.\[\]%-]{1,100}=[^\r\n<>{}]{0,8192}$", "body.formish")
@@ -349,7 +349,7 @@ def _parse_body(body: str, content_type: str, max_chars: int) -> list[Target] | 
     """Split a body into parameter targets, or ``None`` when it is unstructured (inspect it whole)."""
     ct = content_type.lower()
     if "multipart/" in ct or (not ct and body.startswith("--")):
-        return _parse_multipart(body, ct, max_chars)
+        return _parse_multipart(body, content_type, max_chars)
     head = body.lstrip()[:1]
     if "json" in ct or (head in ("{", "[") and "xml" not in ct):
         try:
@@ -464,11 +464,12 @@ def build_view(event: Event, max_chars: int = 8192) -> HttpView | None:
     if query_raw:
         targets.extend(_split_params(query_raw[:max_chars], QUERY, max_chars, plus=True))
 
-    content_type = (http.content_type or headers.get("content-type") or "").lower()
+    raw_content_type = http.content_type or headers.get("content-type") or ""
+    content_type = raw_content_type.lower()
     body = http.request_body
     if body:
         body = body[:max_chars]
-        parts = _parse_body(body, content_type, max_chars)
+        parts = _parse_body(body, raw_content_type, max_chars)  # multipart boundary is case-sensitive
         if parts is None:
             targets.append(make_target(BODY, body, max_chars=max_chars))
         else:

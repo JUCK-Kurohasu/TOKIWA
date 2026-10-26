@@ -426,6 +426,6 @@ class RareMethodDetector(Detector):
                 entities=view.entities(),
                 tags=["web", "rare_method", shown.lower()],
                 fingerprint=f"{self.id}|{event.source_ip or '-'}|{shown}",
-                details={"method": shown, "via": via, "status": view.status},
+                details={"matched": shown, "method": shown, "via": via, "status": view.status},
             )
         ]
