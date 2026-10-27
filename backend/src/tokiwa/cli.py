@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+from pathlib import Path
 
 import typer
 
@@ -74,11 +75,15 @@ def serve(
         import os
 
         os.environ["TOKIWA_NO_JOBS"] = "1"
+    # Watch only the package source: the default (the working directory, usually backend/) also covers data/,
+    # where every SQLite write made watchfiles log "change detected" (uvicorn filters *.py only afterwards).
+    reload_dirs = [str(Path(__file__).resolve().parent)] if reload else None
     uvicorn.run(
         "tokiwa.api.asgi:app",
         host=host or s.server.host,
         port=port or s.server.port,
         reload=reload,
+        reload_dirs=reload_dirs,
         log_level=s.log_level.lower(),
     )
 

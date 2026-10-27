@@ -248,6 +248,9 @@ def unique_software(items: Iterable[SoftwareItem], limit: int | None = None) -> 
 # ---------------------------------------------------------------------------- HTTP
 
 
+_DECODED_BODY_DROP_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
+
+
 def _retry_after_seconds(resp: httpx.Response) -> float | None:
     value = resp.headers.get("retry-after")
     if not value:
@@ -297,13 +300,21 @@ async def fetch(
                 else:
                     chunks: list[bytes] = []
                     size = 0
+                    # aiter_bytes() yields the *decoded* body, so the cap bounds decompressed size (zip bombs too).
                     async for chunk in resp.aiter_bytes():
                         size += len(chunk)
                         if size > max_bytes:
                             raise FetchError(f"response from {_safe_url(resp.url)} exceeds {max_bytes} bytes")
                         chunks.append(chunk)
+                    # The rebuilt response holds the decoded body: drop the encoding/framing headers, otherwise httpx
+                    # decompresses a second time ("incorrect header check" on every gzip-serving feed).
+                    headers = [
+                        (k, v)
+                        for k, v in resp.headers.multi_items()
+                        if k.lower() not in _DECODED_BODY_DROP_HEADERS
+                    ]
                     out = httpx.Response(
-                        resp.status_code, headers=resp.headers, content=b"".join(chunks), request=resp.request
+                        resp.status_code, headers=headers, content=b"".join(chunks), request=resp.request
                     )
                     if out.status_code not in ok_statuses:
                         raise FetchError(f"HTTP {out.status_code} from {_safe_url(out.request.url)}")

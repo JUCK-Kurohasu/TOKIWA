@@ -167,4 +167,9 @@ G（実 LLM 評価）は私が予算を伝えるまで実行しないこと。
   再開コストが発生する → 第 2 波は 4〜6 体程度に絞り、新しいセッションから始めるのが効率的。
 - worktree が骨格以前のコミット（0efcd24）から作られることがある → `git merge --ff-only <skeleton>` で追いつかせる。
 - エージェントのブランチ統合: `git merge --no-edit worktree-agent-<id>`。衝突は docs（api-contract/architecture）のみだった。
+- **実フィードでの初回実行（ユーザー環境, 2026-10-27）で gzip の二重解凍が露見**: `intel/sources/_common.fetch()` が解凍済み本文に
+  `Content-Encoding` を残したまま Response を作り直していた → KEV/GHSA/RSS が `DecodingError`。修正済み。fixture を返す
+  MockTransport は圧縮応答（`Content-Encoding: gzip`）も試すこと（サンドボックスからは実フィードに出られず検出できなかった）。
+- `tokiwa serve --reload` は `reload_dirs` を tokiwa パッケージに限定（既定の backend/ だと data/ の SQLite 書き込みごとに
+  watchfiles が "change detected" を出していた）。
 - CI は `FORCE_COLOR=1` で動く → Typer/Rich の CLI 出力を文字列比較するテストは ANSI を除去してから判定する（`re.sub(r"\x1b\[[0-9;]*m", "", out)`）。ローカル再現は `FORCE_COLOR=1 uv run pytest`。

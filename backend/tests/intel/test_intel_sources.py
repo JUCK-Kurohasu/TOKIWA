@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
 import json
+import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -72,6 +74,30 @@ async def test_fetch_retries_then_fails_and_caps_size(no_sleep: list[float]) -> 
             await _common.fetch(c, "GET", "https://example.test/big", max_bytes=10)
 
 
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+async def test_fetch_decodes_compressed_responses_once(encoding: str) -> None:
+    # Real feeds (CISA, GitHub, RSS hosts) answer compressed. fetch() rebuilds the response from the already
+    # decoded body, so it must drop Content-Encoding or httpx tries to decompress a second time.
+    body = json.dumps({"ok": True, "pad": "x" * 500}).encode()
+    packed = gzip.compress(body) if encoding == "gzip" else zlib.compress(body)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": encoding, "ETag": '"v1"', "Content-Type": "application/json"},
+            content=packed,
+        )
+
+    async with _client(handler) as c:
+        resp = await _common.fetch(c, "GET", "https://example.test/feed.json")
+        assert resp.json()["ok"] is True
+        assert "content-encoding" not in resp.headers
+        assert resp.headers["etag"] == '"v1"'  # conditional GETs still see the validators
+        # The size cap applies to the decoded body, which also bounds decompression bombs.
+        with pytest.raises(_common.FetchError, match="exceeds"):
+            await _common.fetch(c, "GET", "https://example.test/feed.json", max_bytes=len(packed))
+
+
 # --------------------------------------------------------------------------- KEV
 
 
@@ -105,6 +131,19 @@ async def test_kev_parse_and_conditional_get(settings: Settings, feeds: Any) -> 
         res = await src.fetch(c, datetime(2026, 10, 21, 12, 0, tzinfo=UTC))
     assert res.vulns == [] and not res.errors
     assert feeds.calls[-1].headers["If-Modified-Since"] == "Wed, 21 Oct 2026 12:00:00 GMT"
+
+
+async def test_kev_gzip_feed(settings: Settings, feeds: Any) -> None:
+    raw = (FIXTURES / "kev" / "known_exploited_vulnerabilities.json").read_bytes()
+    feeds.set(
+        "www.cisa.gov",
+        "/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        lambda r: httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=gzip.compress(raw)),
+    )
+    async with feeds.client() as c:
+        res = await KevSource(settings).fetch(c, None)
+    assert not res.errors
+    assert "CVE-2024-3400" in _by_id(res.vulns)
 
 
 # --------------------------------------------------------------------------- EPSS
