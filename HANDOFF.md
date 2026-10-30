@@ -3,7 +3,7 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-10-26（セッション 1 / 統合担当・第 1 波クローズ）
+最終更新: 2026-10-30（実 API 初回接続の不具合修正・UI 小修正。第 2 波は未着手のまま。詳細は次節）
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
@@ -22,6 +22,13 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
 - `TODO(verify)`: 上限 24 が「1 リクエスト」単位か、ネストをどう数えるかは API の文面からの推定（`STRICT_MAX_OPTIONAL_PARAMS`）。
 - 未確認: Opus（deep）経路の `betas=server-side-fallback` / `fallbacks="default"` が実 API で通るか、トリアージの `TriageResult` スキーマが
   実 API で通るか。接続テストの deep と、コパイロット・トリアージの実行ログ（LLM → 呼び出し履歴）で確認すること。
+
+### Anthropic のモデル選択プルダウン（2026-10-30）
+- 設定画面（LLM → 設定）で、実際に使うプロバイダが Anthropic のとき、軽量 / 高性能モデルをプルダウンで選べる。
+  `GET /api/v1/llm/models`（`llm/models.py`・`AnthropicProvider.list_models()`・`LLMGateway.list_models()`）が `GET /v1/models` から
+  有効かつ構造化出力対応のモデルを取得（5 分キャッシュ、失敗時は内蔵一覧 + 理由）。一覧にない ID は「その他（手入力）」で指定可能。
+- 未確認（`TODO(verify)`）: 実 API の `/v1/models` 応答で `lifecycle` / `capabilities.structured_outputs` のフィルタが想定どおり効くか
+  （フィールドが無い場合は除外せず残す実装）。内蔵一覧 `BUILTIN_ANTHROPIC_MODELS` は手で更新が必要。
 
 ### UI の小修正（2026-10-30）
 - コパイロットの「送信」が狭い幅で縦に 2 行に折り返す問題: `Textarea` が `w-full` で行内の幅を取り、ボタンが縮んでいた（ボタンは `h-9` 固定のため文字だけがはみ出す）。
@@ -150,7 +157,7 @@ G（実 LLM 評価）は私が予算を伝えるまで実行しないこと。
    `api/types-*.ts` を `types.ts` へ集約、ページの遅延読み込み（バンドル 1.27MB）、実バックエンドとの画面確認（Playwright）。
 4. **設定の整理**: Gate の CLI 専用 5 設定を `GateSettings` へ、sensors のサーバー側設定を `detection` へ移す、
    空文字の `TOKIWA_*` を未設定扱いにする、各モジュールの定数（NVD 待機・閾値等）の設定化。
-5. **運用基盤**: Alembic 導入（ADR-0002）、データ保持期間とパージジョブ、mypy の既存 6 エラー（db/session.py,
+5. **運用基盤**: Alembic 導入（ADR-0002）、データ保持期間とパージジョブ、mypy の既存 4 エラー（db/session.py,
    detect/context.py, llm/gateway.py）解消と CI での必須化。
 6. **機能の残り**: Gate → `next-action`/`rsc` ヘッダ透過と `response_content_type` 記録（detect-web 依頼）、
    多 IP パスワードスプレー検知、アクター横断の指紋統合（detect-ai）、対処の二者承認（respond）、

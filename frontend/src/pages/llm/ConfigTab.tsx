@@ -12,6 +12,8 @@ import {
   type Effort,
   type LLMConfig,
   type LLMConfigUpdate,
+  type LLMModelOption,
+  type LLMModelsResponse,
   type LLMProviderName,
   type LLMTestResult,
 } from "@/api/types-intel";
@@ -45,6 +47,10 @@ const strings = {
     providerAnthropic: "Anthropic（Claude）",
     providerOpenai: "OpenAI 互換（Ollama / vLLM などローカル LLM）",
     providerMock: "mock（LLM を呼ばない・テスト用）",
+    modelCustom: "その他（手入力）…",
+    modelsApi: "Anthropic API から取得したモデル一覧",
+    modelsBuiltin: "内蔵のモデル一覧を表示中（API からは取得していません）",
+    modelsError: "取得できなかった理由",
     modelFast: "軽量モデル（一次トリアージ）",
     modelDeep: "高性能モデル（昇格・詳細分析）",
     effortFast: "思考量（軽量）",
@@ -97,6 +103,10 @@ const strings = {
     providerAnthropic: "Anthropic (Claude)",
     providerOpenai: "OpenAI-compatible (local LLM: Ollama / vLLM …)",
     providerMock: "mock (no LLM calls, for testing)",
+    modelCustom: "Other (type an ID)…",
+    modelsApi: "Models fetched from the Anthropic API",
+    modelsBuiltin: "Showing the built-in model list (not fetched from the API)",
+    modelsError: "Why it could not be fetched",
     modelFast: "Fast model (first-pass triage)",
     modelDeep: "Deep model (escalation / analysis)",
     effortFast: "Effort (fast)",
@@ -134,6 +144,61 @@ const strings = {
 };
 
 const MODEL_SUGGESTIONS = ["claude-haiku-5-5", "claude-opus-5-5"];
+const CUSTOM_MODEL = "__custom__";
+
+/**
+ * Model dropdown for Anthropic. An ID that is not in the list (custom endpoint, brand-new model, or a value saved
+ * before the list loaded) switches the field to a free-text input, so no saved setting is ever hidden or lost.
+ */
+function ModelPicker({
+  id,
+  value,
+  onChange,
+  models,
+  customLabel,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  models: LLMModelOption[];
+  customLabel: string;
+}) {
+  const [custom, setCustom] = useState(false);
+  const known = models.some((m) => m.id === value);
+  const typing = custom || !known;
+  return (
+    <div className="space-y-1.5">
+      <Select
+        id={id}
+        className="w-full font-mono"
+        value={typing ? CUSTOM_MODEL : value}
+        onChange={(e) => {
+          if (e.target.value === CUSTOM_MODEL) {
+            setCustom(true);
+          } else {
+            setCustom(false);
+            onChange(e.target.value);
+          }
+        }}
+      >
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.display_name && m.display_name !== m.id ? `${m.display_name} — ${m.id}` : m.id}
+          </option>
+        ))}
+        <option value={CUSTOM_MODEL}>{customLabel}</option>
+      </Select>
+      {typing && (
+        <Input
+          aria-label={customLabel}
+          className="font-mono"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
 
 type Editable = Required<
   Pick<
@@ -194,6 +259,16 @@ function ConfigForm({ config }: { config: LLMConfig }) {
   const [openaiUrl, setOpenaiUrl] = useState("");
   const [notice, flash] = useFlash();
   const readOnly = !can.admin;
+  // Dropdown only when requests actually go to Anthropic ("auto" resolves to the server's active provider).
+  const useAnthropicModels =
+    (form.provider === "auto" ? config.active_provider : form.provider) === "anthropic";
+  const modelsQuery = useQuery({
+    queryKey: ["llm", "models", config.active_provider, config.anthropic_api_key_set],
+    queryFn: () => api.get<LLMModelsResponse>("/llm/models"),
+    enabled: useAnthropicModels,
+    staleTime: 5 * 60_000,
+  });
+  const modelOptions = useAnthropicModels ? modelsQuery.data?.models : undefined;
 
   const set = <K extends keyof Editable>(k: K, v: Editable[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -217,6 +292,7 @@ function ConfigForm({ config }: { config: LLMConfig }) {
       setOpenaiKey("");
       flash(L.saved);
       qc.invalidateQueries({ queryKey: LLM_CONFIG_KEY });
+      qc.invalidateQueries({ queryKey: ["llm", "models"] });
       qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
@@ -262,29 +338,55 @@ function ConfigForm({ config }: { config: LLMConfig }) {
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor={`${uid}-mf`}>{L.modelFast}</Label>
-                <Input
-                  id={`${uid}-mf`}
-                  list={`${uid}-models`}
-                  className="font-mono"
-                  value={form.model_fast}
-                  onChange={(e) => set("model_fast", e.target.value)}
-                />
+                {modelOptions ? (
+                  <ModelPicker
+                    id={`${uid}-mf`}
+                    value={form.model_fast}
+                    onChange={(v) => set("model_fast", v)}
+                    models={modelOptions}
+                    customLabel={L.modelCustom}
+                  />
+                ) : (
+                  <Input
+                    id={`${uid}-mf`}
+                    list={`${uid}-models`}
+                    className="font-mono"
+                    value={form.model_fast}
+                    onChange={(e) => set("model_fast", e.target.value)}
+                  />
+                )}
               </div>
               <div>
                 <Label htmlFor={`${uid}-md`}>{L.modelDeep}</Label>
-                <Input
-                  id={`${uid}-md`}
-                  list={`${uid}-models`}
-                  className="font-mono"
-                  value={form.model_deep}
-                  onChange={(e) => set("model_deep", e.target.value)}
-                />
+                {modelOptions ? (
+                  <ModelPicker
+                    id={`${uid}-md`}
+                    value={form.model_deep}
+                    onChange={(v) => set("model_deep", v)}
+                    models={modelOptions}
+                    customLabel={L.modelCustom}
+                  />
+                ) : (
+                  <Input
+                    id={`${uid}-md`}
+                    list={`${uid}-models`}
+                    className="font-mono"
+                    value={form.model_deep}
+                    onChange={(e) => set("model_deep", e.target.value)}
+                  />
+                )}
               </div>
               <datalist id={`${uid}-models`}>
                 {MODEL_SUGGESTIONS.map((m) => (
                   <option key={m} value={m} />
                 ))}
               </datalist>
+              {modelsQuery.data && useAnthropicModels && (
+                <p className="text-[11px] text-muted sm:col-span-2">
+                  {modelsQuery.data.source === "api" ? L.modelsApi : L.modelsBuiltin}
+                  {modelsQuery.data.error ? ` — ${L.modelsError}: ${modelsQuery.data.error}` : ""}
+                </p>
+              )}
               <div>
                 <Label htmlFor={`${uid}-ef`}>{L.effortFast}</Label>
                 {effortSelect(`${uid}-ef`, form.effort_fast, (v) => set("effort_fast", v))}

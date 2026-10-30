@@ -48,6 +48,10 @@ Web UI の **LLM → 設定** からも入力できます（書き込み専用�
 | `llm.effort_fast` / `llm.effort_deep` | `low` / `medium` | 思考の深さ |
 | `llm.output_language` | `ja` | LLM の出力言語（`ja` / `en`） |
 
+UI（**LLM → 設定**）では、プロバイダが Anthropic のとき、モデルを **プルダウンで選べます**。一覧は、設定したキーで使えるモデルを
+Anthropic API（`GET /v1/models`）から取得したもので、API から取得できないとき（キー未設定・ネットワークエラーなど）は内蔵の一覧を表示し、
+理由を併記します。一覧にないモデル ID（プロキシ経由・新モデルなど）は「その他（手入力）」で指定できます。
+
 トリアージは軽量モデルで始め、**信頼度が低い**（`triage.escalate_confidence_below`、既定 0.6）か、
 **重大度が高い**（`triage.escalate_severity`、既定 high 以上）ときに上位モデルへ昇格します。
 LLM に回すのは `triage.min_severity_for_llm`（既定 medium）以上のアラートだけです。

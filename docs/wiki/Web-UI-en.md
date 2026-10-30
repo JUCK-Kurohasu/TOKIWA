@@ -104,7 +104,7 @@ You can also preview what is served. For details, see [Deception (Mirage)](Decep
 
 ### LLM
 
-- **Settings**: provider, models (fast / deep), daily budget, output language, API key (write-only). Includes a **Connection test** button
+- **Settings**: provider, models (fast / deep; a dropdown for Anthropic), daily budget, output language, API key (write-only). Includes a **Connection test** button
 - **Usage**: daily cost, number of calls, and token counts (by purpose)
 - **Call log**: an audit log of every LLM call. Admins can also see the redacted input and response bodies
 

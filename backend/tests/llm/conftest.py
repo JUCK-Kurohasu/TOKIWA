@@ -61,7 +61,7 @@ class FakeAnthropicServer:
         return self
 
     def _handler(self, request: httpx2.Request) -> httpx2.Response:
-        body = json.loads(request.content)
+        body = json.loads(request.content) if request.content else {}  # GET requests have no body
         self.requests.append({"url": str(request.url), "headers": dict(request.headers), "body": body})
         if not self._queue:
             return httpx2.Response(

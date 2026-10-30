@@ -116,6 +116,19 @@ export interface LLMUsageResponse {
   days: LLMUsageDay[];
 }
 
+/** GET /llm/models: Anthropic models for the settings dropdown ("api" = live from the API, "builtin" = fallback list). */
+export interface LLMModelOption {
+  id: string;
+  display_name?: string | null;
+  max_input_tokens?: number | null;
+}
+export interface LLMModelsResponse {
+  source: "api" | "builtin";
+  models: LLMModelOption[];
+  /** Why the live list was not used (no secrets). */
+  error?: string | null;
+}
+
 /** POST /llm/test */
 export interface LLMTestResult {
   ok: boolean;

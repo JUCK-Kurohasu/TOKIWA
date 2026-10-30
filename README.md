@@ -43,7 +43,8 @@ npm install
 npm run dev                         # http://localhost:5173
 
 # LLM を使う場合（未設定なら mock で動作）
-export ANTHROPIC_API_KEY=...        # または UI の「LLM」設定から
+export ANTHROPIC_API_KEY=...        # または UI の「LLM」設定から（モデルはプルダウンで選択）
+# 「LLM」設定の状態カードに「mock で動作中」と出ているときは LLM は呼ばれていません（プロバイダを auto / Anthropic に）
 ```
 
 センサーの接続:
