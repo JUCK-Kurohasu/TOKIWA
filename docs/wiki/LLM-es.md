@@ -48,6 +48,11 @@ Si el **Provider** (Proveedor) del resultado es `mock`, no se llamó a ninguna A
 | `llm.effort_fast` / `llm.effort_deep` | `low` / `medium` | Profundidad de razonamiento |
 | `llm.output_language` | `ja` | Idioma de salida del LLM (`ja` / `en`) |
 
+En la interfaz (**LLM → Settings**), cuando el proveedor es Anthropic se pueden **elegir los modelos en un desplegable**. La lista se obtiene de la
+API de Anthropic (`GET /v1/models`) e incluye los modelos que puede usar la clave configurada; si no se puede obtener (sin clave, error de red...)
+se muestra una lista integrada junto con el motivo. Un ID de modelo que no esté en la lista (a través de un proxy, un modelo nuevo...) puede
+introducirse con «Other (type an ID)» (Otro (escribir un ID)).
+
 El triaje empieza con el modelo rápido y se escala al modelo profundo cuando **la confianza es baja** (`triage.escalate_confidence_below`, 0.6 por defecto) o
 **la severidad es alta** (`triage.escalate_severity`, high o superior por defecto).
 Solo se envían al LLM las alertas de severidad `triage.min_severity_for_llm` (medium por defecto) o superior.

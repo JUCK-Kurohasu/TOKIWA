@@ -48,6 +48,10 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 | `llm.effort_fast` / `llm.effort_deep` | `low` / `medium` | 思考深度 |
 | `llm.output_language` | `ja` | LLM 的输出语言（`ja` / `en`） |
 
+在 UI（**LLM → Settings**）中，当提供商为 Anthropic 时，可以通过 **下拉列表选择模型**。列表来自 Anthropic API（`GET /v1/models`），
+包含所配置密钥可以使用的模型；无法获取时（未设置密钥、网络错误等）会显示内置列表并注明原因。
+不在列表中的模型 ID（经代理、全新模型等）可通过“Other (type an ID)”（其他（手动输入））指定。
+
 分诊从轻量模型开始，在 **置信度较低**（`triage.escalate_confidence_below`，默认 0.6）或
 **严重级别较高**（`triage.escalate_severity`，默认 high 及以上）时升级到高级模型。
 只有 `triage.min_severity_for_llm`（默认 medium）及以上的告警才会交给 LLM。

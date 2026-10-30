@@ -37,7 +37,15 @@ from anthropic.types.beta import BetaMessage
 from pydantic import BaseModel
 
 from tokiwa.config import Settings, anthropic_api_key
-from tokiwa.llm.base import ChatTurn, LLMProvider, LLMUsage, ProviderResponse, ToolCall, ToolSpec
+from tokiwa.llm.base import (
+    ChatTurn,
+    LLMProvider,
+    LLMUsage,
+    ModelOption,
+    ProviderResponse,
+    ToolCall,
+    ToolSpec,
+)
 from tokiwa.llm.prompting import untrusted_block
 
 log = logging.getLogger(__name__)
@@ -60,6 +68,9 @@ NO_EFFORT_MODEL_PREFIXES: tuple[str, ...] = ("claude-haiku-4-5", "claude-sonnet-
 # tools sent with strict=true. TODO(verify): the limit is taken from that message; whether it is per request or per
 # tool, and how nested objects are counted, is not documented here - we count per request, recursively.
 STRICT_MAX_OPTIONAL_PARAMS = 24
+
+# Safety cap on the model list shown in the UI (the API paginates; there are far fewer models than this).
+MAX_LISTED_MODELS = 200
 
 # Server-side tool loops stop with ``pause_turn`` after ~10 iterations; resume at most this many times.
 MAX_PAUSE_CONTINUATIONS = 4
@@ -285,6 +296,33 @@ class AnthropicProvider(LLMProvider):
                 kwargs["base_url"] = llm.anthropic_base_url
             self._client = AsyncAnthropic(**kwargs)
         return self._client
+
+    # ------------------------------------------------------------------ model listing
+    async def list_models(self) -> list[ModelOption]:
+        """``GET /v1/models``: the models this key can use, newest first (as returned by the API).
+
+        TOKIWA needs structured outputs, so models that explicitly report no support for them are left out, as are
+        deprecated/retired ones. Anything the API does not state (missing fields) is kept - the list is a convenience,
+        and an unknown model can still be typed in by hand.
+        """
+        out: list[ModelOption] = []
+        async for m in self.client.models.list(limit=100):
+            if _get(m, "lifecycle") not in (None, "active"):
+                continue
+            caps = _get(m, "capabilities")
+            if _get(_get(caps, "structured_outputs"), "supported") is False:
+                continue
+            max_input = _get(m, "max_input_tokens")
+            out.append(
+                ModelOption(
+                    id=str(_get(m, "id")),
+                    display_name=_get(m, "display_name"),
+                    max_input_tokens=int(max_input) if isinstance(max_input, int) else None,
+                )
+            )
+            if len(out) >= MAX_LISTED_MODELS:
+                break
+        return out
 
     # ------------------------------------------------------------------ request building
     def _system_blocks(self, system: str, cache: bool) -> list[dict[str, Any]]:

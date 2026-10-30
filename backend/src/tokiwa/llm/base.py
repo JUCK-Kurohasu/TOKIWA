@@ -116,8 +116,20 @@ class ChatTurn:
     refused: bool = False
 
 
+class ModelOption(BaseModel):
+    """A model a provider can serve, as offered in the settings UI."""
+
+    id: str
+    display_name: str | None = None
+    max_input_tokens: int | None = None
+
+
 class LLMProvider(ABC):
     name: ClassVar[str]
+
+    async def list_models(self) -> list[ModelOption] | None:
+        """Models selectable for this provider, or ``None`` when it cannot enumerate them (the default)."""
+        return None
 
     @abstractmethod
     def available(self) -> bool:

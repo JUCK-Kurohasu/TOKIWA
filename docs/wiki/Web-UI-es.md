@@ -107,7 +107,7 @@ También se puede previsualizar el contenido que se sirve. Más detalles en [Eng
 
 ### LLM
 
-- **Settings** (Configuración): proveedor, modelos (rápido / profundo), presupuesto diario, idioma de salida, clave de API (solo escritura). Incluye el botón **Connection test** (Prueba de conexión)
+- **Settings** (Configuración): proveedor, modelos (rápido / profundo; desplegable para Anthropic), presupuesto diario, idioma de salida, clave de API (solo escritura). Incluye el botón **Connection test** (Prueba de conexión)
 - **Usage** (Uso): costo diario, número de llamadas y número de tokens (por finalidad)
 - **Call log** (Registro de llamadas): log de auditoría de todas las llamadas al LLM. Los administradores también pueden ver el texto enmascarado de las entradas y las respuestas
 

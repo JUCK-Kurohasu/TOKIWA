@@ -32,6 +32,7 @@ from tokiwa.llm.base import (
     ToolSpec,
 )
 from tokiwa.llm.mock import MockProvider
+from tokiwa.llm.models import ModelListCache, ModelListing, builtin_listing
 from tokiwa.llm.pricing import estimate_cost
 from tokiwa.schemas.system import LLMCall, LLMCallStatus
 from tokiwa.util import new_id, utcnow
@@ -68,6 +69,7 @@ class LLMGateway:
     def __init__(self, provider: LLMProvider | None = None, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.provider = provider or build_provider(self.settings)
+        self._models_cache = ModelListCache()
 
     @property
     def llm(self) -> LLMSettings:
@@ -78,6 +80,23 @@ class LLMGateway:
 
     def effort_for(self, tier: LLMTier) -> str:
         return self.llm.effort_fast if tier == LLMTier.FAST else self.llm.effort_deep
+
+    async def list_models(self) -> ModelListing:
+        """Anthropic model choices for the UI: live from the API when this gateway talks to Anthropic, else built-in."""
+        if self.provider.name != "anthropic":
+            return builtin_listing()
+        cached = self._models_cache.get()
+        if cached is not None:
+            return ModelListing(source="api", models=cached)
+        try:
+            models = await self.provider.list_models()
+        except Exception as exc:
+            log.warning("could not list Anthropic models: %s", exc)
+            return builtin_listing(f"{type(exc).__name__}: {exc}"[:300])
+        if not models:
+            return builtin_listing("the API returned no models")
+        self._models_cache.put(models)
+        return ModelListing(source="api", models=models)
 
     async def spent_today_usd(self) -> float:
         since = utcnow() - timedelta(hours=24)

@@ -19,6 +19,7 @@ from tokiwa.db.models.llm import LLMCallRow
 from tokiwa.llm.base import LLMPurpose, LLMTier, StructuredRequest
 from tokiwa.llm.gateway import get_gateway
 from tokiwa.llm.mock import register_mock_responder
+from tokiwa.llm.models import ModelListing
 from tokiwa.llm.prompting import UNTRUSTED_DATA_POLICY
 from tokiwa.llm.settings import LLMConfigOut, LLMConfigUpdate, config_view, update_config
 from tokiwa.schemas.common import Page
@@ -82,6 +83,12 @@ async def put_config(body: LLMConfigUpdate, user: AdminUser) -> LLMConfigOut:
     # changes never contains secret values (only "set"/"cleared").
     await record_audit(user.username, "llm.config.update", "llm.config", {"changes": changes})
     return await config_view(gateway)
+
+
+@router.get("/models", response_model=ModelListing)
+async def list_models(_: CurrentUser) -> ModelListing:
+    """Anthropic models selectable in the settings UI (live from the API when possible, else a built-in list)."""
+    return await get_gateway().list_models()
 
 
 @router.get("/usage", response_model=LLMUsageResponse)

@@ -48,6 +48,11 @@ If the result's **Provider** is `mock`, no real API was called (the provider set
 | `llm.effort_fast` / `llm.effort_deep` | `low` / `medium` | Depth of thinking |
 | `llm.output_language` | `ja` | LLM output language (`ja` / `en`) |
 
+In the UI (**LLM → Settings**), when the provider is Anthropic you can **pick models from a dropdown**. The list is fetched from the
+Anthropic API (`GET /v1/models`) and contains the models your configured key can use; when it cannot be fetched (no key, network error, ...)
+a built-in list is shown together with the reason. A model ID that is not in the list (via a proxy, a brand-new model, ...) can be entered with
+"Other (type an ID)".
+
 Triage starts with the fast model and escalates to the deep model when **confidence is low** (`triage.escalate_confidence_below`, default 0.6) or
 **severity is high** (`triage.escalate_severity`, default high or above).
 Only alerts at or above `triage.min_severity_for_llm` (default medium) are sent to the LLM.
