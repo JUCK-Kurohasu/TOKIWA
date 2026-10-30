@@ -32,6 +32,10 @@ const strings = {
     provider: "プロバイダ",
     available: "利用可能",
     unavailable: "利用不可（ルールベースにフォールバック）",
+    activeProvider: "実際に使用中",
+    mockActive: "mock で動作中（LLM は呼ばれていません）",
+    mockActiveHint:
+      "プロバイダが mock のため、トリアージとコパイロットは実 API を呼びません。auto か Anthropic に切り替えてください。",
     spent: "本日の費用",
     budget: "日次予算",
     settings: "設定",
@@ -66,18 +70,24 @@ const strings = {
     saved: "保存しました",
     noChanges: "変更はありません",
     test: "接続テスト",
-    testDesc: "最小の構造化呼び出しを 1 回行い、プロバイダへの到達性を確認します（少額の費用が発生します）。",
+    testDesc:
+      "fast / deep の各 tier で最小の構造化呼び出しを 1 回ずつ行い、プロバイダへの到達性を確認します（少額の費用が発生します）。",
     runTest: "テストを実行",
     ok: "接続成功",
     ng: "接続失敗",
     model: "モデル",
     latency: "応答時間",
+    mockTest: "mock が応答しました。実 API は呼ばれていません（プロバイダ設定を確認してください）。",
   },
   en: {
     status: "Current status",
     provider: "Provider",
     available: "Available",
     unavailable: "Unavailable (falling back to rules)",
+    activeProvider: "Actually in use",
+    mockActive: "Running on mock (no LLM is called)",
+    mockActiveHint:
+      "The provider is mock, so triage and the copilot never call a real API. Switch to auto or Anthropic.",
     spent: "Spent today",
     budget: "Daily budget",
     settings: "Settings",
@@ -113,12 +123,13 @@ const strings = {
     noChanges: "No changes",
     test: "Connection test",
     testDesc:
-      "Makes one minimal structured call to check that the provider is reachable (incurs a small cost).",
+      "Makes one minimal structured call per tier (fast and deep) to check that the provider is reachable (incurs a small cost).",
     runTest: "Run test",
     ok: "Connected",
     ng: "Failed",
     model: "Model",
     latency: "Latency",
+    mockTest: "The mock answered; no real API was called (check the provider setting).",
   },
 };
 
@@ -424,11 +435,23 @@ function ConfigForm({ config }: { config: LLMConfig }) {
   );
 }
 
+const TEST_TIERS = ["fast", "deep"] as const;
+
 function ConnectionTest() {
   const L = useLocal(strings);
   const can = useCan();
-  const test = useMutation({ mutationFn: () => api.post<LLMTestResult>("/llm/test") });
-  const r = test.data;
+  // Both tiers: they use different models and request shapes, so a passing fast test says nothing about deep.
+  const test = useMutation({
+    mutationFn: async () => {
+      const out: { tier: (typeof TEST_TIERS)[number]; result: LLMTestResult }[] = [];
+      for (const tier of TEST_TIERS) {
+        out.push({ tier, result: await api.post<LLMTestResult>(`/llm/test?tier=${tier}`) });
+      }
+      return out;
+    },
+  });
+  const rs = test.data;
+  const mock = rs?.some((x) => x.result.provider === "mock") ?? false;
   return (
     <Card>
       <CardHeader
@@ -448,11 +471,16 @@ function ConnectionTest() {
           )
         }
       />
-      {(r || test.error) && (
-        <CardBody className="space-y-2 text-sm">
+      {(rs || test.error) && (
+        <CardBody className="space-y-3 text-sm">
           {test.error ? <ApiErrorState error={test.error} /> : null}
-          {r && (
-            <div role="status" className="space-y-1.5">
+          {mock && (
+            <p role="alert" className="text-xs font-medium text-sev-medium">
+              {L.mockTest}
+            </p>
+          )}
+          {rs?.map(({ tier, result: r }) => (
+            <div key={tier} role="status" className="space-y-1.5">
               <div
                 className={cn(
                   "flex items-center gap-1.5 font-medium",
@@ -464,6 +492,7 @@ function ConnectionTest() {
                 ) : (
                   <XCircle className="h-4 w-4" aria-hidden />
                 )}
+                <span className="font-mono text-xs uppercase text-muted">{tier}</span>
                 {r.ok ? L.ok : L.ng}
               </div>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
@@ -480,7 +509,7 @@ function ConnectionTest() {
                 </pre>
               )}
             </div>
-          )}
+          ))}
         </CardBody>
       )}
     </Card>
@@ -494,6 +523,8 @@ export function ConfigTab() {
   if (q.error) return <ApiErrorState error={q.error} />;
   const c = q.data;
   if (!c) return null;
+  // `provider` is the configured value ("auto" may resolve to mock); `active_provider` is what actually answers.
+  const isMock = (c.active_provider ?? c.provider) === "mock";
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       {/* Remount the form when the stored settings change (not on spend updates) so it shows saved values. */}
@@ -514,7 +545,12 @@ export function ConfigTab() {
               <div className="text-[11px] text-muted">{L.provider}</div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-sm">{c.provider}</span>
-                {c.available ? (
+                {isMock ? (
+                  <Badge tone="warn">
+                    <XCircle className="h-3 w-3" aria-hidden />
+                    {L.mockActive}
+                  </Badge>
+                ) : c.available ? (
                   <Badge tone="accent">
                     <CheckCircle2 className="h-3 w-3" aria-hidden />
                     {L.available}
@@ -526,6 +562,12 @@ export function ConfigTab() {
                   </Badge>
                 )}
               </div>
+              {c.active_provider && (
+                <div className="text-[11px] text-muted">
+                  {L.activeProvider}: <span className="font-mono">{c.active_provider}</span>
+                </div>
+              )}
+              {isMock && <p className="text-[11px] text-sev-medium">{L.mockActiveHint}</p>}
             </div>
             <div className="space-y-1">
               <div className="text-[11px] text-muted">

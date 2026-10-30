@@ -69,6 +69,10 @@ Gate v0.1 不支持 WebSocket（返回 501）。请让 WebSocket 的路径不经
 **没有使用 LLM（返回的是模拟应答）**
 在 **LLM → Settings**（LLM → 设置）的 **Current status**（当前状态）中检查提供商及其是否可用。为 `auto` 时，若没有 Anthropic 的 API 密钥则为 `mock`。
 请检查是否在服务器启动前设置了 `ANTHROPIC_API_KEY`，或是否已在 UI 中输入密钥，并执行 **Connection test**（连接测试）。
+如果“Current status”（当前状态）显示正在使用 mock，或连接测试结果为 `mock`、延迟 0–1 ms、费用 $0，说明提供方被设置为 `mock`。请切换为 `auto` 或 `Anthropic` 并保存。
+
+**Copilot 因“400 … too many optional parameters”失败**
+这是 Anthropic 拒绝了 strict 工具定义（每个请求最多 24 个可选参数）。当前版本在超出限制时会自动以非 strict 方式发送（工具输入仍会在服务器端校验）。如使用旧版本，请更新。
 
 **LLM 分诊（研判）中途停止了**
 可能已用完每日预算（`llm.daily_budget_usd`，默认 $5）。当天会切换为基于规则的判定。

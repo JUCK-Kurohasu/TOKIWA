@@ -69,6 +69,10 @@ Las propuestas del mismo tipo y para el mismo objetivo se agrupan en una sola, p
 **No se usa el LLM (las respuestas son simuladas)**
 Compruebe el proveedor y su disponibilidad en **Current status** (Estado actual) de **LLM → Settings** (LLM → Configuración). Con `auto`, si no hay clave de API de Anthropic, se usa `mock`.
 Compruebe si definió `ANTHROPIC_API_KEY` antes de arrancar el servidor o si introdujo la clave en la interfaz, y ejecute **Connection test** (Prueba de conexión).
+Si «Current status» (Estado actual) indica que funciona con mock, o el resultado de la prueba muestra `mock`, latencia de 0–1 ms y coste $0, el proveedor está configurado como `mock`. Cámbielo a `auto` o `Anthropic` y guarde.
+
+**El copiloto falla con «400 … too many optional parameters»**
+Anthropic rechaza las definiciones de herramientas strict (máximo 24 parámetros opcionales por solicitud). Las versiones actuales envían las herramientas sin strict automáticamente si se superaría el límite (las entradas de las herramientas se siguen validando en el servidor). Actualice si usa una versión anterior.
 
 **El triaje con LLM se detuvo a mitad de camino**
 Es posible que se haya agotado el presupuesto diario (`llm.daily_budget_usd`, $5 por defecto). Ese día se pasa a la evaluación basada en reglas.

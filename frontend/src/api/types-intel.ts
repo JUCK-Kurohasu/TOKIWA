@@ -58,6 +58,8 @@ export const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 /** GET /llm/config. API keys are never returned. */
 export interface LLMConfig {
   provider: LLMProviderName | string;
+  /** The provider actually in use ("auto" resolved). "mock" means no real API is called. */
+  active_provider?: string;
   available: boolean;
   model_fast: string;
   model_deep: string;

@@ -36,7 +36,8 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 **会以明文保存在数据库中**。请注意数据库备份的管理，尽可能使用环境变量。
 密钥不会写入日志、审计日志或 LLM 的输入中。
 
-设置完成后，可以通过 **LLM → Settings → Connection test**（连接测试）进行检查（会进行 1 次最小的结构化调用，计入预算和审计）。
+设置完成后，可以通过 **LLM → Settings → Connection test**（连接测试）进行检查（对 fast / deep 每个 tier 各进行 1 次最小的结构化调用，计入预算和审计）。
+如果结果中的 **Provider**（提供方）为 `mock`，说明没有调用真实 API（提供方设置可能仍为 `mock`）。“Current status”（当前状态）除了设置值，还会显示实际在用的提供方。
 
 ## 模型与层级
 
