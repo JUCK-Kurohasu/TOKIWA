@@ -377,15 +377,27 @@ export function ChatView({
             placeholder={L.placeholder}
             aria-label={L.placeholder}
             maxLength={8000}
-            className="resize-none"
+            className="min-w-0 flex-1 resize-none"
           />
           {busy ? (
-            <Button variant="outline" onClick={onStop} aria-label={L.stop} title={L.stop}>
+            <Button
+              variant="outline"
+              onClick={onStop}
+              aria-label={L.stop}
+              title={L.stop}
+              className="shrink-0 whitespace-nowrap"
+            >
               <CircleStop className="h-4 w-4" aria-hidden />
               {L.stop}
             </Button>
           ) : (
-            <Button onClick={submit} disabled={!draft.trim()} aria-label={L.send} title={L.send}>
+            <Button
+              onClick={submit}
+              disabled={!draft.trim()}
+              aria-label={L.send}
+              title={L.send}
+              className="shrink-0 whitespace-nowrap"
+            >
               <Send className="h-4 w-4" aria-hidden />
               {L.send}
             </Button>
