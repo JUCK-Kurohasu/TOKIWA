@@ -23,6 +23,11 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
 - 未確認: Opus（deep）経路の `betas=server-side-fallback` / `fallbacks="default"` が実 API で通るか、トリアージの `TriageResult` スキーマが
   実 API で通るか。接続テストの deep と、コパイロット・トリアージの実行ログ（LLM → 呼び出し履歴）で確認すること。
 
+### UI の小修正（2026-10-30）
+- コパイロットの「送信」が狭い幅で縦に 2 行に折り返す問題: `Textarea` が `w-full` で行内の幅を取り、ボタンが縮んでいた（ボタンは `h-9` 固定のため文字だけがはみ出す）。
+  `ChatView.tsx` の送信 / 停止ボタンに `shrink-0 whitespace-nowrap`、`Textarea` に `min-w-0 flex-1` を付けて解消（共通 `Button` は未変更）。
+- ロゴを盾から山並み（3 峰）に変更: `components/common/BrandMark.tsx`（サイドバー・ログイン画面）と `public/favicon.svg`。パスは両者で同期すること。
+
 ## 0. 次のセッションはここから — 第 2 波の始め方
 
 ### ユーザーが新セッションに貼るプロンプト（例）

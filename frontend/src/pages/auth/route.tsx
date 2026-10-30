@@ -1,8 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ShieldHalf } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { ApiError, api } from "@/api/client";
+import { BrandMark } from "@/components/common/BrandMark";
 import { Button, ErrorState, Input, Label, Spinner } from "@/components/ui";
 import { publicRedirect, useAuthStatus } from "@/lib/authGate";
 import { useLocal } from "@/lib/i18n";
@@ -24,7 +24,7 @@ function AuthFrame({
     <div className="flex min-h-full items-center justify-center bg-bg p-6">
       <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-7 shadow-xl">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <ShieldHalf className="h-9 w-9 text-accent" />
+          <BrandMark className="h-9 w-9 text-accent" />
           <div className="text-lg font-semibold tracking-[0.3em]">TOKIWA</div>
           <div className="text-sm font-medium">{title}</div>
           <div className="text-xs text-muted">{subtitle}</div>

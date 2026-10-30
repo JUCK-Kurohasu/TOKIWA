@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Languages, LogOut, Moon, ShieldHalf, Sun } from "lucide-react";
+import { Languages, LogOut, Moon, Sun } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router";
 import { api } from "@/api/client";
+import { BrandMark } from "@/components/common/BrandMark";
 import { useLabel, useLang, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appRoutes, SECTION_ORDER } from "@/routes";
@@ -37,7 +38,7 @@ function Sidebar() {
   return (
     <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-surface">
       <div className="flex h-14 items-center gap-2 border-b border-line px-4">
-        <ShieldHalf className="h-5 w-5 text-accent" />
+        <BrandMark className="h-5 w-5 text-accent" />
         <span className="font-semibold tracking-[0.25em]">TOKIWA</span>
       </div>
       <nav className="flex-1 overflow-y-auto px-2 py-3">
