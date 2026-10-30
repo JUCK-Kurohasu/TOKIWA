@@ -69,6 +69,10 @@ under **Rules → Detectors**.
 **The LLM isn't being used (you get mock responses)**
 Check the provider and whether it is available in "Current status" under **LLM → Settings**. With `auto`, the provider becomes `mock` if there is no Anthropic API key.
 Check that you set `ANTHROPIC_API_KEY` before starting the server, or that you entered a key in the UI, and run the **Connection test**.
+If "Current status" says it is running on mock, or the test result shows `mock`, a 0–1 ms latency and $0 cost, the provider is set to `mock`. Switch it to `auto` or `Anthropic` and save.
+
+**The copilot fails with "400 … too many optional parameters"**
+This is Anthropic rejecting strict tool definitions (at most 24 optional parameters per request). Current versions automatically send the tools without strict when the limit would be exceeded (tool inputs are still validated server-side). Update if you run an older version.
 
 **LLM triage stopped partway through**
 You may have used up the daily budget (`llm.daily_budget_usd`, default $5). For the rest of that day, TOKIWA switches to rule-based verdicts.

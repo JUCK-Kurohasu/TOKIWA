@@ -56,6 +56,11 @@ FALLBACK_MODEL_PREFIXES: tuple[str, ...] = (
 # Older models that reject ``output_config.effort`` (only relevant when an operator configures them).
 NO_EFFORT_MODEL_PREFIXES: tuple[str, ...] = ("claude-haiku-4-5", "claude-sonnet-4-5", "claude-3")
 
+# Observed 400 from the API: "Schemas contains too many optional parameters (46) ... (limit: 24)" for the 11 copilot
+# tools sent with strict=true. TODO(verify): the limit is taken from that message; whether it is per request or per
+# tool, and how nested objects are counted, is not documented here - we count per request, recursively.
+STRICT_MAX_OPTIONAL_PARAMS = 24
+
 # Server-side tool loops stop with ``pause_turn`` after ~10 iterations; resume at most this many times.
 MAX_PAUSE_CONTINUATIONS = 4
 
@@ -83,6 +88,20 @@ def fallback_eligible(model: str) -> bool:
 
 def supports_effort(model: str) -> bool:
     return not model.startswith(NO_EFFORT_MODEL_PREFIXES)
+
+
+def count_optional_params(schema: Any) -> int:
+    """Properties not listed in ``required``, summed over every object schema nested in ``schema``."""
+    if isinstance(schema, list):
+        return sum(count_optional_params(item) for item in schema)
+    if not isinstance(schema, dict):
+        return 0
+    total = 0
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        required = set(schema.get("required") or [])
+        total += sum(1 for name in props if name not in required)
+    return total + sum(count_optional_params(v) for v in schema.values() if isinstance(v, dict | list))
 
 
 def _get(obj: Any, name: str, default: Any = None) -> Any:
@@ -292,7 +311,8 @@ class AnthropicProvider(LLMProvider):
             kwargs["fallbacks"] = "default"
         return kwargs
 
-    def _tool_defs(self, tools: list[ToolSpec]) -> list[dict[str, Any]]:
+    def _tool_defs(self, tools: list[ToolSpec], *, strict: bool | None = None) -> list[dict[str, Any]]:
+        use_strict = self._strict_tools if strict is None else strict
         defs: list[dict[str, Any]] = []
         for spec in tools:
             schema = spec.input_schema
@@ -304,12 +324,23 @@ class AnthropicProvider(LLMProvider):
             # strict: true guarantees schema-valid arguments (the replacement for forced tool_choice on Opus 5.5).
             # It needs a closed schema; transform_schema closes objects and moves unsupported constraints
             # (min/max, lengths) into descriptions - callers still validate tool inputs themselves.
-            if self._strict_tools and schema.get("additionalProperties") is not True:
+            if use_strict and schema.get("additionalProperties") is not True:
                 try:
                     tool = {**tool, "input_schema": transform_schema(schema), "strict": True}
                 except (ValueError, TypeError):
                     log.debug("tool %s schema not strict-compatible; sending non-strict", spec.name)
             defs.append(tool)
+        if any(d.get("strict") for d in defs):
+            optional = sum(count_optional_params(d["input_schema"]) for d in defs if d.get("strict"))
+            if optional > STRICT_MAX_OPTIONAL_PARAMS:
+                # The API compiles all strict schemas of a request into one grammar and rejects the request
+                # (400) beyond a budget of optional parameters, so skip the doomed first attempt.
+                log.info(
+                    "strict tools need %d optional parameters (limit %d); sending tools non-strict",
+                    optional,
+                    STRICT_MAX_OPTIONAL_PARAMS,
+                )
+                return self._tool_defs(tools, strict=False)
         return defs
 
     # ------------------------------------------------------------------ structured
@@ -521,12 +552,15 @@ class AnthropicProvider(LLMProvider):
         try:
             msg: Any = await self.client.beta.messages.create(**kwargs, messages=cast(Any, messages))
         except anthropic.BadRequestError as exc:
-            if not (tool_defs and self._strict_tools and "strict" in str(exc).lower()):
+            if not any(d.get("strict") for d in tool_defs):
                 raise
+            # Do not match on the message text: the API words schema-compilation limits in several ways
+            # ("too many optional parameters ..." never mentions "strict"). Retry once without strict; if that
+            # fails as well the 400 is genuine and propagates. Strict stays on until a retry has succeeded.
             log.warning("API rejected strict tool definitions (%s); retrying without strict", exc)
-            self._strict_tools = False
-            kwargs["tools"] = self._tool_defs(tools)
+            kwargs["tools"] = self._tool_defs(tools, strict=False)
             msg = await self.client.beta.messages.create(**kwargs, messages=cast(Any, messages))
+            self._strict_tools = False
         usage = usage_from_message(msg)
         served = str(_get(msg, "model") or model)
         if _get(msg, "stop_reason") == "refusal":

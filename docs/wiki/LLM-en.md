@@ -36,7 +36,8 @@ You can also enter it under **LLM → Settings** in the Web UI (write-only; it i
 **stored in plain text in the DB**. Be careful with how you handle DB backups, and use the environment variable if you can.
 The key is never written to logs, the audit log, or LLM input.
 
-After setting it, you can check it with **LLM → Settings → Connection test** (it makes one minimal structured call, which counts against the budget and is audited).
+After setting it, you can check it with **LLM → Settings → Connection test** (it makes one minimal structured call per tier, fast and deep, which counts against the budget and is audited).
+If the result's **Provider** is `mock`, no real API was called (the provider setting may still be `mock`). "Current status" shows the provider actually in use as well as the configured one.
 
 ## Models and tiers
 

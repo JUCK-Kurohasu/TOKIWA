@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import Literal
 
+import anthropic
 import pytest
+from anthropic import transform_schema
 from pydantic import BaseModel, Field
 
 from tokiwa.config import Settings
@@ -473,6 +475,82 @@ async def test_chat_retries_without_strict_on_400(settings: Settings, fake_anthr
     assert fake_anthropic.bodies[0]["tools"][0]["strict"] is True
     assert "strict" not in fake_anthropic.bodies[1]["tools"][0]
     assert fake_anthropic.bodies[1]["tools"][0]["input_schema"] == TOOLS[0].input_schema
+
+
+REAL_400 = {
+    "type": "error",
+    "error": {
+        "type": "invalid_request_error",
+        "message": "Schemas contains too many optional parameters (46), which would make grammar compilation "
+        "inefficient. Reduce the number of optional parameters in your tool schemas (limit: 24).",
+    },
+}
+
+
+async def _chat(provider: AnthropicProvider, tools: list[ToolSpec]):  # type: ignore[no-untyped-def]
+    return await provider.chat(
+        model="claude-opus-5-5",
+        system="s",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        max_tokens=1024,
+        effort="low",
+        cache=False,
+    )
+
+
+async def test_chat_retries_without_strict_on_real_optional_params_400(  # type: ignore[no-untyped-def]
+    settings: Settings, fake_anthropic, msg
+) -> None:
+    """The API's real wording never contains "strict"; the retry must not depend on the message text."""
+    fake_anthropic.reply(REAL_400, status=400)
+    fake_anthropic.reply(msg([{"type": "text", "text": "ok"}]))
+    provider = _provider(settings, fake_anthropic)
+    assert (await _chat(provider, TOOLS)).text == "ok"
+    assert fake_anthropic.bodies[0]["tools"][0]["strict"] is True
+    assert "strict" not in fake_anthropic.bodies[1]["tools"][0]
+    assert provider._strict_tools is False
+
+
+async def test_chat_genuine_400_propagates_and_keeps_strict(  # type: ignore[no-untyped-def]
+    settings: Settings, fake_anthropic
+) -> None:
+    bad = {"type": "error", "error": {"type": "invalid_request_error", "message": "messages: bad"}}
+    fake_anthropic.reply(bad, status=400)
+    fake_anthropic.reply(bad, status=400)
+    provider = _provider(settings, fake_anthropic)
+    with pytest.raises(anthropic.BadRequestError):
+        await _chat(provider, TOOLS)
+    assert len(fake_anthropic.bodies) == 2  # one retry, no more
+    assert provider._strict_tools is True  # an unrelated 400 must not disable strict for good
+
+
+def test_count_optional_params_is_recursive() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "a": {"type": "string"},
+            "b": {"type": "object", "properties": {"c": {"type": "integer"}}},
+        },
+        "required": ["a"],
+    }
+    assert ap.count_optional_params(schema) == 2  # b (top level) + c (nested)
+
+
+def test_copilot_tools_exceed_strict_budget_and_are_sent_non_strict(settings: Settings) -> None:
+    """Regression: the 11 copilot tools carry 46 optional params; the API allows 24 per request."""
+    from tokiwa.copilot.tools import tool_specs
+
+    provider = AnthropicProvider(settings)
+    specs = tool_specs()
+    all_strict = sum(ap.count_optional_params(transform_schema(s.input_schema)) for s in specs)
+    assert all_strict > ap.STRICT_MAX_OPTIONAL_PARAMS
+    defs = provider._tool_defs(specs)
+    assert len(defs) == len(specs)
+    assert not any("strict" in d for d in defs)
+    assert [d["input_schema"] for d in defs] == [s.input_schema for s in specs]
+    # small tool sets keep strict
+    assert provider._tool_defs(TOOLS)[0]["strict"] is True
 
 
 async def test_chat_refusal(settings: Settings, fake_anthropic, msg) -> None:  # type: ignore[no-untyped-def]

@@ -36,7 +36,8 @@ También puede introducirse en **LLM → Settings** (LLM → Configuración) de 
 **se guarda en texto plano en la base de datos**. Tenga cuidado con el manejo de las copias de seguridad de la base de datos y, si es posible, use una variable de entorno.
 La clave no se escribe en los logs, en el log de auditoría ni en las entradas al LLM.
 
-Una vez configurada, puede comprobarse con **LLM → Settings → Connection test** (Prueba de conexión) (realiza una llamada estructurada mínima, que cuenta para el presupuesto y queda auditada).
+Una vez configurada, puede comprobarse con **LLM → Settings → Connection test** (Prueba de conexión) (realiza una llamada estructurada mínima por nivel, fast y deep, que cuenta para el presupuesto y queda auditada).
+Si el **Provider** (Proveedor) del resultado es `mock`, no se llamó a ninguna API real (puede que el proveedor siga en `mock`). «Current status» (Estado actual) muestra el proveedor realmente en uso además del configurado.
 
 ## Modelos y niveles (tiers)
 

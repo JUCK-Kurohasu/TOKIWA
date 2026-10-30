@@ -9,6 +9,20 @@
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
 
+## 実 API 初回接続で判明したこと（2026-10-30・Anthropic キー登録後）
+
+- **provider が `mock` のままだった**ため、接続テストもトリアージも全てモックの応答だった（応答 0〜1 ms・費用 $0・出力 200 tokens 固定が目印）。
+  UI の状態カードは設定値（`provider`）しか出さず、`MockProvider.available()` も常に True で、気づけなかった。
+  → 状態カードに `active_provider` と「mock で動作中」警告を追加。接続テストを fast / deep の両方に変更し、結果が mock のときは注意書きを表示。
+- **コパイロットが 400 で失敗**（実 API で初めて判明）: `Schemas contains too many optional parameters (46) ... (limit: 24)`。
+  11 ツールを `strict: true` で送ると、オプション引数の合計が 1 リクエストあたり 24 を超えるため。
+  既存のリトライは「エラー文に `strict` を含む場合のみ」で、実際の文面に当たらず（テストも自分の想定文面で書かれていた）無効だった。
+  → `anthropic_provider.py`: strict 対象のオプション引数が 24 超ならはじめから strict なしで送る。400 は文面に依らず 1 回だけ strict なしで再試行
+  （再試行も失敗したら例外を伝播し、strict は無効化しない）。ツール入力は `copilot/tools.py` の Pydantic（`extra="forbid"`）で検証されるので安全性は変わらない。
+- `TODO(verify)`: 上限 24 が「1 リクエスト」単位か、ネストをどう数えるかは API の文面からの推定（`STRICT_MAX_OPTIONAL_PARAMS`）。
+- 未確認: Opus（deep）経路の `betas=server-side-fallback` / `fallbacks="default"` が実 API で通るか、トリアージの `TriageResult` スキーマが
+  実 API で通るか。接続テストの deep と、コパイロット・トリアージの実行ログ（LLM → 呼び出し履歴）で確認すること。
+
 ## 0. 次のセッションはここから — 第 2 波の始め方
 
 ### ユーザーが新セッションに貼るプロンプト（例）
