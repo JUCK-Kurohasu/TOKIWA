@@ -1,0 +1,12 @@
+# Environment-only override (sandbox: Docker Hub 429 + ghcr blob 403 + TLS-intercepting egress). No repo change.
+x-args: &args
+  NODE_IMAGE: local/node-ca:22.23.4-trixie-slim
+  PYTHON_IMAGE: local/python-ca:3.12.15-slim-trixie
+  UV_IMAGE: local/uv:0.11.32
+services:
+  tokiwa-init: {build: {args: *args}}
+  tokiwa: {build: {args: *args}}
+  gate: {build: {args: *args}}
+  sim: {build: {args: *args}}
+  sim-ingest: {build: {args: *args}}
+  agent: {build: {args: *args}}

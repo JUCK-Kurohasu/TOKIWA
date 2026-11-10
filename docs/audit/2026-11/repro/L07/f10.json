@@ -1,0 +1,6 @@
+{"id":"L07-10","title":"初回セットアップ /auth/setup が未認証・既定 0.0.0.0 待受でユーザー数チェック後に挿入するため、初回起動直後に先着した第三者が管理者になれる（同時実行で複数管理者も）","area":"auth","category":"security","severity":"low","confidence":"likely",
+"summary":"POST /api/v1/auth/setup は認証もワンタイム秘密も要求せず、ユーザー数 0 のとき最初の要求者を admin にする。server.host の既定は 0.0.0.0 のため、インストール直後〜管理者作成までの間はネットワーク上の誰でも（スキャン中の AI エージェントを含む）管理者を作れる。またチェック（count）と INSERT の間にロックが無いため、同時要求では複数の setup が成功しうる（コード追跡のみ）。セットアップ完了後は 409 'setup already completed' を返すことを確認。",
+"evidence":"backend/src/tokiwa/api/routes/auth.py:27-45（_user_count()>0 なら 409、それ以外は無条件で Role.ADMIN を作成）、backend/src/tokiwa/config.py:27（host 既定 \"0.0.0.0\"）。確認: セットアップ済みサーバーへ有効なボディで POST /api/v1/auth/setup → 409 {\"detail\":\"setup already completed\"}。並列 setup の競合は未実行（likely）。",
+"attack_scenario":"ラボ/検証環境で docker compose up 直後、管理者作成前に同一ネットワーク上の攻撃者や自律エージェントが /api/v1/auth/status の setup_required=true を見つけて先に管理者を作成 → TOKIWA を乗っ取り、検知器無効化・トークン発行（L07-05 の偽造入口）を行う。",
+"recommendation":"初回起動時にワンタイムのセットアップコードをサーバーログ/CLI に出し、/auth/setup で必須にする（Jupyter/Grafana 方式）か、`tokiwa user create --role admin` による CLI 作成を既定にする。setup_required 中は 127.0.0.1 からのみ受け付けるオプション。count と INSERT を BEGIN IMMEDIATE / 一意制約付きの単一行（setup_done フラグ）で直列化。",
+"effort":"S","known":"none","references":[],"related":["L07-07","L07-03"]}

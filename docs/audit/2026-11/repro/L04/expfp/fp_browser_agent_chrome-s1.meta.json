@@ -1,0 +1,20 @@
+{
+  "generator_version": "1",
+  "summary": {
+    "events": 71,
+    "events_by_attack": {
+      "none": 71
+    },
+    "events_by_profile": {
+      "fp_browser_agent_chrome": 71
+    },
+    "first": "2026-10-01T09:02:48.947256+00:00",
+    "labelled_events": 71,
+    "last": "2026-10-01T09:16:25.045574+00:00",
+    "sessions": 3,
+    "sessions_by_profile": {
+      "fp_browser_agent_chrome": 3
+    }
+  },
+  "tokiwa_version": "0.1.0"
+}

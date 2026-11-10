@@ -1,0 +1,30 @@
+{
+  "generator_version": "1",
+  "summary": {
+    "events": 353,
+    "events_by_attack": {
+      "none": 353
+    },
+    "events_by_profile": {
+      "benign_browser": 140,
+      "fp_api_script": 51,
+      "fp_browser_agent_headless": 27,
+      "fp_ci_contract_test": 9,
+      "fp_mobile_app": 46,
+      "fp_sdk_poller": 80
+    },
+    "first": "2026-10-01T09:00:56.315752+00:00",
+    "labelled_events": 353,
+    "last": "2026-10-01T09:27:07.187212+00:00",
+    "sessions": 11,
+    "sessions_by_profile": {
+      "benign_browser": 4,
+      "fp_api_script": 2,
+      "fp_browser_agent_headless": 1,
+      "fp_ci_contract_test": 1,
+      "fp_mobile_app": 2,
+      "fp_sdk_poller": 1
+    }
+  },
+  "tokiwa_version": "0.1.0"
+}

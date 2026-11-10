@@ -1,0 +1,8 @@
+dockerfile scan results:
+
+Passed checks: 208, Failed checks: 1, Skipped checks: 0
+
+Check: CKV_DOCKER_7: "Ensure the base image uses a non latest version tag"
+	FAILED for resource: deploy/Dockerfile.FROM
+	File: deploy/Dockerfile:15-15
+

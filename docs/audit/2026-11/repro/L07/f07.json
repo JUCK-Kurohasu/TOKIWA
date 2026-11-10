@@ -1,0 +1,6 @@
+{"id":"L07-07","title":"『最後の管理者』保護がチェック後更新の競合で破れ、同時降格で管理者 0 人になる（API では復旧不能）","area":"auth","category":"reliability","severity":"low","confidence":"confirmed",
+"summary":"PATCH/DELETE /api/v1/users/{id} は _admin_count() で管理者数を数えてから更新するが、ロックや条件付き UPDATE が無く、しかもコミットはレスポンス後（L07-04）なので、2 人の管理者を同時に降格すると両方とも成功し管理者が 0 人になる。/auth/setup はユーザー総数 0 のときしか開かないため、API/UI からは誰も管理者に戻せず、トークン発行・ユーザー管理・LLM 設定・通知設定が不能になる。復旧はサーバーシェルでの `tokiwa user create --role admin` のみ。",
+"evidence":"backend/src/tokiwa/api/routes/users.py:24-27,68-76,86-92（count→update の TOCTOU）、backend/src/tokiwa/api/routes/auth.py:18-28（setup はユーザー総数で判定）。再現（MYDIR/scripts/t3.py, ポート 18301）: 管理者が admin と adm36fc の 2 人だけの状態で、admin が adm36fc を、adm36fc が admin を同時に role=viewer へ PATCH → [200, 200]。再ログインで両者 role=viewer、GET /auth/status は setup_required=false。",
+"attack_scenario":"主に運用事故（2 人の管理者が同時に権限整理する等）。悪用では、乗っ取った管理者アカウントで正規管理者と自分を同時に降格させ、防御側の管理操作（漏えいトークン失効・ユーザー削除）をサーバーシェルに入れるまで止める妨害が可能。",
+"recommendation":"管理者数チェックと更新を 1 トランザクションで行い、PostgreSQL では SELECT ... FOR UPDATE（または UPDATE ... WHERE (SELECT count(*) ...) > 1 の条件付き更新）、SQLite では BEGIN IMMEDIATE を使う。自分自身の降格/削除は別確認にする。管理者 0 人状態を検知したら起動時に警告し、復旧手順（tokiwa user create --role admin）を docs/wiki に明記。",
+"effort":"S","known":"none","references":[],"related":["L07-04"]}

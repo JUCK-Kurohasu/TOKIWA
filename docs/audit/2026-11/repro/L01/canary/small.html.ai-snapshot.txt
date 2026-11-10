@@ -1,0 +1,13 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Lab Shop" [ref=e3] [cursor=pointer]:
+      - /url: /
+    - text: "|"
+    - link "Products" [ref=e4] [cursor=pointer]:
+      - /url: /products
+    - text: "|"
+    - link "Login" [ref=e5] [cursor=pointer]:
+      - /url: /login
+  - main [ref=e6]:
+    - heading "Welcome" [level=1] [ref=e7]
+    - paragraph [ref=e8]: Spring sale

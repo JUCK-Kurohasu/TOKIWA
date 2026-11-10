@@ -1,0 +1,2 @@
+gate=1252 server=1169 victim=1170 (restart 2)
+restart3: server=331 victim=333 side=334 gate=354 gate2=356

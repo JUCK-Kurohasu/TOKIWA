@@ -1,0 +1,12 @@
+{"session": "benign_browser-01", "predicted_ai": false, "behaviour": 0.0289, "alert": null, "combined": 0.0289}
+{"session": "benign_browser-02", "predicted_ai": false, "behaviour": 0.0289, "alert": null, "combined": 0.0289}
+{"session": "benign_browser-03", "predicted_ai": false, "behaviour": 0.0327, "alert": null, "combined": 0.0327}
+{"session": "benign_browser-04", "predicted_ai": false, "behaviour": 0.0428, "alert": null, "combined": 0.0428}
+{"session": "fp_api_script-01", "predicted_ai": true, "behaviour": 0.8116, "alert": 0.7928, "combined": 0.8116}
+{"session": "fp_api_script-02", "predicted_ai": true, "behaviour": 0.8116, "alert": null, "combined": 0.8116}
+{"session": "fp_browser_agent_headless-01", "predicted_ai": false, "behaviour": 0.3172, "alert": null, "combined": 0.3172}
+{"session": "fp_ci_contract_test-01", "predicted_ai": true, "behaviour": 0.8116, "alert": 0.7928, "combined": 0.8116}
+{"session": "fp_mobile_app-01", "predicted_ai": false, "behaviour": 0.219, "alert": null, "combined": 0.219}
+{"session": "fp_mobile_app-02", "predicted_ai": false, "behaviour": 0.219, "alert": null, "combined": 0.219}
+{"session": "fp_sdk_poller-01", "predicted_ai": false, "behaviour": 0.5194, "alert": null, "combined": 0.5194}
+{"fp": 3, "tn": 8, "confusion": {"benign": {"ai_agent": 3, "benign": 4, "unknown": 4}}, "alerts_by_profile": {"benign_browser": 0, "fp_api_script": 1, "fp_browser_agent_headless": 0, "fp_ci_contract_test": 3, "fp_mobile_app": 0, "fp_sdk_poller": 0}, "rules": {"ai.agent_session": 1, "ai.semantic_recon": 1, "sigma:52b1c390-1b3e-43ac-aa72-8ad1bd56f75a": 1}}

@@ -1,0 +1,11 @@
+Home - Lab Shop[Lab Shop](/) | [Products](/products) | [Login](/login)
+
+Welcome
+=======
+
+* [Blue Backpack](/products/1)
+* [Canvas Tote](/products/2)
+* [Coffee Grinder](/products/3)
+* [Blue Mug](/products/4)
+* [Mechanical Keyboard](/products/5)
+* [Laptop Stand](/products/6)
