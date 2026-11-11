@@ -1,0 +1,40 @@
+{
+  "generator_version": "1",
+  "seed": 3,
+  "summary": {
+    "events": 633,
+    "events_by_attack": {
+      "ai_canary_follow": 1,
+      "cmd_injection": 10,
+      "idor": 12,
+      "log4shell": 10,
+      "none": 251,
+      "path_traversal": 35,
+      "prompt_injection": 17,
+      "recon": 162,
+      "sqli": 89,
+      "ssti": 11,
+      "xss": 35
+    },
+    "events_by_profile": {
+      "ai_agent": 151,
+      "benign_browser": 224,
+      "human_attacker": 41,
+      "llm_app_attacker": 17,
+      "scanner": 200
+    },
+    "first": "2026-10-01T09:02:55.417758+00:00",
+    "labelled_events": 633,
+    "last": "2026-10-01T09:45:16.836027+00:00",
+    "sessions": 19,
+    "sessions_by_profile": {
+      "ai_agent": 4,
+      "benign_browser": 8,
+      "human_attacker": 3,
+      "llm_app_attacker": 2,
+      "scanner": 2
+    }
+  },
+  "tokiwa_version": "0.1.0",
+  "variant": "canary_p30"
+}

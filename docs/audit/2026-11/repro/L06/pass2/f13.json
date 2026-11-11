@@ -1,0 +1,9 @@
+{"id":"L06-13","title":"docs/deploy.md が `gate run --token tkw_...` / `agent run --token tkw_...` を案内し、トークンが argv に載る。Gate は待受プロセスなので TOKIWA 自身のホストセンサーがその cmdline を伏字なしで収集し、自分の ingest+gate トークンを DB・UI・コパイロット(LLM)に流す",
+"area":"gate","category":"security","severity":"medium","confidence":"likely",
+"summary":"CLI は --token を受け付け（gate/cli.py:86 の help は --token-file/env を推奨）、docs/deploy.md:84,88 の docker run 例は --token tkw_... を使う。argv は ps・/proc/<pid>/cmdline・docker inspect（Args）で同一ホストの他ユーザー/コンテナ管理者に見える。さらに TOKIWA のホストセンサーは待受ソケットの所有プロセスの cmdline を redact_text() で送るが、redact_text は『--token tkw_...』（空白区切り）を伏字にせず、tkw_ 接頭辞のトークン形式も認識しない。L12-02 の一般論（空白区切りの秘密）の具体例だが、漏れるのが TOKIWA 自身の Gate/Agent トークン（ingest+gate スコープ）で、公式手順どおりに展開すると必ず発生する点が異なる。",
+"evidence":"docs/deploy.md:84 'tokiwa:local gate run ... --token tkw_...', :88 'agent run --token tkw_...'; backend/src/tokiwa/gate/cli.py:86; sensors/host.py:143-156（cmdline を redact_text）; auth/security.py:20 API_TOKEN_PREFIX='tkw_'（redact 側に該当パターン無し: grep -rn tkw_ src/tokiwa/llm → なし）。実行: redact_text('... gate run ... --token tkw_EXAMPLEFAKE...') → 伏字なしでそのまま返る。'--token=tkw_...' は [REDACTED:secret]。ホストセンサーが実際に Gate の cmdline を送る end-to-end は未実行（likely）。",
+"attack_scenario":"コパイロット/トリアージの LLM 入力やイベント詳細 UI（viewer 権限）からトークンが読め、L07-01 のとおり ingest+gate トークン 1 本で偽イベント投入・デコイ/カナリア一覧の取得ができる。プロンプトインジェクションで LLM 出力に cmdline を引き出させる経路（L08 系）とも連鎖する。",
+"recommendation":"(1) docs/deploy.md の例を -e TOKIWA_GATE__INGEST_TOKEN / --token-file（Docker secret）に置換し、--token 使用時に WARN を出す（将来は廃止）。(2) redact.py に API トークン形式（tkw_[A-Za-z0-9_-]{20,}、Bearer 値、一般的な高エントロピー文字列）の値パターンを追加し、空白区切りの --token/--password/--api-key 等も伏字に（L12-02 と同時修正）。(3) ホストセンサーは TOKIWA 自身のプロセス（tokiwa gate/agent/serve）の cmdline を送らない。",
+"effort":"S","known":"none",
+"references":["https://docs.docker.com/engine/swarm/secrets/"],
+"related":["L12-02","L07-01","L13-02"]}

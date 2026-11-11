@@ -1,0 +1,9 @@
+{"id":"L06-07","title":"X-Original-URL / X-Rewrite-URL によるルーティング上書きを Gate も検知器も解釈せず素通し。上流が尊重する構成ではデコイ・パスベース検知を迂回して別パスへ到達できる",
+"area":"gate","category":"detection-gap","severity":"low","confidence":"confirmed",
+"summary":"Gate のデコイ照合・イベントの path は要求行のパスのみを使い、X-Original-URL / X-Rewrite-URL（IIS URL Rewrite・旧 Symfony/Zend 系・一部 Java フィルタが『実際のパス』として使う）を見ない。これらは上流へそのまま転送され、web 検知器（web_common のヘッダ allowlist）も対象外のため、要求行 /static/app.js + X-Original-URL: /.env はデコイを踏まず、アラートも出ない。上流がこのヘッダを尊重する場合、デコイで覆ったパスやパスベースの検知（sensitive_file_probe 等）を丸ごと迂回できる。",
+"evidence":"backend/src/tokiwa/gate/app.py:314（decoys.match(ex.path) のみ）, proxy.py:64-108（該当ヘッダの扱いなし）, grep -rn x-original-url backend/src/tokiwa → 該当なし。再現（gateR 21604→生ログ上流）: 'GET /static/app.js' + 'X-Original-URL: /.env' → 上流に転送（rawup.jsonl）、イベント path=/static/app.js・tags=[]、アラート 0 件（同時刻の要求行 /.env はデコイ + deception.trip + web.sensitive_file_probe + sigma の 3 件）。上流側でヘッダが尊重されるかはアプリ依存（未検証: ラボ victim は FastAPI で非対応）。",
+"attack_scenario":"AI ペンテストエージェントはアクセス制御回避の定番として X-Original-URL / X-Rewrite-URL / X-HTTP-Method-Override のファジングを行う。IIS + URL Rewrite や該当ヘッダを解釈するレガシーアプリが上流の場合、デコイ（Gate が実ファイルを隠しているパス）や管理パスに、Gate 上は無害な静的ファイル要求として到達し、SOC には何も見えない。",
+"recommendation":"(1) Gate で X-Original-URL / X-Rewrite-URL / X-Override-URL を既定で除去（上流が必要なら許可リストで明示）。(2) 除去・観測時に gate:route_override タグを付け、値もデコイ照合と sensitive path 検知にかける。(3) web_recon にルーティング上書きヘッダの検知ルール（値が要求行パスと異なる場合 medium）を追加。",
+"effort":"S","known":"none",
+"references":["https://portswigger.net/web-security/access-control#url-based-access-control-can-be-circumvented","https://symfony.com/blog/cve-2018-14773-remove-support-for-legacy-and-risky-http-headers"],
+"related":["L06-03","L05-06"]}

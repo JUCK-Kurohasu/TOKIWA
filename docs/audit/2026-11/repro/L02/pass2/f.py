@@ -1,0 +1,51 @@
+import json
+S="docs/audit/2026-11/repro/L02/pass2"
+R={"hex":"https://github.com/0x4m4/hexstrike-ai","pentagi":"https://github.com/vxcontrol/pentagi","strix":"https://github.com/usestrix/strix","gtg":"https://assets.anthropic.com/m/ec212e6566a0d47/original/Disrupting-the-first-reported-AI-orchestrated-cyber-espionage-campaign.pdf","mcpfetch":"https://github.com/modelcontextprotocol/servers/tree/main/src/fetch","ares":"https://github.com/mafifrizi/ares"}
+F=[
+dict(id="L02-04",title="LLM が既定 UA の市販ツール（nuclei→ffuf→sqlmap）を順番に操る攻撃は『AI』でなく3本の automated_scanner セッションに分解され、AI スコアは 0.001 前後になる",area="aidetect",category="detection-gap",severity="medium",confidence="confirmed",
+summary="HexStrike AI・PentAGI・Strix・GTG-1002 型のスタックでは LLM は制御面にいるだけで、標的に届くのは nmap/nuclei/ffuf/sqlmap/katana 等の既定 UA・既定ペーシングのツール通信である（公式 README 上の事実）。TOKIWA の scoring は scanner_client を AI 側の強い反証（-2.2）、sustained_high_rate/wordlist_enumeration も反証として扱い、セッションキーが UA 指紋を含むためツールごとに別セッションになる。結果、ツール切替の間に LLM が出力を読んで次を選ぶという最も AI らしい特徴（ツール遷移＋思考待ち）が、どの特徴量にも入っていない。Web 系シグネチャ（web.scanner_ua, web.sqli）は発報するが『AI エージェントによる攻撃』の帰属・対処優先度が落ちる。",
+evidence="再現: agents/L02/pass2/chain.py（SessionTracker にインプロセスで合成イベント120件: 同一IP、nuclei 40req→8-40秒の思考待ち→ffuf 50req→待ち→sqlmap 30req、各ツール既定 UA）。出力 agents/L02/pass2/chain.out: 3 セッション全て cls=automated_scanner, ai=0.0007/0.0005/0.0032, 指標 multi_tool_source+scanner_client+sustained_high_rate。コード: aidetect/scoring.py:53 scanner_client=-2.2, :50 sustained_high_rate=-2.6, multi_tool_source は重み 0.5（:47）のみで AI_BIAS=-3.4 を超えない。fingerprints 側にツール遷移（tool_switch）特徴は無い（grep 0件）。合成データであり実ツールの実測ではない（推測を含む）。",
+attack_scenario="ARES/HexStrike 風のオーケストレータ（Claude/GPT がツールを選ぶ）が標的に nuclei→ffuf→sqlmap を順に流す。運用者のダッシュボードには『古典的スキャナ 3 件』と出て AI 攻撃キャンペーンとして相関・優先付けされず、LLM 駆動の次手（ツール結果を読んだ適応）は見えない。",
+recommendation="(1) アクター（IP+時間窓、UA を跨ぐ）単位で『ツール遷移列』を特徴化: 異なる既定ツール UA の逐次切替、切替前の 5-60 秒の沈黙、直前ツールの出力（発見パス/500応答）を引き継ぐ標的選択（前ツールが見つけたパスを次ツールが叩く）に加点。(2) multi_tool_source を同時でなく逐次にも拡張し重みを上げる。(3) scanner_client の AI 反証は『単一ツール・単一セッションのみ』に限定。(4) eval/sim に `llm_tool_chain` プロファイルを追加（L02-10）。調整点: AI_WEIGHTS / ai_agent_threshold。",
+effort="M",known="none",references=[R["hex"],R["pentagi"],R["strix"],R["gtg"]],related=["L02-01","L01-09","L04-02","L02-10"]),
+dict(id="L02-05",title="MCP 公式 fetch サーバーの既定 UA『ModelContextProtocol/1.0 (Autonomous; …)』が未登録で UNKNOWN 扱い。robots.txt 先行取得という挙動も使われていない",area="aidetect",category="detection-gap",severity="medium",confidence="confirmed",
+summary="MCP 参照実装の fetch サーバーは、モデル起点の取得で UA『ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)』（ユーザー指定時は User-Specified）を送り、取得前に同じ UA で robots.txt を確認する（公式ソース/README）。TOKIWA の UA ルール `\\bmcp[-_ ]?(?:client|remote|inspector)\\b` はこの文字列に一致せず、family=UNKNOWN・ai_declared_client=0 になる。MCP 系エージェントが標的 URL を直接取得する最も一般的な経路なのに、正直に名乗る UA が拾えていない。",
+evidence="確認: backend/.venv で classify_user_agent('ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)') -> (ClientFamily.UNKNOWN, None)。ルール定義 aidetect/fingerprints.py:97。UA 文字列は mcp_server_fetch/server.py の DEFAULT_USER_AGENT_AUTONOMOUS（WebFetch で原文確認）。robots.txt 先行は recon.py の HINT_KINDS 'robots' に既にあるが、『robots→ページ』の同一 UA 連続という対は特徴化されていない（推測）。",
+attack_scenario="攻撃者または自動化パイプラインが MCP fetch を使い標的ページ/OpenAPI を収集する（偵察フェーズ）。名乗り UA が分類されず ai_declared_client（重み1.4）が立たない。なお UA は設定一つで変更可能（--user-agent）なので弱い信号である点は変わらない。",
+recommendation="UA ルールに `ModelContextProtocol/` を AI_AGENT として追加（Autonomous=強め、User-Specified=人間起点としてやや弱め）。同様の『自己申告型』を定期的に棚卸し（OpenAI-Operator/ChatGPT Agent 等は一次情報の UA 文字列を要検証）。robots.txt を取得後に同一 UA で本体を取る逐次パターンを弱い AI/行儀の良いクローラ信号として別扱いにする。",
+effort="S",known="none",references=[R["mcpfetch"]],related=["L04-05","L01-08"]),
+dict(id="L02-06",title="UA 分類表が 2 系統あり内容が食い違う: dirsearch・commix 等は web.scanner_ua では検知されるが aidetect 側では UNKNOWN（scanner_client が立たない）",area="aidetect",category="detection-gap",severity="low",confidence="confirmed",
+summary="aidetect/fingerprints.py の _UA_RULES と detect/detectors/web_recon.py の _TOOLS は別々の手書きリスト。後者にある dirsearch / commix / hydra / xsstrike / havij / skipfish / joomscan / jaeles / zmeu / jorgee / qualys / appscan 等が前者に無く、AI 帰属スコア（scanner_client=反証、SCANNER ヘッド）が働かない。逆に両方に無い現行ツール（katana、wafw00f、wapiti、Burp/Caido 系）もある（実 UA は要確認）。",
+evidence="確認: classify_user_agent('dirsearch/0.4.3') と ('commix/3.9') はともに (UNKNOWN, None)。web_recon.py:193-230 は dirsearch/commix を含む。『katana』『wafw00f』『Wapiti/3.1』も UNKNOWN（UA 文字列自体は推測入力で一次ソース未確認）。",
+attack_scenario="LLM エージェントが dirsearch/commix を既定 UA で使うと web.scanner_ua は鳴るが、セッション分類は scanner にも AI にもならず unknown/human に落ちる。",
+recommendation="UA ルールを単一のデータ定義（family/tool/severity）にまとめ、両方がそこから生成されるようにする。テスト: 双方の登録ツール集合が一致することを検証。katana/httpx(PD)/wapiti/wafw00f/arjun/dalfox は各 README・ソースで UA を確認して追加。",
+effort="S",known="none",references=[R["hex"]],related=["L01-08","L02-05"]),
+dict(id="L02-07",title="llm_sdk_headers（x-stainless-*, mcp-session-id 等）は『LLM→API』区間のヘッダで、標的に届く攻撃ツール通信には載らない前提違いの可能性が高い",area="aidetect",category="detection-gap",severity="low",confidence="hypothesis",
+summary="aidetect は x-stainless-* / mcp-session-id / mcp-protocol-version / anthropic-version を AI 由来ヘッダとして加点する（重み 1.0）。しかしこれらは LLM プロバイダや MCP サーバーへの通信に付くもので、HexStrike（MCP クライアント→サーバー→nmap/ffuf 等）、PentAGI/Strix（コンテナ内ツール）、GTG-1002（MCP サーバー群）のいずれでも標的側のリクエストはツール自身が生成する。標的が LLM アプリ/MCP エンドポイントそのものである場合のみ意味を持つ。",
+evidence="aidetect/fingerprints.py:74-78, scoring.py:44,187。各ツールの公式 README/ソース（URL）はツールが子プロセスとして標的に通信する構成を示す（x-stainless 等を標的へ送る記述は確認できず＝不在証明ではない）。実トラフィック未観測のため推測。",
+attack_scenario="運用者が『x-stainless が来ないから AI ではない』と誤解する、または評価データでこの特徴が過大評価され実効性が測れない。",
+recommendation="docs/detection に『このヘッダは LLM アプリ/MCP エンドポイント保護時のみ有効』と明記。評価では UA/ヘッダ依存を外したアブレーション（eval の特徴別寄与）を出す。実在 AI 攻撃ツールの標的側ログ（公開事例）が得られたら検証。",
+effort="S",known="none",references=[R["hex"],R["pentagi"],R["gtg"]],related=["L02-04"]),
+dict(id="L02-08",title="初期侵入後の段階（認証・プロセス生成・横展開・資格情報収集）を検知する出荷済みの検知器もセンサーも無い（AUTH/PROCESS イベント種別は定義のみ）",area="sensors",category="detection-gap",severity="medium",confidence="likely",
+summary="GTG-1002 は偵察→脆弱性発見→資格情報収集→横展開→データ持ち出しを MCP ツールで自動化したと報告され、ARES 候補（mafifrizi/ares）は AD/クラウド/横展開/EDR 回避モジュールを持つ。PentAGI/Strix も端末で post-exploitation を行う。TOKIWA は EventKind.AUTH / PROCESS / DNS を定義するが、これらを生成するセンサー（auth.log/journald/auditd/Windows イベント）は無く、検知器も AUTH/PROCESS を使わない（Sigma の logsource 対応のみ、同梱ルールは web/ai/llm_app のみ）。残るのは Web・ポート・IDS・net_scan のみ。",
+evidence="grep: EventKind.AUTH/PROCESS/DNS を参照するのは detect/sigma/fieldmap.py:406-409 のみ、DNS は suricata.py:177 が生成。sensors/ に host.py(ポート/接続)・suricata・zeek・nginx・caddy のみ。同梱 Sigma は rules ディレクトリ ai/web/llm_app の 3 区分（find で確認）。HANDOFF/wave2 に該当計画は見当たらず（grep 0件）。",
+attack_scenario="AI エージェントが Web 経由で足場を得た後、資格情報で SSH/WinRM に横展開し端末で列挙コマンドを高速に打つ。TOKIWA はその後半を何も見ない（Gate の外側）。",
+recommendation="最小構成: (1) host センサーに auth.log/journald の SSH 成功・失敗と sudo、auditd execve を AUTH/PROCESS イベントとして追加。(2) 『高速コマンド連打（人間不可能なペース）』『短時間に多数ホストへ同一資格情報』の検知器。(3) Sigma に linux auth/process_creation の同梱ルール。範囲が大きいので優先度はオーナー判断（スコープを Web 防御に絞るなら docs に明記）。",
+effort="L",known="none",references=[R["gtg"],R["ares"],R["strix"]],related=["L01-05"]),
+dict(id="L02-09",title="Chrome の新 headless では UA から HeadlessChrome が消える（資料間で見解が割れる）。Playwright/browser-use/Playwright-MCP 型エージェントは UA だけだと BROWSER 扱いになる可能性",area="aidetect",category="detection-gap",severity="low",confidence="hypothesis",
+summary="fingerprints.py の headless 判定は UA 文字列（HeadlessChrome/Playwright/Puppeteer/Selenium）依存。複数の解説は新 headless では HeadlessChrome が付かないとするが、別資料は Playwright 全 Chromium でも付くとする。ビルド/チャンネル依存で、一次情報（Chrome/Playwright リリースノート）は未確認。実 UA が通常 Chrome と同じなら、残る手掛かりは Client Hints/Fetch Metadata・ヘッダ順・TLS 指紋だが、Gate は TLS 終端背後で scheme=http を記録するため働かない（L02-03）。",
+evidence="aidetect/fingerprints.py:131-135。WebSearch で相反する二次情報（castle.io 等）。ローカルで実ブラウザは動かしておらず未確認。",
+attack_scenario="ブラウザ駆動エージェント（ARTEX の playwright-cli 経路、browser-use 等）が通常 Chrome UA で来て browser_consistent（AI 反証 -2.0）側に寄る。",
+recommendation="ラボで Playwright の既定 chromium/headless-shell/新 headless の navigator.userAgent と送出ヘッダを実測し fixtures 化。Gate で X-Forwarded-Proto を信頼して scheme を設定、HTTP/2・JA4 はプロキシ側からヘッダ受け渡しする受け口を用意。",
+effort="M",known="none",references=["https://blog.castle.io/how-to-detect-headless-chrome-bots-instrumented-with-playwright/"],related=["L02-03","L01-10","L04-02"]),
+dict(id="L02-10",title="eval/sim のプロファイルが 5 種のみで、実在 AI 攻撃ツールの形（ツール連鎖・MCP fetch・ヘッドレスブラウザ駆動・API 専用エージェント・低速/回転）を測れない",area="eval",category="testing",severity="low",confidence="confirmed",
+summary="eval/profiles.py の PROFILES は benign_browser / scanner / human_attacker / ai_agent / llm_app_attacker のみ。ai_agent の UA は python-httpx・aiohttp・Go・Claude-User の自己申告で、実運用で最も困難な形（既定ツール UA の連鎖 L02-04、UA 偽装ブラウザ、MCP fetch L02-05、API のみ）が評価データに無いため、既定のスコア調整が実世界より楽観的に見える。",
+evidence="eval/profiles.py:84-130（identity 定義）, :455-500（レジストリ）。L02 の pass1/pass2 再現スクリプト（agents/L02/scripts/repro_sessions.py, pass2/chain.py）が各形を単発で示しており、プロファイル化は未実施。",
+attack_scenario="調整（ai_agent_threshold 等）が現行プロファイルに過適合し、実在ツールの形では再現率が低いまま『評価は良好』と報告される。",
+recommendation="プロファイル追加案: llm_tool_chain（L02-04）、mcp_fetch_agent、headless_browser_agent（通常 UA）、api_only_agent、slow_rotating_agent。各プロファイルの期待ラベルと許容再現率を eval CI に入れる。",
+effort="M",known="none",references=[R["hex"],R["mcpfetch"]],related=["L02-04","L02-05","L02-09"]),
+]
+with open("$AUDIT_DIR/findings/L02-field.jsonl","a",encoding="utf-8") as f:
+    for x in F:
+        x.setdefault("known","none"); f.write(json.dumps(x,ensure_ascii=False)+"\n")
+print(len(F))

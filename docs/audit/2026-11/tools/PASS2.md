@@ -108,3 +108,68 @@ Existing: L10-01..03, L07-02. Open items (attacker-controlled telemetry rendered
 Read `$AUDIT_DIR/agents/L14/NOTES.md`. Finish only what is listed there as pending (lab ingest/agent profiles), write any
 evidence you already have as findings, then clean up containers/daemons you start. If Docker cannot be started within
 ~10 tool calls, write that down in NOTES.md and stop — do not burn budget on it.
+
+# New lanes (not covered in pass 1). Create your own findings file as named; ids start at <lane>-01.
+
+## Lane L15 — is the evaluation trustworthy?   (file: findings/L15-evalvalidity.jsonl, ports 22500-22549)
+The owner's question: 「本当に対応できる？」. TOKIWA reports detection/attribution quality through `tokiwa.eval` + `tokiwa.eval.sim`
+(backend/src/tokiwa/eval, docs on evaluation, any numbers quoted in README/docs/wiki/HANDOFF). Existing: L01-03, L02-10, L04-02.
+- Circularity: were detectors/thresholds/weights tuned on the same simulator profiles they are scored on? Does the sim emit
+  markers the detectors key on (fixed UA strings, header sets, exact pacing constants, path lists shared between sim and
+  detector code)? Grep for shared constants; perturb the sim profiles slightly (pacing jitter, header order, path names,
+  UA) and re-run `tokiwa eval run --llm mock` to measure how fast precision/recall fall. Report the measured numbers.
+- Label quality: how ground truth is assigned (per event/session/IP?), what counts as a true positive (any alert on the
+  attacker IP?), whether benign traffic is realistic and large enough, base-rate realism (attack share of traffic).
+- Metric validity: per-session vs per-campaign recall, time-to-detect, cost per incident, variance across seeds
+  (run 3-5 seeds), whether mock-LLM results say anything about real-LLM triage quality (state clearly what they cannot).
+- Documentation claims vs measured reality: any number in docs that the current code does not reproduce.
+
+## Lane L16 — false positives on realistic benign traffic   (file: findings/L16-benignfp.jsonl, ports 22600-22649)
+Operational question: how noisy is TOKIWA in front of a normal site? Existing: L04-05, L04-06, L05-11, L11-05.
+Build a small benign corpus (in MYDIR) and replay it through a local Gate + victim, or feed events directly to the
+detectors in-process, then count alerts/incidents/response proposals by rule:
+- ordinary browser sessions (SPA with many XHRs, bursts of parallel asset loads, back/forward, form posts);
+- text a real user legitimately submits: a blog post or support ticket about SQL (`SELECT * FROM users WHERE ...`),
+  code snippets, shell commands, HTML/markdown with <script> examples, file paths with `../`, URLs in parameters, base64
+  blobs, JWTs, long search queries, Japanese text, emoji, JSON with `$`-prefixed keys, GraphQL queries incl. introspection
+  from dev tools;
+- machine clients: uptime monitors, health checks, mobile apps (okhttp), API integrations with python-requests/Go/curl,
+  payment/webhook callbacks, RSS readers, link-preview bots (Slackbot, Twitterbot, facebookexternalhit), search crawlers,
+  security.txt / well-known probes, browser extensions, corporate proxies, CDN health probes;
+- operations: deploys causing 5xx/404 bursts, load tests, an internal vulnerability scan that the owner authorised,
+  admins using curl against the API.
+Report which rules fire, with what severity, whether they would trigger LLM triage (cost) or block proposals, and whether
+any allow-listing / suppression / tuning mechanism exists and works (per-rule disable, per-path exceptions, learning mode).
+
+## Lane L17 — personal data and data governance   (file: findings/L17-privacy.jsonl, ports 22700-22749)
+Operational question: what personal or confidential data does TOKIWA collect, keep, show and send out? Existing: L08-02,
+L12-02, L07-06, L11-08, L03-01, L05-01, L05-03.
+Establish FACTS from code and a local run (file:line, observed DB rows):
+- exactly which request/response parts are stored (bodies? form fields? query strings? cookies? response bodies?), for
+  how long (retention defaults, purge jobs — do they run? do they cover every table incl. LLM audit prompts/responses?),
+  and who can read them (role checks on raw events, LLM call history, exports, the copilot);
+- what leaves the system: fields sent to the LLM provider after redaction, to notification channels (Slack/Discord/email/
+  webhook), to web-research; whether an operator can turn each of these off or restrict it per data class;
+- data-subject operations: delete/export everything about one IP/user/session; anonymisation/pseudonymisation of IPs;
+- data at rest: SQLite file permissions, DB encryption, backups, secrets stored in DB, logs containing personal data;
+- access audit: is "who viewed/exported what" recorded? admin actions?
+- documentation: is any of this explained to an operator (docs/wiki)?
+Legal framing rule (the owner requires strict accuracy): do NOT state legal conclusions. For each fact, you may add a
+short "確認が必要な論点" naming the kind of obligation an operator should check (e.g. purpose limitation, retention,
+cross-border transfer to an LLM provider, security-log legitimate interest) with a PRIMARY-source URL (law text or
+regulator guidance) that you actually opened; mark anything you could not verify as 未確認. No invented article numbers.
+
+## Lane L18 — day-2 operations: backup, upgrade, recovery, key handling   (file: findings/L18-day2ops.jsonl, ports 22800-22849)
+Existing: L11-01..09, L13-01..05, L14-01..10, L06-02, L07-02, L11-03.
+- Upgrades and schema changes: is there a migration mechanism (alembic or equivalent)? What happens when a newer version
+  starts on an older DB (try it: create a DB, add/alter a column in a copy of the models, start) — silent breakage?
+- Backup/restore: documented procedure? Does a SQLite file copy taken while the server runs restore cleanly (WAL)?
+  PostgreSQL path? What is NOT in the DB but needed (secret.key, tokens, data dir files)?
+- Key and credential lifecycle: secret.key creation/permissions/rotation, API token rotation and expiry, admin password
+  reset/lockout recovery, what breaks on rotation (cross-check L11-03 only for new aspects).
+- Config handling: precedence env vs file vs DB settings, invalid config behaviour at startup (fail closed or silently
+  default?), dangerous defaults when a setting is misspelled, hot-reload of settings changed in the UI.
+- Startup/shutdown: graceful shutdown (in-flight ingest, queued triage, Gate queue), crash recovery, job scheduler
+  catch-up/overlap, time jumps/NTP, disk-full behaviour (try a small tmpfs or a quota if cheap), log rotation of
+  TOKIWA's own logs, running as non-root, systemd/compose restart policies in deploy/.
+- Multi-admin operations: concurrent edits (last-write-wins?), deleting the last admin, disabling a user with live tokens.

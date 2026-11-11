@@ -1,0 +1,5 @@
+response:
+  protected_cidrs: ["127.0.0.0/8", "10.0.0.0/8"]
+  auto_aprove_enabled: false
+gate:
+  trust_forwarded_for: false
