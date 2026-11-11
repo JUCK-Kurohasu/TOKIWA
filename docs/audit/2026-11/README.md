@@ -11,6 +11,7 @@ TOKIWA を実在の AI 攻撃ツール（ARTEX、ARES、PentAGI、Strix など�
 | `repro/<レーン>/` | 監査で使った再現スクリプトと出力（作業ファイルそのまま。トークン類は伏せてある） |
 | `RULES.md` | 監査エージェントに与えたルール（読み取り専用・localhost のみ・実 LLM 不使用 など） |
 | `tools/` | 集計（`consolidate.py`）・Issue 本文の生成（`render2.py`）・REST での一括登録（`file_issues.py`）・親 Issue 本文の再生成（`epic.py`）・2 巡目の指示（`PASS2.md`）。LLM を使わずに再実行できる |
+| `tools/taxonomy.json` + `tools/status_diagram.py` | 全 Issue の分類（系統 A〜K と原因別の束）と、#16 先頭の系統図（Mermaid）の生成。Issue の開閉状態を GitHub から読んで描き直す（`.github/workflows/audit-epic.yml` が close / reopen 時に実行） |
 
 ## レーン
 

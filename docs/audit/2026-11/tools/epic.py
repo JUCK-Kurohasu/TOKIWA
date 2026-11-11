@@ -31,3 +31,4 @@ if "--dry" not in sys.argv:
     r = subprocess.run(["gh", "api", "-X", "PATCH", "repos/JUCK-Kurohasu/TOKIWA/issues/16", "--input", "-", "--jq", ".html_url"],
                        input=json.dumps({"body": body}), capture_output=True, text=True)
     print(r.stdout.strip() or r.stderr.strip()[:300])
+    subprocess.run([sys.executable, str(A / "status_diagram.py")], check=False)  # refill the status diagram section

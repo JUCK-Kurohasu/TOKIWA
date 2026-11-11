@@ -1,0 +1,34 @@
+# Redraw the status diagram in the audit epic (#16) whenever an issue is closed or reopened.
+# docs/audit/2026-11/tools/status_diagram.py reads the live issue states and rewrites only the section
+# between the audit-status markers in the epic body (it does nothing when no audit issue changed state).
+name: Audit epic status
+
+on:
+  issues:
+    types: [closed, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  redraw:
+    name: redraw status diagram
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # One run at a time; a newer queued run replaces an older queued one, and the last one always
+    # reads the current states, so bulk closes end in a correct diagram.
+    concurrency:
+      group: audit-epic-status
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write # edits the epic body
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Redraw the diagram
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 docs/audit/2026-11/tools/status_diagram.py
