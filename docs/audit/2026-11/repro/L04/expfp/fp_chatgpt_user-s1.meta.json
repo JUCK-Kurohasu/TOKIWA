@@ -1,0 +1,20 @@
+{
+  "generator_version": "1",
+  "summary": {
+    "events": 33,
+    "events_by_attack": {
+      "none": 33
+    },
+    "events_by_profile": {
+      "fp_chatgpt_user": 33
+    },
+    "first": "2026-10-01T09:02:48.947256+00:00",
+    "labelled_events": 33,
+    "last": "2026-10-01T09:15:41.256649+00:00",
+    "sessions": 3,
+    "sessions_by_profile": {
+      "fp_chatgpt_user": 3
+    }
+  },
+  "tokiwa_version": "0.1.0"
+}

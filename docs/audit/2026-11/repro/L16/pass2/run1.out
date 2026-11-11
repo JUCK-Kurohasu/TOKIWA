@@ -1,0 +1,22 @@
+events in: 6855 scenarios: [('deploy_users', 40), ('spa_browser', 10), ('text_user', 1), ('uptimerobot', 1), ('k8s_probe', 1), ('elb_health', 1), ('cloudfront_origin', 1), ('okhttp_app', 1), ('python_integration', 1), ('go_integration', 1), ('curl_admin', 1), ('stripe_webhook', 1), ('rss_reader', 1), ('preview_Slackbot-LinkExpanding', 1), ('preview_Twitterbot', 1), ('preview_facebookexternalhit', 1), ('preview_Discordbot', 1), ('googlebot_crawl', 1), ('wellknown_probes', 1), ('deploy_refresher', 1), ('internal_k6_loadtest', 1), ('internal_authorised_scan', 1), ('forgot_password', 1)]
+
+ALERTS 42 {'medium': 17, 'high': 19, 'critical': 4, 'low': 2}
+  internal_authorised_scan (events 11): {('deception.trip', 'critical'): 2, ('sigma:004869cf-0236-45b7-875f-9f40dab81dca', 'medium'): 1, ('sigma:8db5e4e5-c68f-4807-943a-3e79810ba1af', 'medium'): 1, ('web.sensitive_file_probe', 'medium'): 3, ('web.scanner_ua', 'medium'): 1, ('web.sensitive_file_probe', 'low'): 1, ('sigma:52b1c390-1b3e-43ac-aa72-8ad1bd56f75a', 'low'): 1, ('web.sqli', 'high'): 1, ('sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9', 'medium'): 1, ('web.xss', 'high'): 1, ('sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad', 'high'): 1, ('web.path_traversal', 'high'): 1}
+  internal_k6_loadtest (events 2400): {('web.request_flood', 'medium'): 1}
+  text_user (events 27): {('ai.natural_language_payload', 'medium'): 3, ('sigma:d2d481f5-8c00-48b7-b5ee-7fdc9656fe94', 'medium'): 1, ('sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96', 'high'): 1, ('web.sqli', 'high'): 2, ('sigma:be88336f-ab43-4572-b22f-f67eaae301df', 'high'): 1, ('web.path_traversal', 'medium'): 2, ('sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03', 'high'): 1, ('web.cmd_injection', 'high'): 1, ('web.path_traversal', 'high'): 2, ('sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9', 'medium'): 1, ('web.xss', 'high'): 2, ('sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad', 'high'): 1, ('web.ssrf', 'high'): 2, ('sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b', 'high'): 1, ('sigma:3c8aa795-ee7b-495a-9c73-70f15a08c006', 'medium'): 1, ('sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779', 'critical'): 1, ('web.deserialization', 'high'): 1, ('web.log4shell', 'critical'): 1, ('llm_app.prompt_injection', 'medium'): 1}
+
+INCIDENTS 3
+   critical [198.51.100.11] Log4Shell JNDI Lookup String 他25件 | ['198.51.100.11']
+   medium [10.20.0.69] HTTP request flood: 200 requests in 10s (~20 rps) | ['10.20.0.69']
+   critical [10.20.0.70] Decoy path requested (Decoy /.env) 他14件 | ['10.20.0.70']
+
+LLM calls 82 Counter({'triage': 65, 'incident': 17})
+
+PROPOSALS 5
+   ('rate_limit', '198.51.100.11', 'proposed', 'llm') text_user
+   ('deceive', '198.51.100.11', 'proposed', 'llm') text_user
+   ('block_ip', '198.51.100.11', 'proposed', 'llm') text_user
+   ('block_ip', '10.20.0.70', 'proposed', 'llm') internal_authorised_scan
+   ('rate_limit', '10.20.0.70', 'proposed', 'llm') internal_authorised_scan
+
+sessions ai>=0.5: []

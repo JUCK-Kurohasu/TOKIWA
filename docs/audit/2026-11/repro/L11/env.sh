@@ -1,0 +1,1 @@
+export TOKIWA_SERVER__DATA_DIR=docs/audit/2026-11/repro/L11/run1/data TOKIWA_DATABASE__URL=sqlite+aiosqlite:///docs/audit/2026-11/repro/L11/run1/data/tokiwa.db TOKIWA_SERVER__STATIC_DIR=/home/user/TOKIWA/frontend/dist TOKIWA_LLM__PROVIDER=mock TOKIWA_INTEL__ENABLED=false

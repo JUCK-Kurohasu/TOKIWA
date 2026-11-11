@@ -1,0 +1,7 @@
+F = {"id":"L09-04","title":"protected_cidrs 等の安全設定を後から変えても、既に active な遮断は Gate ポリシーに残り続ける（再検証は実行直前の 1 回だけ）",
+"area":"respond","category":"reliability","severity":"medium","confidence":"likely",
+"summary":"_execute() は実行直前に現在の設定で再検証するが、Gate ポリシー生成（build_gate_policy/aggregate）は active 行をそのまま集約し、protected_cidrs・protect_server_addresses・min_prefix・block_private_targets を再適用しない。誤遮断に気づいた管理者が『絶対に対象にしない範囲』に自社 LB や監視 IP を追加しても、その IP の既存遮断は TTL（最大 7 日）が切れるか個別に取り消すまで有効のまま。docs/response.md は protected_cidrs を『絶対に対象にしない範囲』と説明しており、運用者の期待と挙動が食い違う。Gate 側も fail-static（サーバー不達中は最後のポリシーを保持し、エントリに期限を持たない）なので、障害中は取り消しも期限切れも反映されない。",
+"evidence":"backend/src/tokiwa/respond/policy.py:55-87（aggregate は ip_network(row.target) のみ。保護範囲チェック無し）, :109-144（build_gate_policy）; respond/service.py:305-314（再検証は _execute 内のみ）; gate/policy.py:3-10, 208-240（fail-static、GatePolicy にエントリ単位の期限なし）; docs/response.md §7（protected_cidrs: 絶対に対象にしない範囲）",
+"attack_scenario":"攻撃者が自社の上流 LB/監視/パートナー IP を送信元に見せかけて（XFF 信頼構成や共有出口経由）遮断を成立させる→運用者が慌てて protected_cidrs に追加して再起動しても遮断は解けず、active 行を探して個別に revert するまでサービス断が続く。さらに TOKIWA サーバーを落とすと Gate は最後のポリシーを無期限に保持し、取り消し操作も届かない。",
+"recommendation":"build_gate_policy で各 active 行を現在設定の validate_network_target に通し、不合格は配信から除外＋行を failed/reverted に遷移（監査付き）。設定変更（protected_cidrs 追加）時に該当 active 行を一覧表示/一括取り消しする管理 API。GatePolicy に entries ごとの expires_at を入れ、Gate 側でも期限切れを適用（fail-static でも期限は守る）。",
+"effort":"S","known":"none","references":[],"related":["L09-01"]}

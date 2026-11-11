@@ -1,0 +1,22 @@
+{"scenario": "baseline: fixed IP + fixed python-httpx UA", "events": 20, "sessions": 1, "classifications": {"ai_agent": 1}, "max_ai_score": 0.9841, "max_session_requests": 20, "top_indicators": ["adaptive_mutation", "discovery_then_use", "burst_think_rhythm", "automation_client", "attack_payloads"]}
+{"scenario": "baseline: fixed IP + fixed Chrome UA (nuclei-like header set)", "events": 20, "sessions": 1, "classifications": {"ai_agent": 1}, "max_ai_score": 0.9188, "max_session_requests": 20, "top_indicators": ["adaptive_mutation", "discovery_then_use", "burst_think_rhythm", "attack_payloads", "regular_think_gaps"]}
+{"scenario": "per-request UA rotation (nuclei useragent.PickRandom per request)", "events": 20, "sessions": 18, "classifications": {"unknown": 18}, "max_ai_score": 0.0163, "max_session_requests": 2, "top_indicators": ["spec_discovery", "browser_consistent"]}
+{"scenario": "per-request IP rotation (residential proxy pool) + fixed httpx UA", "events": 20, "sessions": 19, "classifications": {"unknown": 19}, "max_ai_score": 0.1727, "max_session_requests": 2, "top_indicators": ["adaptive_mutation", "automation_client", "attack_payloads"]}
+{"scenario": "AI agent driving sqlmap (default sqlmap UA)", "events": 20, "sessions": 1, "classifications": {"ai_agent": 1}, "max_ai_score": 0.7732, "max_session_requests": 20, "top_indicators": ["adaptive_mutation", "discovery_then_use", "burst_think_rhythm", "attack_payloads", "regular_think_gaps"]}
+{"scenario": "jittered pacing: think gaps 0.3-0.95s (mid band, e.g. fast model / Strix-style parallel agents)", "events": 20, "sessions": 1, "classifications": {"human": 1}, "max_ai_score": 0.5267, "max_session_requests": 20, "top_indicators": ["discovery_then_use", "adaptive_mutation", "automation_client", "attack_payloads", "spec_discovery"]}
+{"scenario": "jittered pacing: think gaps 65-180s (slow/human-like delays)", "events": 20, "sessions": 1, "classifications": {"ai_agent": 1}, "max_ai_score": 0.9089, "max_session_requests": 20, "top_indicators": ["adaptive_mutation", "discovery_then_use", "automation_client", "attack_payloads", "spec_discovery"]}
+--- fingerprint checks
+{"case": "Chrome UA + nuclei header set, scheme=http", "family": "browser", "anomalies": []}
+{"case": "Chrome UA + nuclei header set, scheme=https", "family": "browser", "anomalies": ["chromium_ua_without_client_hints", "browser_ua_without_fetch_metadata"]}
+{"ua": "Ares-Agent", "family": "unknown", "tool": null, "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "PentAGI", "family": "unknown", "tool": null, "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 (compatible; Strix/1.0)", "family": "unknown", "tool": null, "automation": true, "anomalies": ["nonstandard_mozilla_ua", "no_accept_language"]}
+{"ua": "Go-http-client/2.0", "family": "http_library", "tool": "go-http-client", "automation": true, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, l", "family": "headless_browser", "tool": "headless-chrome", "automation": true, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KH", "family": "browser", "tool": null, "automation": false, "anomalies": ["browser_ua_without_accept_language"]}
+{"ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Fir", "family": "browser", "tool": null, "automation": false, "anomalies": ["browser_ua_without_accept_language"]}
+{"ua": "Fuzz Faster U Fool v2.1.0-dev", "family": "scanner", "tool": "ffuf", "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.00 (Nikto/2.5.0) (Evasions:None) (Test:Port Check)", "family": "scanner", "tool": "nikto", "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/", "family": "scanner", "tool": "nmap", "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ChatGPT", "family": "ai_agent", "tool": "chatgpt-user", "automation": false, "anomalies": ["no_accept_language"]}
+{"ua": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)", "family": "browser", "tool": null, "automation": false, "anomalies": ["browser_ua_without_accept_language"]}

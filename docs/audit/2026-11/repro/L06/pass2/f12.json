@@ -1,0 +1,9 @@
+{"id":"L06-12","title":"deceive モードの汎用 404 と Gate 生成の 502/504 に Cache-Control が無く、CDN/共有キャッシュの背後では deceive 中の 1 IP が実 URL のキャッシュを 404 で汚染し得る",
+"area":"gate","category":"robustness","severity":"low","confidence":"likely",
+"summary":"Gate の _respond() は 403/429/501 にだけ Cache-Control: no-store を付ける（app.py:558-559）。サーバー生成のデコイは no-store 付き（deception/render.py:20）だが、deceive 対象 IP に全パスで返す GENERIC_404（app.py:346-348）と上流障害時の 502/504 には Cache-Control も Vary も無い。Gate の前段に CDN/リバースキャッシュがある構成では、deceive 中の IP が実在 URL（静的アセット等）をキャッシュミス時に要求すると、その 404 が共有キャッシュに保存され、他の全利用者が一定時間 404 を受ける可能性がある（CDN の負のキャッシュ既定は製品依存＝要確認）。",
+"evidence":"app.py:539-567（no-store は status in (403,429,501) のみ）, :346-348。再現（偽ポリシーで deceive=['127.0.0.1/32'] を配った gateM 21606）: curl -si /products/1 → 'HTTP/1.1 404 Not Found / content-type: text/html; charset=utf-8 / content-length: 157 / date / server: rawup' で Cache-Control・Vary なし。CDN が 404 をキャッシュする挙動自体は本環境では未検証。",
+"attack_scenario":"攻撃者が意図的に deceive 判定を受け（デコイを踏む等）、その後に人気アセットや主要ページをキャッシュバスター無しで要求すると、CDN が 404 を保存して正規利用者に配る（防御機構を使った可用性攻撃）。逆に deceive が誤判定（L03-10 のような正規 AI アシスタント）でも同じ事故が起きる。",
+"recommendation":"Gate 生成応答（GENERIC_404, 502, 504, 汎用デコイ）には一律 Cache-Control: no-store, private を付与し、deceive 対象への応答には Vary: * 相当（または CDN 向け CDN-Cache-Control: no-store / Surrogate-Control: no-store）も付ける。gate.md に CDN 配下での注意を追記。",
+"effort":"S","known":"none",
+"references":["https://developers.cloudflare.com/cache/how-to/configure-cache-status-code/","https://www.rfc-editor.org/rfc/rfc9111#section-4.2.2"],
+"related":["L03-05","L03-10"]}

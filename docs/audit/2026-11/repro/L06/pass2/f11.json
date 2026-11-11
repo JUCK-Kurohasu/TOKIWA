@@ -1,0 +1,9 @@
+{"id":"L06-11","title":"CIDR 指定の rate_limit もクライアント IP ごとに別バケットで、範囲内のアドレスを回すだけで無制限。トリアージの提案は単一 IP（IPv6 も /128）限定のため、/64 を持つ IPv6 攻撃者には block/rate_limit/deceive が実質効かない",
+"area":"gate","category":"detection-gap","severity":"medium","confidence":"confirmed",
+"summary":"TokenBucketLimiter.allow() のキーは一致したポリシー項目ではなく ex.client_ip（app.py:283, ratelimit.py:3-6 で意図的と明記）。そのため 203.0.113.0/24 や 2001:db8::/64 に 3 req/min を設定しても、範囲内で送信元を変えれば各アドレスが満タンのバケットを得て制限されない。加えてトリアージの対処提案は evidence に出た単一 IP だけを許可（triage/evidence.py:289-299）し、IPv6 でも /128 になる。IPv6 の家庭/クラウド回線は通常 /64 以上が割り当てられ、エージェントはリクエストごとに送信元を変えられるので、block_ip・rate_limit・deceive・tarpit はいずれも次のアドレスで外れる。LRU 上限（100,000 キー）もあるため大量アドレスでは既存バケットも押し出される。",
+"evidence":"backend/src/tokiwa/gate/app.py:281-283, ratelimit.py:3-6,33-60, triage/evidence.py:289-299, config.py:198-199（min_prefix_v6=48 は手動 CIDR を許すが提案は /128）。再現（偽ポリシーサーバー scripts/fakepolicy.py で rate_limited={'203.0.113.0/24':3,'2001:db8::/64':3}、gateM 21606 --trust-forwarded-for、XFF は試験用の送信元指定手段）: 同一 203.0.113.5 ×8 → '200 200 200 429 429 429 429 429'、/24 内で .10〜.17 を回す ×8 → 全 200。IPv6 同一 2001:db8::1 ×8 → 3 回目以降 429、/64 内 2001:db8::a:1〜8 → 全 200。",
+"attack_scenario":"クラウド VM（AWS/GCP は IPv6 /80〜/64 を付与可能）や住宅回線の /56〜/64 を持つ AI エージェントが、ソケットごとに送信元 IPv6 を変える（ツール側で容易）と、SOC が承認したブロック・レート制限は常に 1 アドレス遅れで追いかけるだけになる。IPv4 でもプロキシプール/住宅プロキシで同様だが、IPv6 では追加コスト 0。",
+"recommendation":"(1) rate_limit のバケットキーを『一致したポリシー項目（CIDR）』単位にするオプション（shared_bucket）を追加し、CIDR 指定時の既定にする。(2) IPv6 送信元は検知・相関・対処のすべてで /64 に集約した『主体キー』を併用（イベントに source.ip_prefix を付与）。(3) トリアージ提案で IPv6 は /64 への block/rate_limit を許可（validate.py の min_prefix_v6=48 の範囲内）し、UI で範囲を明示。(4) 同一 /64 内のアドレス数急増を検知（アドレス回転＝自動化ツール）するルールを追加。",
+"effort":"M","known":"none",
+"references":["https://www.rfc-editor.org/rfc/rfc6177"],
+"related":["L06-01","L09"]}

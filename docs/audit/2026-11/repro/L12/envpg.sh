@@ -1,0 +1,1 @@
+export TOKIWA_SERVER__DATA_DIR=docs/audit/2026-11/repro/L12/runpg/data TOKIWA_DATABASE__URL=postgresql+asyncpg://tokiwa@127.0.0.1:18551/tokiwa TOKIWA_SERVER__STATIC_DIR=/home/user/TOKIWA/frontend/dist TOKIWA_LLM__PROVIDER=mock PYTHONPATH=docs/audit/2026-11/repro/L12/pylib

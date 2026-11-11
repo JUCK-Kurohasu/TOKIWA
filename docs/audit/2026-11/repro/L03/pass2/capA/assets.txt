@@ -1,0 +1,9 @@
+01a1c80b2adf7c3da504024ef6f1bc4f decoy_path /.env True Decoy /.env
+01a1c80b2ae270b8894bcdda4c194830 decoy_path /backup.sql True Decoy /backup.sql
+01a1c80b2ae576debde3195902af7974 decoy_path /admin/config.php True Decoy /admin/config.php
+01a1c80b2ae77030aafd2b4fcb792500 decoy_path /.git/config True Decoy /.git/config
+01a1c80b2ae97467b6a07b295b53e0e7 decoy_path /api/internal/debug True Decoy /api/internal/debug
+01a1c80b2aea7b95b295ed85a38deab2 ai_canary None True AI canary: hidden HTML instruction
+01a1c80b2aec7deda0ac2cf09080550c ai_canary /api/internal/openapi.json True AI canary: internal OpenAPI
+01a1c80b2aed7ecda50b6771add3633f ai_canary /robots.txt False AI canary: robots.txt
+01a1c80b2aef7f648bd4b33a9eaf8a6d ai_canary /llms.txt False AI canary: llms.txt

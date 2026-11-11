@@ -1,0 +1,9 @@
+{"id":"L06-09","title":"Gate はヘッダを先頭 64 個しか記録しないが上流へは全ヘッダを転送する。ダミーヘッダ 64 個を前置するだけで User-Agent・Referer・X-Forwarded-Host 等がイベントから消え、scanner_ua やヘッダ経由の SQLi/Log4Shell 等の検知と AI 帰属が無効化される（欠落の印も付かない）",
+"area":"gate","category":"detection-gap","severity":"medium","confidence":"confirmed",
+"summary":"capture_headers() は raw[:MAX_CAPTURED_HEADERS]（=64）だけを辞書化し、それ以降のヘッダは user_agent/referrer/content_type を含めてイベントに一切残らない（capture.py:25,136-149,219-236）。プロキシは全ヘッダを上流へ送るので、検知が見る内容と上流が処理する内容が食い違う。切り捨ては tag/label にも出ないため、SOC から見ると『UA 無しの普通のリクエスト』になる。uvicorn/httptools は 64 を大きく超えるヘッダ数を受け付ける。ヘッダ長の上限（L05-02）とは別原因。",
+"evidence":"capture.py:25 MAX_CAPTURED_HEADERS = 64, :140 for ... in raw[:MAX_CAPTURED_HEADERS]。再現 scripts/caps.py（agents/L06/pass2）: gateA 21603→lab victim。対照 GET /capctl1 + 'User-Agent: sqlmap/1.8.2' + Referer に UNION SELECT → web.scanner_ua・sigma Vulnerability Scanner UA・web.sqli[header referer] の 3 アラート、イベント ua='sqlmap/...'。同じヘッダの前に X-Pad-0..63 を置いた GET /cappad1 → イベント ua=None, referrer なし, headers 64 個（X-Pad のみ）, tags=[]、アラート 0 件。同じ要求を gateR（生ログ上流）へ → 上流は 74 ヘッダを受信し user-agent: sqlmap... と referer: ...UNION SELECT... を含む（logs/rawup.jsonl）。",
+"attack_scenario":"AI エージェント／その生成スクリプトに『ランダムなヘッダを 70 個付けて』と指示するだけで、ツール UA（sqlmap/nuclei/ffuf）や AI フレームワーク UA に基づく帰属、X-Forwarded-For/Referer/X-Api-Version 等のヘッダ経由インジェクション検知、header_order 指紋（AI クライアント識別）がすべて外れる。上流アプリは通常どおりヘッダを解釈するため、ヘッダ経由の攻撃（Log4Shell 型、ホストヘッダ攻撃、SQLi）は成立し記録だけが欠落する。",
+"recommendation":"(1) 検知に重要なヘッダ（user-agent, referer, host, content-type, cookie, authorization, x-forwarded-*, forwarded, origin と web_common の allowlist 全体）は位置に関係なく必ず捕捉する（先に名前で拾い、残りを先頭 N 個）。(2) 上限超過時は gate:headers_truncated タグと総数ラベルを付け、web_recon で『異常なヘッダ数』（例 >40）自体を medium シグナルにする。(3) Gate に受理するヘッダ数の上限（例 100、超過は 431）を設ける。(4) header_order には総数を記録。",
+"effort":"S","known":"none",
+"references":["https://datatracker.ietf.org/doc/html/rfc6585#section-5"],
+"related":["L05-02","L05-06"]}

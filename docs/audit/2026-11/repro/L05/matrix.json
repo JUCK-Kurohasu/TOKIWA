@@ -1,0 +1,963 @@
+{
+ "plain(1x url)|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "plain(1x url)|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "plain(1x url)|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "plain(1x url)|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "plain(1x url)|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "plain(1x url)|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "plain(1x url)|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "plain(1x url)|deser_php": [
+  "web.deserialization"
+ ],
+ "plain(1x url)|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "url 2x|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "url 2x|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "url 2x|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "url 2x|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "url 2x|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "url 2x|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "url 2x|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "url 2x|deser_php": [
+  "web.deserialization"
+ ],
+ "url 2x|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "url 3x|sqli": [
+  "web.sqli"
+ ],
+ "url 3x|xss": [
+  "web.xss"
+ ],
+ "url 3x|traversal": [
+  "web.path_traversal"
+ ],
+ "url 3x|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "url 3x|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "url 3x|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "url 3x|log4shell": [
+  "web.log4shell"
+ ],
+ "url 3x|deser_php": [
+  "web.deserialization"
+ ],
+ "url 3x|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "url 4x|sqli": [],
+ "url 4x|xss": [],
+ "url 4x|traversal": [],
+ "url 4x|cmdi": [],
+ "url 4x|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "url 4x|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "url 4x|log4shell": [],
+ "url 4x|deser_php": [],
+ "url 4x|lfi_wrapper": [],
+ "%uXXXX|sqli": [
+  "web.sqli"
+ ],
+ "%uXXXX|xss": [
+  "web.xss"
+ ],
+ "%uXXXX|traversal": [
+  "web.path_traversal"
+ ],
+ "%uXXXX|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "%uXXXX|ssti": [
+  "web.ssti"
+ ],
+ "%uXXXX|ssrf": [
+  "web.ssrf"
+ ],
+ "%uXXXX|log4shell": [
+  "web.log4shell"
+ ],
+ "%uXXXX|deser_php": [
+  "web.deserialization"
+ ],
+ "%uXXXX|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "overlong utf8|sqli": [
+  "web.sqli"
+ ],
+ "overlong utf8|xss": [
+  "web.xss"
+ ],
+ "overlong utf8|traversal": [
+  "web.path_traversal"
+ ],
+ "overlong utf8|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "overlong utf8|ssti": [
+  "web.ssti"
+ ],
+ "overlong utf8|ssrf": [
+  "web.ssrf"
+ ],
+ "overlong utf8|log4shell": [
+  "web.log4shell"
+ ],
+ "overlong utf8|deser_php": [
+  "web.deserialization"
+ ],
+ "overlong utf8|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "fullwidth|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "fullwidth|xss": [
+  "web.xss"
+ ],
+ "fullwidth|traversal": [
+  "web.path_traversal"
+ ],
+ "fullwidth|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "fullwidth|ssti": [
+  "web.ssti"
+ ],
+ "fullwidth|ssrf": [
+  "web.ssrf"
+ ],
+ "fullwidth|log4shell": [
+  "web.log4shell"
+ ],
+ "fullwidth|deser_php": [],
+ "fullwidth|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "html &#dd;|sqli": [
+  "web.sqli"
+ ],
+ "html &#dd;|xss": [
+  "web.xss"
+ ],
+ "html &#dd;|traversal": [
+  "web.path_traversal"
+ ],
+ "html &#dd;|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "html &#dd;|ssti": [
+  "web.ssti"
+ ],
+ "html &#dd;|ssrf": [
+  "web.ssrf"
+ ],
+ "html &#dd;|log4shell": [
+  "web.log4shell"
+ ],
+ "html &#dd;|deser_php": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.deserialization"
+ ],
+ "html &#dd;|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "html &#xh (no ;)|sqli": [
+  "web.sqli"
+ ],
+ "html &#xh (no ;)|xss": [],
+ "html &#xh (no ;)|traversal": [
+  "web.path_traversal"
+ ],
+ "html &#xh (no ;)|cmdi": [],
+ "html &#xh (no ;)|ssti": [
+  "web.ssti"
+ ],
+ "html &#xh (no ;)|ssrf": [],
+ "html &#xh (no ;)|log4shell": [
+  "web.log4shell"
+ ],
+ "html &#xh (no ;)|deser_php": [],
+ "html &#xh (no ;)|lfi_wrapper": [],
+ "html named|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "html named|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "html named|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "html named|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "html named|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "html named|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "html named|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "html named|deser_php": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.deserialization"
+ ],
+ "html named|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "random case|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "random case|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "random case|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "random case|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "random case|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "random case|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "random case|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "random case|deser_php": [],
+ "random case|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "ws tab|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "ws tab|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "ws tab|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws tab|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "ws tab|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "ws tab|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "ws tab|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "ws tab|deser_php": [
+  "web.deserialization"
+ ],
+ "ws tab|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "ws %0b|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "ws %0b|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "ws %0b|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws %0b|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "ws %0b|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "ws %0b|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "ws %0b|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "ws %0b|deser_php": [
+  "web.deserialization"
+ ],
+ "ws %0b|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "ws %a0|sqli": [],
+ "ws %a0|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "ws %a0|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws %a0|cmdi": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws %a0|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "ws %a0|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "ws %a0|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "ws %a0|deser_php": [
+  "web.deserialization"
+ ],
+ "ws %a0|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "ws /**/|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "ws /**/|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "ws /**/|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws /**/|cmdi": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "ws /**/|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "ws /**/|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "ws /**/|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "ws /**/|deser_php": [
+  "web.deserialization"
+ ],
+ "ws /**/|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "base64 param|sqli": [],
+ "base64 param|xss": [],
+ "base64 param|traversal": [],
+ "base64 param|cmdi": [],
+ "base64 param|ssti": [],
+ "base64 param|ssrf": [],
+ "base64 param|log4shell": [],
+ "base64 param|deser_php": [],
+ "base64 param|lfi_wrapper": [],
+ "json body|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "json body|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "json body|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "json body|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "json body|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "json body|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "json body|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "json body|deser_php": [
+  "web.deserialization"
+ ],
+ "json body|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "json \\u escapes|sqli": [
+  "web.sqli"
+ ],
+ "json \\u escapes|xss": [
+  "web.xss"
+ ],
+ "json \\u escapes|traversal": [
+  "web.path_traversal"
+ ],
+ "json \\u escapes|cmdi": [
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "json \\u escapes|ssti": [
+  "web.ssti"
+ ],
+ "json \\u escapes|ssrf": [
+  "web.ssrf"
+ ],
+ "json \\u escapes|log4shell": [
+  "web.log4shell"
+ ],
+ "json \\u escapes|deser_php": [
+  "web.deserialization"
+ ],
+ "json \\u escapes|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "json nested string|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "json nested string|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "json nested string|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "json nested string|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "json nested string|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "json nested string|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "json nested string|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "json nested string|deser_php": [],
+ "json nested string|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "json 128 leaves first|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96"
+ ],
+ "json 128 leaves first|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9"
+ ],
+ "json 128 leaves first|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad"
+ ],
+ "json 128 leaves first|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03"
+ ],
+ "json 128 leaves first|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c"
+ ],
+ "json 128 leaves first|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b"
+ ],
+ "json 128 leaves first|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "json 128 leaves first|deser_php": [],
+ "json 128 leaves first|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137"
+ ],
+ "json key|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96"
+ ],
+ "json key|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9"
+ ],
+ "json key|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad"
+ ],
+ "json key|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03"
+ ],
+ "json key|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c"
+ ],
+ "json key|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b"
+ ],
+ "json key|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "json key|deser_php": [],
+ "json key|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137"
+ ],
+ "json utf-16 body|sqli": [],
+ "json utf-16 body|xss": [],
+ "json utf-16 body|traversal": [],
+ "json utf-16 body|cmdi": [],
+ "json utf-16 body|ssti": [],
+ "json utf-16 body|ssrf": [],
+ "json utf-16 body|log4shell": [],
+ "json utf-16 body|deser_php": [],
+ "json utf-16 body|lfi_wrapper": [],
+ "graphql variables|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "graphql variables|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "graphql variables|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "graphql variables|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "graphql variables|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "graphql variables|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "graphql variables|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "graphql variables|deser_php": [
+  "web.deserialization"
+ ],
+ "graphql variables|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "multipart|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "multipart|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "multipart|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "multipart|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "multipart|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "multipart|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "multipart|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "multipart|deser_php": [
+  "sigma:8702e466-1a81-4f21-83dc-0c5858a17114",
+  "web.deserialization"
+ ],
+ "multipart|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "multipart xboundary confusion|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96"
+ ],
+ "multipart xboundary confusion|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9"
+ ],
+ "multipart xboundary confusion|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad"
+ ],
+ "multipart xboundary confusion|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03"
+ ],
+ "multipart xboundary confusion|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c"
+ ],
+ "multipart xboundary confusion|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b"
+ ],
+ "multipart xboundary confusion|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "multipart xboundary confusion|deser_php": [
+  "sigma:8702e466-1a81-4f21-83dc-0c5858a17114",
+  "web.deserialization"
+ ],
+ "multipart xboundary confusion|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137"
+ ],
+ "xml element|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96",
+  "web.sqli"
+ ],
+ "xml element|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "xml element|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "xml element|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "xml element|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "xml element|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "xml element|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "xml element|deser_php": [
+  "sigma:8702e466-1a81-4f21-83dc-0c5858a17114",
+  "web.deserialization"
+ ],
+ "xml element|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "header Referer|sqli": [
+  "web.sqli"
+ ],
+ "header Referer|xss": [
+  "web.xss"
+ ],
+ "header Referer|traversal": [],
+ "header Referer|cmdi": [
+  "web.cmd_injection"
+ ],
+ "header Referer|ssti": [
+  "web.ssti"
+ ],
+ "header Referer|ssrf": [
+  "web.ssrf"
+ ],
+ "header Referer|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "header Referer|deser_php": [
+  "web.deserialization"
+ ],
+ "header Referer|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "header X-Forwarded-Host|sqli": [
+  "web.sqli"
+ ],
+ "header X-Forwarded-Host|xss": [
+  "web.xss"
+ ],
+ "header X-Forwarded-Host|traversal": [],
+ "header X-Forwarded-Host|cmdi": [
+  "web.cmd_injection"
+ ],
+ "header X-Forwarded-Host|ssti": [
+  "web.ssti"
+ ],
+ "header X-Forwarded-Host|ssrf": [
+  "web.ssrf"
+ ],
+ "header X-Forwarded-Host|log4shell": [
+  "web.log4shell"
+ ],
+ "header X-Forwarded-Host|deser_php": [
+  "web.deserialization"
+ ],
+ "header X-Forwarded-Host|lfi_wrapper": [
+  "web.lfi_rfi"
+ ],
+ "custom header X-Tenant-Id|sqli": [],
+ "custom header X-Tenant-Id|xss": [],
+ "custom header X-Tenant-Id|traversal": [],
+ "custom header X-Tenant-Id|cmdi": [],
+ "custom header X-Tenant-Id|ssti": [
+  "web.ssti"
+ ],
+ "custom header X-Tenant-Id|ssrf": [
+  "web.ssrf"
+ ],
+ "custom header X-Tenant-Id|log4shell": [
+  "web.log4shell"
+ ],
+ "custom header X-Tenant-Id|deser_php": [
+  "web.deserialization"
+ ],
+ "custom header X-Tenant-Id|lfi_wrapper": [],
+ "path segment|sqli": [
+  "web.sqli"
+ ],
+ "path segment|xss": [
+  "web.xss"
+ ],
+ "path segment|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "path segment|cmdi": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "path segment|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "path segment|ssrf": [
+  "web.ssrf"
+ ],
+ "path segment|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "path segment|deser_php": [
+  "web.deserialization"
+ ],
+ "path segment|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "path ;matrix param|sqli": [
+  "web.sqli"
+ ],
+ "path ;matrix param|xss": [
+  "web.xss"
+ ],
+ "path ;matrix param|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "path ;matrix param|cmdi": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.cmd_injection",
+  "web.path_traversal"
+ ],
+ "path ;matrix param|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c",
+  "web.ssti"
+ ],
+ "path ;matrix param|ssrf": [
+  "web.ssrf"
+ ],
+ "path ;matrix param|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "path ;matrix param|deser_php": [
+  "web.deserialization"
+ ],
+ "path ;matrix param|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "HPP split (ASP.NET join)|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96"
+ ],
+ "HPP split (ASP.NET join)|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9",
+  "web.xss"
+ ],
+ "HPP split (ASP.NET join)|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "HPP split (ASP.NET join)|cmdi": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad",
+  "web.path_traversal"
+ ],
+ "HPP split (ASP.NET join)|ssti": [
+  "web.ssti"
+ ],
+ "HPP split (ASP.NET join)|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b",
+  "web.ssrf"
+ ],
+ "HPP split (ASP.NET join)|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779",
+  "web.log4shell"
+ ],
+ "HPP split (ASP.NET join)|deser_php": [
+  "web.deserialization"
+ ],
+ "HPP split (ASP.NET join)|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137",
+  "web.lfi_rfi"
+ ],
+ "after 8192 chars same param|sqli": [
+  "sigma:63ff1f08-4ee1-462c-a4e1-dff453231a96"
+ ],
+ "after 8192 chars same param|xss": [
+  "sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9"
+ ],
+ "after 8192 chars same param|traversal": [
+  "sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad"
+ ],
+ "after 8192 chars same param|cmdi": [
+  "sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03"
+ ],
+ "after 8192 chars same param|ssti": [
+  "sigma:6d8d9e73-625b-4bdc-83f8-2444de57ff5c"
+ ],
+ "after 8192 chars same param|ssrf": [
+  "sigma:d76230ce-dd7a-4d84-a073-d8de5d91b70b"
+ ],
+ "after 8192 chars same param|log4shell": [
+  "sigma:7f1fa436-88ca-4da3-88a1-e44c8dba1779"
+ ],
+ "after 8192 chars same param|deser_php": [],
+ "after 8192 chars same param|lfi_wrapper": [
+  "sigma:6622a926-1e5b-4905-b8be-919682073137"
+ ]
+}

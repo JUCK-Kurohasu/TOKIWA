@@ -1,0 +1,4 @@
+[A] evidence events fully/partly visible: 2 of 25; payload path visible: 2
+[B] evidence block chars after escape: 231289 (max_chars=40000) user: 232429 capped: 72065
+[B] closing tags kept: 2 of 4 | sessions block kept: False | retry note kept: False
+[B] tail: 'c\\u003c\\u003c\\u003c\\u003c\n[input truncated by TOKIWA to respect max_input_tokens_per_call]'

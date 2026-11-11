@@ -1,0 +1,9 @@
+{"id":"L06-10","title":"Content-Encoding: gzip/deflate の要求ボディを Gate も検知器も展開しない。圧縮ボディ内の SQLi 等は検知されないが、Express body-parser など展開する上流ではそのまま処理される",
+"area":"gate","category":"detection-gap","severity":"medium","confidence":"confirmed",
+"summary":"Gate は要求ボディの先頭を生バイトのまま捕捉し（capture.py BodyCapture）、Content-Encoding を見ない。gzip ボディはバイナリとして記録され、web 検知（SQLi/XSS/コマンド注入/SSRF 等のボディ検査）が一切効かない。一方、Node.js Express の body-parser（json/urlencoded）は既定で gzip/deflate を展開し、ASP.NET Core の RequestDecompression ミドルウェアや一部の API ゲートウェイも同様なので、上流では攻撃ペイロードが通常どおり解釈される。Gate はこの不一致をタグ等で示さない。",
+"evidence":"backend/src/tokiwa/gate/capture.py:99-133（BodyCapture.text は content-type と looks_textual のみで判定、Content-Encoding 未処理）, grep 'content-encoding' gate/capture.py detect/web_common.py → 該当なし。再現 scripts/caps.py: 対照 POST /capctl2（urlencoded, OR '1'='1' と UNION SELECT）→ web.sqli[body 'password'] + sigma UNION SELECT。同じボディを gzip 圧縮し 'Content-Encoding: gzip' で POST /capgz2 → イベント request_body はバイナリ（'\\x1f\\x8b...'）、アラート 0 件。上流（rawup）には content-encoding: gzip と 87 バイトのボディがそのまま届く。",
+"attack_scenario":"AI エージェントは WAF 回避として圧縮・エンコード変更を試行錯誤で見つける（応答が変わらず検知もされないことを観測できる）。Node/Express の API が上流なら、ログイン SQLi・NoSQLi・プロトタイプ汚染・SSRF ペイロードをすべて gzip で送るだけで TOKIWA のボディ検知を全面回避できる。",
+"recommendation":"(1) 要求に Content-Encoding（gzip/deflate/br）がある場合、捕捉上限の範囲で展開した平文を request_body に入れ（展開上限で decompression bomb を防ぐ。proxy.decode_content と同様）、gate:req_encoded タグを付与。(2) 展開不能/未知のエンコーディングは gate:req_encoding_unknown として web_recon で low〜medium シグナル化。(3) 運用ドキュメントに『上流が要求ボディを展開するか』を確認項目として追記。",
+"effort":"S","known":"none",
+"references":["https://github.com/expressjs/body-parser#inflate","https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/request-decompression"],
+"related":["L05-04","L05-07"]}

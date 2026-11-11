@@ -1,0 +1,6 @@
+{"id":"L07-09","title":"巨大 offset や同時作成で未処理例外が 500 になる（offset 上限なし・IntegrityError 未変換）","area":"api","category":"robustness","severity":"low","confidence":"confirmed",
+"summary":"GET /api/v1/alerts の offset は ge=0 のみで上限が無く、2^64 超の値で SQLite ドライバが OverflowError を投げ 500 になる（/events は同じ値で 200）。同名ユーザーの同時作成は存在チェック後の INSERT が競合し IntegrityError が 500 として返る。応答本文は 'Internal Server Error' のみでスタックトレースは漏れないが、サーバーログに長大なトレースが出る（ログ汚染・監視ノイズ）。",
+"evidence":"backend/src/tokiwa/api/routes/alerts.py:60（offset: Query(0, ge=0)）、backend/src/tokiwa/api/pagination.py:39-41（同様に上限なし）、backend/src/tokiwa/api/routes/users.py:42-60。再現（ポート 18301）: GET /api/v1/alerts?offset=99999999999999999999 → 500、server.log 'OverflowError: Python int too large to convert to SQLite INTEGER'。同名 POST /api/v1/users 6 並列 → [500,500,201,500,409,500]、'sqlite3.IntegrityError: UNIQUE constraint failed: users.username'。",
+"attack_scenario":"認証済み低権限ユーザー/トークンが 500 を量産してログと監視（エラー率アラート）を汚す程度。単体の影響は小さい。",
+"recommendation":"offset に le=1_000_000 程度の上限（またはカーソル方式）を付け、共通 PageParams を全一覧に使う。IntegrityError を 409 に変換する例外ハンドラを追加。",
+"effort":"S","known":"none","references":[],"related":["L07-04","L12-03"]}

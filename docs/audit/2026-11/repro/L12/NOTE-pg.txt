@@ -1,0 +1,1 @@
+PG data dir /tmp/l12pg (outside MYDIR because postgres user cannot traverse /tmp/claude-0); remove at end

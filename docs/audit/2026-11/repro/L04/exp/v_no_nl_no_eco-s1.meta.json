@@ -1,0 +1,29 @@
+{
+  "generator_version": "1",
+  "summary": {
+    "events": 287,
+    "events_by_attack": {
+      "idor": 12,
+      "none": 140,
+      "path_traversal": 15,
+      "prompt_injection": 6,
+      "recon": 61,
+      "sqli": 36,
+      "ssti": 3,
+      "xss": 14
+    },
+    "events_by_profile": {
+      "benign_browser": 140,
+      "v_no_nl_no_eco": 147
+    },
+    "first": "2026-10-01T09:02:48.947256+00:00",
+    "labelled_events": 287,
+    "last": "2026-10-01T09:32:10.948609+00:00",
+    "sessions": 8,
+    "sessions_by_profile": {
+      "benign_browser": 4,
+      "v_no_nl_no_eco": 4
+    }
+  },
+  "tokiwa_version": "0.1.0"
+}

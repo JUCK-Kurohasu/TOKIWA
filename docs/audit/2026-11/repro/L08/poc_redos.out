@@ -1,0 +1,4 @@
+validate_proposed_rule: (True, [])
+n=20 match time 0.03s
+n=22 match time 0.13s
+n=24 match time 0.52s

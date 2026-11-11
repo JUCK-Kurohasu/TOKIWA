@@ -1,0 +1,20 @@
+{
+  "generator_version": "1",
+  "summary": {
+    "events": 154,
+    "events_by_attack": {
+      "none": 154
+    },
+    "events_by_profile": {
+      "fp_sdk_poller": 154
+    },
+    "first": "2026-10-01T09:02:48.947256+00:00",
+    "labelled_events": 154,
+    "last": "2026-10-01T09:29:40.141207+00:00",
+    "sessions": 3,
+    "sessions_by_profile": {
+      "fp_sdk_poller": 3
+    }
+  },
+  "tokiwa_version": "0.1.0"
+}

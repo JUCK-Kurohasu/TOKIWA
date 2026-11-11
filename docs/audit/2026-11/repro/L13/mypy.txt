@@ -1,0 +1,5 @@
+src/tokiwa/detect/context.py:51: error: Unused "type: ignore" comment  [unused-ignore]
+src/tokiwa/db/session.py:39: error: Unused "type: ignore" comment  [unused-ignore]
+src/tokiwa/db/session.py:43: error: Unused "type: ignore" comment  [unused-ignore]
+src/tokiwa/intel/sources/_common.py:311: error: Incompatible types in assignment (expression has type "list[tuple[str, str]]", variable has type "dict[str, str] | None")  [assignment]
+Found 4 errors in 3 files (checked 215 source files)

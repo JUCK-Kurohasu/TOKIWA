@@ -1,0 +1,1 @@
+uv-0.11.32-py3-none-musllinux_1_1_x86_64.whl 77f4356548ee8dc47efae154efd4e930c65570e7d4971c57bdef592f6eefb39c https://files.pythonhosted.org/packages/02/58/0a92505cfe2b02b1c2d6ded23e83763fe98b43fbe1a4e5cbd6866da3bdf7/uv-0.11.32-py3-none-musllinux_1_1_x86_64.whl
