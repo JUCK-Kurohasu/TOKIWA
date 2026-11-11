@@ -16,8 +16,8 @@ P = {  # class -> (expected detector, payload)
  "deser_php": ("web.deserialization", 'O:8:"Exploit":1:{s:3:"cmd";s:2:"id";}'),
  "lfi_wrapper": ("web.lfi_rfi", "php://filter/convert.base64-encode/resource=index.php"),
 }
-def pct_u(s): return "".join(c if c.isalnum() else "%u%04x" % ord(c) for c in s)
-def overlong(s): return "".join(c if c.isalnum() else "%%c0%%%02x" % (0x80 | ord(c)) if ord(c) < 0x40 else c if c.isalnum() else "%%c1%%%02x" % (0x80 | (ord(c) - 0x40)) for c in s)
+def pct_u(s): return "".join(c if c.isalnum() else "%%u%04x" % ord(c) for c in s)
+def overlong(s): return "".join(c if c.isalnum() or ord(c)>=0x80 else "%%%02X%%%02X" % (0xC0 | (ord(c) >> 6), 0x80 | (ord(c) & 0x3F)) for c in s)
 def fullwidth(s): return q("".join(chr(ord(c) + 0xFEE0) if 0x21 <= ord(c) <= 0x7E and not c.isalnum() else c for c in s))
 def html_dec(s): return q("".join(c if c.isalnum() else "&#%d;" % ord(c) for c in s))
 def html_nosemi(s): return q("".join(c if c.isalnum() else "&#x%x" % ord(c) for c in s))
