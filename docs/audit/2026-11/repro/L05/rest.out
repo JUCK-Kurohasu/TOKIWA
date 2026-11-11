@@ -1,0 +1,40 @@
+== sigma semantics
+OK  escaped star literal: got=False exp=False
+OK  escaped star literal (lit): got=True exp=True
+OK  ? single char: got=True exp=True
+OK  contains|all: got=False exp=False
+OK  not missing field: got=True exp=True
+OK  null value = missing: got=True exp=True
+OK  1 of sel*: got=True exp=True
+OK  re case-sensitive: got=False exp=False
+OK  uri-query vs encoded: got=True exp=True
+OK  uri-query double enc: got=True exp=True
+OK  plus as space: got=True exp=True
+OK  numeric gt on status: got=False exp=False
+OK  keyword search body: got=True exp=True
+== rate / stateful
+cred: 40 fails, 1 per 31s (n=40): ['ai.adaptive_mutation', 'web.credential_stuffing']
+cred: 60 fails status 200 {error} (n=60): -
+cred: 60 fails status 422 (n=60): ['ai.adaptive_mutation']
+cred: 60 fails GraphQL login mutation 200 (n=60): -
+cred: 60 fails over 30 IPs (2 each, fast) (n=60): -
+dirbust: 100 x 404, 1 per 2.1s (n=100): -
+dirbust: 100 x 404 fast over 10 IPs (n=100): -
+dirbust: 100 x 404 fast, 1 IP (control) (n=100): ['web.error_burst']
+dirbust: 100 fast, app returns 200 soft-404 (n=100): -
+flood: 19 rps 30s (n=570): -
+== benign FP sample
+search 'select from union station': -
+search drop table: -
+O'Reilly name: -
+math 1=1: -
+path ../ docs: ['sigma:e9c1a34a-6610-4569-b5ae-1a23ce7790ad', 'web.path_traversal']
+url param: -
+localhost dev url: ['web.ssrf']
+template text {{name}}: -
+shell-ish text: ['sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03', 'web.cmd_injection']
+html snippet: -
+json code snippet: -
+json markdown w/ script tag: ['sigma:0eb136e3-5f0d-4279-8a01-97911b7d7ba9', 'web.xss']
+json py snippet: ['web.path_traversal']
+json bash help: ['ai.natural_language_payload', 'sigma:758f38f5-68ce-4d10-ae2a-ef2c765d1f03', 'web.cmd_injection', 'web.path_traversal']

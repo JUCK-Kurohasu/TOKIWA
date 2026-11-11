@@ -1,0 +1,7 @@
+services:
+  tokiwa:
+    build:
+      args:
+        NODE_IMAGE: local/node-ca:22.23.4-trixie-slim
+        PYTHON_IMAGE: local/python-ca:3.12.15-slim-trixie
+        UV_IMAGE: local/uv:0.11.32
