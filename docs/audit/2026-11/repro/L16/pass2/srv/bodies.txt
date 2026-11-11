@@ -1,0 +1,1 @@
+{"subject": "Log4j について", "message": "ログに ${jndi:ldap} という文字列が出ていますが Log4Shell の影響はありますか？"}

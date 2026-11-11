@@ -9,7 +9,7 @@ python3 - "$A" "$D" <<'PY'
 import os, re, sys
 A, D = sys.argv[1], sys.argv[2]
 EXT = {".py", ".js", ".mjs", ".sh", ".md", ".txt", ".out", ".json", ".jsonl", ".csv", ".tsv", ".yaml", ".yml", ".http"}
-SKIPDIR = {"venv", ".venv", "node_modules", "pylib", "data", "repo", "__pycache__", "src", "fe", "site-packages", ".git", "pgdata", "frontend"}
+SKIPDIR = {"x", "out", "venv", ".venv", "node_modules", "pylib", "data", "repo", "__pycache__", "src", "fe", "site-packages", ".git", "pgdata", "frontend"}
 BADNAME = re.compile(r"token|secret|passw|\.pw$|\.key$|jwt|cookie|\.db|\.log$|\.pid$|admin|poc_redact", re.I)
 SECRET = [(re.compile(r"tkw_[A-Za-z0-9_\-]{16,}"), "tkw_REDACTED"), (re.compile(r"eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{6,}"), "JWT_REDACTED"),
           (re.compile(r"sk-ant-[A-Za-z0-9_\-]{10,}"), "SK_REDACTED"), (re.compile(r'((?:password|passwd|pw)"?\s*[:=]\s*")([A-Za-z0-9_\-]{16,})(")'), r"\1PASSWORD_REDACTED\3")]
@@ -17,7 +17,7 @@ DROP = re.compile(r"BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}\b|ghp_[A-Za-z0-9]{
 n = 0
 for lane in sorted(os.listdir(os.path.join(A, "agents"))):
     for root, dirs, files in os.walk(os.path.join(A, "agents", lane)):
-        dirs[:] = [d for d in dirs if d not in SKIPDIR and not d.startswith(("run", "eval", "."))]
+        dirs[:] = [d for d in dirs if d not in SKIPDIR and not d.startswith(("run", "eval", ".", "src"))]
         for f in files:
             p = os.path.join(root, f)
             if os.path.splitext(f)[1] not in EXT or BADNAME.search(f) or os.path.getsize(p) > 60_000 or os.path.islink(p): continue

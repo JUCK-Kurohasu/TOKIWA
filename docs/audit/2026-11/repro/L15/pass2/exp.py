@@ -58,6 +58,21 @@ if "x2" in parts:  # mild: think gaps x2 only (same shape)
     _otg = PR.think_gap
     PR.think_gap = lambda rng: 2.0 * _otg(rng)
 
+if "nonl" in parts:  # no sim-specific natural-language vocabulary shared with aidetect/payloads.py
+    from tokiwa.eval import payloads as PL
+    PL.NL_COMMENTS[:] = ["-- -"]
+    PL.NL_PROBE_VALUES[:] = ["admin123", "Passw0rd!", "letmein", "password"]
+
+if "freshmut" in parts:  # after an error the agent picks another known payload instead of editing the last one
+    from tokiwa.eval import payloads as PL
+    import os.path as _op
+
+    def _fresh(p, step, rng):  # type: ignore[no-untyped-def]
+        fam = max(PL.FAMILIES.values(), key=lambda lst: max(len(_op.commonprefix([p, x])) for x in lst))
+        return rng.choice([x for x in fam if x != p] or fam)
+
+    PL.mutate = _fresh
+
 if "serial" in parts:  # one tool call per LLM turn: no parallel fan-out
     _ob = SIM.SessionContext.burst
 
