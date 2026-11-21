@@ -71,6 +71,17 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 悪化したものを `regressions` に列挙する。`--fail-on-regression` で CI ゲートにできる。許容幅は
 `backend/src/tokiwa/eval/report.py` の `KEY_METRICS` で調整する。
 
+- **アラート量も見る**: `alerts.total`（相対 10%・最低 2 件）と検知器別件数 `alerts.by_detector[<id>]`（相対 20%・最低 2 件）は
+  増減どちらも `changed` として回帰扱い。セッション単位の率が 1.0 に張り付いていても、検知器が止まった
+  （例: Sigma 全停止で 87 → 68 件）ことを拾うため。medium 以上の攻撃セッション検知率
+  `detection.attack_session_rate_medium_plus` も比較対象。
+- **比較可能性の確認**: 各実行は `metrics.json` の `comparability` に、データセットの sha256（同一性の基準。
+  seed / mix / generator_version は説明用）、LLM プロバイダ、有効な検知器、読み込んだ Sigma ルール数、検知・トリアージ・
+  デセプションの設定値（しきい値・窓。パスは含まない）、再生のバッチ設定を記録する。比較する 2 つで 1 つでも違えば
+  「NOT COMPARABLE」と差分を表示し、`--fail-on-regression` では終了コード **3** にする（悪化は 1）。
+  意図して条件を変えた比較（検知器を 1 つ外した効果を見る等）は `--allow-mismatch` を付ける。
+  `comparability` の無い古い `metrics.json` との比較も「比較不能」になるので、ベースラインを取り直す。
+
 ## 調整できるところ
 
 - プロファイルの振る舞い（間隔分布・バースト幅・変異戦略）: `tokiwa/eval/profiles.py`, `payloads.py`

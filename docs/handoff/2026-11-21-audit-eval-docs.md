@@ -8,8 +8,8 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| #177 Sigma 既定パス | 完全（/health の degraded 表示のみ他レーン依頼） | `config.default_sigma_rule_dirs()`: パッケージ位置基準の絶対パス（ソース → `<repo>/rules/sigma`、インストール → `<venv>/../rules/sigma` = Docker の `/app/rules/sigma`）。ローダは見つからないディレクトリを ERROR（ストアごとに 1 回）+ `SigmaRuleStore.missing_dirs`。eval: `RunResults/metrics.pipeline.sigma_rules_loaded`・`sigma_rule_dirs_missing`、0 件・欠落時は note。report.md ヘッダに件数。wiki Configuration 4 言語の既定値行 | (下記) |
-| #178 compare の比較可能性 | 未着手 | | |
+| #177 Sigma 既定パス | 完全（/health の degraded 表示のみ他レーン依頼） | `config.default_sigma_rule_dirs()`: パッケージ位置基準の絶対パス（ソース → `<repo>/rules/sigma`、インストール → `<venv>/../rules/sigma` = Docker の `/app/rules/sigma`）。ローダは見つからないディレクトリを ERROR（ストアごとに 1 回）+ `SigmaRuleStore.missing_dirs`。eval: `RunResults/metrics.pipeline.sigma_rules_loaded`・`sigma_rule_dirs_missing`、0 件・欠落時は note。report.md ヘッダに件数。wiki Configuration 4 言語の既定値行 | 9a7c6e4 |
+| #178 compare の比較可能性 | 完全 | metrics.json に `comparability`（dataset sha256・meta の seed/mix/generator_version・llm_mode/provider・detectors_enabled・sigma_rules_loaded・replay バッチ設定・detection/triage/deception 設定値）。`compare_runs` が `comparable`/`mismatches` を返し、CLI は `NOT COMPARABLE` を表示、`--fail-on-regression` で終了コード 3（`--allow-mismatch` で 1/0 判定）。KEY_METRICS に `detection.attack_session_rate_medium_plus`・`alerts.total`（stable, 相対 10%・最低 2）・`alerts.by_detector[<id>]`（stable, 相対 20%・最低 2）。`MetricSpec` NamedTuple 化。report.md に比較不能の明示。CLI wiki 4 言語・eval/README | (下記) |
 | #176 mock LLM の明示 | 未着手 | | |
 | #175 区間・分母・medium+ | 未着手 | | |
 | #72 / #83 / #26 ARTEX 取り込み | 未着手 | | |
@@ -28,6 +28,14 @@ by_tier {deep 64, fast 22, rules 6}, event_recall 0.9617, per_detector 29 行。
 mypy: 既知の 4 エラー（detect/context.py:51, db/session.py:39,43, intel/sources/_common.py:311）。
 
 ## 要判断
+
+- **#178 comparability の無い古い metrics.json との比較は「比較不能」扱い**（`--fail-on-regression` で終了コード 3）。
+  既存ベースラインは取り直しが必要。CI 未導入（wave2）なので影響は小さいと判断。緩めるなら
+  `report.comparability_mismatches` の先頭分岐を「警告のみ」に変える。
+- **#178 `stable` 指標（alerts.total・検知器別件数）は増加も回帰扱い**（status `changed`）。同一データ・同一設定で
+  アラート量が動くのは説明が要る変化なので。誤検知削減で減らした場合も止まるため、その時はベースラインを更新する。
+  許容幅は lab-mini 2 回実行で alerts 87/87・検知器別も同一（決定的）だったので相対 10%/20%・最低 2 件とした。
+- **#178 終了コード 3 = 比較不能**（2 は既存の EvalError / 引数エラーで使用済み）。
 
 - **#177 既定値の変更（方式 b: 既定を変え docs・wiki・テストを同時に直す）**: `detection.sigma_rule_dirs` の既定を
   CWD 相対 `../rules/sigma` から「パッケージ位置から解決した絶対パス」に変更。理由: 旧既定はソースチェックアウト以外

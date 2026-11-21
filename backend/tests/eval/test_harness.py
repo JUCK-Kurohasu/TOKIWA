@@ -79,6 +79,12 @@ async def test_eval_run_end_to_end(settings: Settings, small_dataset: Path, tmp_
     doc2 = await run_evaluation(small_dataset, run2, ReplayOptions(detector_overrides=all_off), compare=run1)
     cmp_doc = doc2["comparison"]
     assert cmp_doc["has_regression"] and "detection.attack_session_rate" in cmp_doc["regressions"]
+    # ...but the two runs differ in their enabled detectors, so the pair is flagged as not comparable (#178)
+    assert not cmp_doc["comparable"]
+    assert any(m.startswith("detectors_enabled:") for m in cmp_doc["mismatches"])
+    assert doc["comparability"]["dataset_sha256"] == doc2["comparability"]["dataset_sha256"]
+    assert doc["comparability"]["dataset_seed"] == 21
+    assert doc["comparability"]["sigma_rules_loaded"] == m["pipeline"]["sigma_rules_loaded"] >= 20
     assert "Regression check" in (run2 / "report.md").read_text(encoding="utf-8")
     assert json.loads((run2 / "metrics.json").read_text())["comparison"]["previous_run"] == "r1"
 

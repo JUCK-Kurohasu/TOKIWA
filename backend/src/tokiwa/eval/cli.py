@@ -1,13 +1,18 @@
 """``tokiwa eval`` — evaluation harness.
 
     tokiwa eval run --dataset eval/datasets/lab-mini.jsonl [--llm mock|live] [--out eval/runs/<ts>]
-                    [--compare eval/runs/<prev>] [--fail-on-regression]
-    tokiwa eval compare <run-or-metrics.json> <previous-run-or-metrics.json>
+                    [--compare eval/runs/<prev>] [--fail-on-regression] [--allow-mismatch]
+    tokiwa eval compare <run-or-metrics.json> <previous-run-or-metrics.json> [--fail-on-regression]
+                        [--allow-mismatch]
     tokiwa eval import-artex <artex traffic> --out eval/datasets/artex-<name>.jsonl [--host gate]
     tokiwa eval info <dataset.jsonl>
 
 ``--llm live`` calls the configured real LLM (cost!). It requires an explicit ``--budget-usd`` which becomes the
 daily budget of the throw-away eval database, i.e. a hard cap for this run.
+
+Exit codes with ``--fail-on-regression``: 1 = regression, 3 = the two runs are not comparable (different dataset,
+LLM provider, detectors, Sigma rules, thresholds or batching; see ``report.comparability_mismatches``) — pass
+``--allow-mismatch`` to compare them anyway.
 """
 
 from __future__ import annotations
@@ -22,7 +27,13 @@ import typer
 from tokiwa.eval.artex import DEFAULT_SOURCE_IP, ArtexImportError, import_artex
 from tokiwa.eval.dataset import dataset_summary, read_dataset, write_dataset
 from tokiwa.eval.harness import EvalError, ReplayOptions
-from tokiwa.eval.report import compare_runs, load_metrics, run_evaluation
+from tokiwa.eval.report import (
+    compare_runs,
+    comparison_exit_code,
+    comparison_summary,
+    load_metrics,
+    run_evaluation,
+)
 from tokiwa.util import utcnow
 
 app = typer.Typer(
@@ -59,7 +70,12 @@ def run(
     compare: Path | None = typer.Option(
         None, "--compare", help="Previous run dir or metrics.json to diff against"
     ),
-    fail_on_regression: bool = typer.Option(False, help="Exit 1 when --compare finds a regression"),
+    fail_on_regression: bool = typer.Option(
+        False, help="Exit 1 when --compare finds a regression (3 when the runs are not comparable)"
+    ),
+    allow_mismatch: bool = typer.Option(
+        False, help="Give a regression verdict even when the runs differ in dataset/LLM/detectors/settings"
+    ),
     speed: float = typer.Option(0.0, help="0 = as fast as possible, 1 = real time, 10 = 10x faster"),
     batch_size: int = typer.Option(100, help="Max events per ingest batch (Gate default 100)"),
     enable_detector: list[str] = typer.Option([], "--enable-detector", help="Force-enable a detector id"),
@@ -109,25 +125,36 @@ def run(
             typer.echo(f"note: {note}")
     cmp_doc = doc.get("comparison")
     if cmp_doc:
-        typer.echo("regressions: " + (", ".join(cmp_doc["regressions"]) or "none"))
-        if fail_on_regression and cmp_doc["has_regression"]:
-            raise typer.Exit(1)
+        for line in comparison_summary(cmp_doc, allow_mismatch=allow_mismatch):
+            typer.echo(line)
+        code = comparison_exit_code(
+            cmp_doc, fail_on_regression=fail_on_regression, allow_mismatch=allow_mismatch
+        )
+        if code:
+            raise typer.Exit(code)
 
 
 @app.command("compare")
 def compare_cmd(
     current: Path = typer.Argument(..., exists=True, help="Run dir or metrics.json"),
     previous: Path = typer.Argument(..., exists=True, help="Baseline run dir or metrics.json"),
-    fail_on_regression: bool = typer.Option(False, help="Exit 1 when a regression is found"),
+    fail_on_regression: bool = typer.Option(
+        False, help="Exit 1 when a regression is found (3 when the runs are not comparable)"
+    ),
+    allow_mismatch: bool = typer.Option(
+        False, help="Give a regression verdict even when the runs differ in dataset/LLM/detectors/settings"
+    ),
 ) -> None:
-    """Diff the key metrics of two runs."""
+    """Diff the key metrics of two runs (after checking that they are comparable)."""
     result = compare_runs(load_metrics(current), load_metrics(previous))
     for d in result["deltas"]:
         if d["status"] != "n/a":
             typer.echo(f"{d['status']:10s} {d['metric']:48s} {d['previous']} -> {d['current']}")
-    typer.echo("regressions: " + (", ".join(result["regressions"]) or "none"))
-    if fail_on_regression and result["has_regression"]:
-        raise typer.Exit(1)
+    for line in comparison_summary(result, allow_mismatch=allow_mismatch):
+        typer.echo(line)
+    code = comparison_exit_code(result, fail_on_regression=fail_on_regression, allow_mismatch=allow_mismatch)
+    if code:
+        raise typer.Exit(code)
 
 
 @app.command("import-artex")

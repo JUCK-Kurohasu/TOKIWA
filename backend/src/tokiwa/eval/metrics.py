@@ -115,7 +115,7 @@ class _Attribution:
 
 def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[str, Any]]:
     per_profile: dict[str, dict[str, Any]] = {}
-    attack_total = attack_hit = benign_total = benign_hit = benign_hit_med = 0
+    attack_total = attack_hit = attack_hit_med = benign_total = benign_hit = benign_hit_med = 0
     for st in truth.sessions.values():
         alerts = att.session_alerts.get(st.session, [])
         hit = bool(alerts)
@@ -131,6 +131,7 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         if st.is_attack:
             attack_total += 1
             attack_hit += int(hit)
+            attack_hit_med += int(hit_med)
         else:
             benign_total += 1
             benign_hit += int(hit)
@@ -148,6 +149,8 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         "attack_sessions": attack_total,
         "attack_sessions_detected": attack_hit,
         "attack_session_rate": ratio(attack_hit, attack_total),
+        "attack_sessions_detected_medium_plus": attack_hit_med,
+        "attack_session_rate_medium_plus": ratio(attack_hit_med, attack_total),
         "benign_sessions": benign_total,
         "benign_sessions_alerted": benign_hit,
         "benign_session_fpr": ratio(benign_hit, benign_total),
@@ -199,6 +202,7 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
         rules.append(row)
     by_sev = Counter(str(a.get("severity")) for a in att.res.alerts)
     by_cat = Counter(str(a.get("category")) for a in att.res.alerts)
+    by_det = Counter(str(a.get("detector") or a.get("rule_id")) for a in att.res.alerts)
     summary = {
         "total": len(att.res.alerts),
         "true_positive": tp,
@@ -207,6 +211,7 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
         "precision": ratio(tp, tp + fp),
         "by_severity": dict(sorted(by_sev.items())),
         "by_category": dict(sorted(by_cat.items())),
+        "by_detector": dict(sorted(by_det.items())),
         "incidents": len(att.res.incidents),
     }
     return summary, rules

@@ -127,8 +127,8 @@ Con `--time-scale` inferior a 1 termina antes, pero cambia el ritmo de las solic
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
 tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
 tokiwa eval info FILE.jsonl
 ```
@@ -138,7 +138,8 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock` (gratis, sin conexión; por defecto) o `live` (el proveedor configurado; **genera costos**) |
 | `--budget-usd` | **Obligatorio** con `--llm live`. Límite de costo de esta ejecución |
 | `--out` | Destino de salida (por defecto `eval/runs/<hora UTC>`) |
-| `--compare` / `--fail-on-regression` | Comparación con la ejecución anterior / código de salida 1 si hay empeoramiento |
+| `--compare` / `--fail-on-regression` | Comparación con la ejecución anterior / código de salida 1 si hay empeoramiento. Si las dos ejecuciones difieren en sus condiciones (sha256 del conjunto de datos, proveedor LLM, detectores activos, número de reglas Sigma cargadas, umbrales, lotes), se consideran "no comparables" y el código de salida es 3 |
+| `--allow-mismatch` | Compara y evalúa el empeoramiento aunque las condiciones difieran (las diferencias se muestran como advertencia) |
 | `--speed` | 0 = lo más rápido posible, 1 = tiempo real, 10 = 10 veces más rápido |
 | `--enable-detector` / `--disable-detector` | Fuerza la activación / desactivación de un detector |
 | `--keep-work` | Conserva la base de datos temporal de la evaluación |
