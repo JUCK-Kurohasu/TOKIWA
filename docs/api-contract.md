@@ -23,13 +23,18 @@
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409） |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409） |
 | GET | /tokens | admin | → `ApiToken[]` |
-| POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |
+| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
 users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
 
 ## 取り込み（`routes/ingest.py` 実装済）
-| POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult` |
+| POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult`。トークンに `allowed_datasets` があり範囲外の dataset を含むバッチは **丸ごと 403**（Gate の送信側は 403 を恒久エラーとしてバッチを破棄する） |
+
+出所の記録（監査 #40）: サーバーは全イベントの `labels` に `ingest.token_id` / `ingest.token`（送ってきたトークンの id / 名前）を
+付ける。クライアントが送った `ingest.*` ラベルは先に捨てる。トークンに `allowed_sensor_ids` があれば `sensor_id` をその中に強制し、
+主張された値は `ingest.claimed_sensor_id` に残す（無制限トークンは従来どおり、未指定時のみ `token:<name>` で補完）。
+`gate` スコープを持たないトークンが `gate.*` / `deception.*` dataset または kind=deception を送ると `ingest.trust=low` を付ける（受理はする）。
 
 ## イベント（`routes/events.py`）
 | GET | /events | user | `?kind&dataset&source_ip&session_id&host&q&since&until&limit&offset` → `Page[Event]`（新しい順。`q` は HTTP path / UA の部分一致・大小無視） |

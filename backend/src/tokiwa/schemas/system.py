@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from tokiwa.schemas.common import ORMModel
 
@@ -62,11 +62,22 @@ class ApiToken(ORMModel):
     created_at: datetime
     last_used: datetime | None = None
     revoked: bool = False
+    # Ingest binding (None = unrestricted). See db.models.core.ApiTokenRow.
+    allowed_sensor_ids: list[str] | None = None
+    allowed_datasets: list[str] | None = None
+
+
+# sensor ids are host names / "gate-1" style ids; dataset patterns are "<family>.<stream>" with fnmatch "*".
+SensorIdItem = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:@/-]{1,128}$")]
+DatasetPatternItem = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.*-]{1,64}$")]
 
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     scopes: list[ApiTokenScope] = Field(default_factory=lambda: [ApiTokenScope.INGEST, ApiTokenScope.GATE])
+    # Optional ingest binding. Omitted / null = unrestricted. An empty list is rejected (it would mean "deny all").
+    allowed_sensor_ids: list[SensorIdItem] | None = Field(default=None, min_length=1, max_length=64)
+    allowed_datasets: list[DatasetPatternItem] | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ApiTokenCreated(ApiToken):

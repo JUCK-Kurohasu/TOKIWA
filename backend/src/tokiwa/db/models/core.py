@@ -30,6 +30,11 @@ class ApiTokenRow(IdMixin, Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_used: Mapped[datetime | None] = mapped_column(default=None)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Ingest binding (audit #40). NULL = unrestricted (tokens created before these columns existed keep working).
+    # allowed_sensor_ids: the server forces Event.sensor_id into this list (the client value goes to labels).
+    # allowed_datasets: fnmatch patterns ("nginx.access", "host.*"); a batch with any other dataset is refused.
+    allowed_sensor_ids: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
+    allowed_datasets: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), default=None)
 
 
 class SettingRow(Base):

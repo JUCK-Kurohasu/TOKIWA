@@ -506,4 +506,8 @@ export interface ApiToken {
   created_at: string;
   last_used: string | null;
   revoked: boolean;
+  /** Ingest binding (null = unrestricted): events are forced to one of these sensor ids. */
+  allowed_sensor_ids?: string[] | null;
+  /** Ingest binding (null = unrestricted): fnmatch patterns of datasets this token may send. */
+  allowed_datasets?: string[] | null;
 }

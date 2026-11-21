@@ -35,6 +35,9 @@ export const API_TOKEN_SCOPES: ApiTokenScope[] = ["ingest", "gate", "read"];
 export interface ApiTokenCreate {
   name: string;
   scopes: ApiTokenScope[];
+  /** Omit for unrestricted. An empty list is rejected (422). */
+  allowed_sensor_ids?: string[];
+  allowed_datasets?: string[];
 }
 
 // ApiToken itself lives in types.ts
@@ -46,6 +49,8 @@ export interface ApiTokenCreated {
   created_at: string;
   last_used: string | null;
   revoked: boolean;
+  allowed_sensor_ids?: string[] | null;
+  allowed_datasets?: string[] | null;
   /** Plain-text secret. Returned exactly once, on creation. */
   token: string;
 }

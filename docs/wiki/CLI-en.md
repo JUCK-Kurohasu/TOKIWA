@@ -46,10 +46,11 @@ You are prompted for the password interactively (twice, with input hidden). The 
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
 The default scopes are `ingest` and `gate`. The token (`tkw_...`) is shown **only once**.
+`--sensor-id` / `--dataset` (repeatable) bind the token to sensor ids and datasets ([Connecting sensors](Sensors-en)).
 
 ## tokiwa gate run
 

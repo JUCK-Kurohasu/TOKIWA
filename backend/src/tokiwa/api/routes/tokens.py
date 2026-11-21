@@ -19,6 +19,10 @@ from tokiwa.util import new_id, utcnow
 router = APIRouter(prefix="/api/v1/tokens", tags=["tokens"])
 
 
+def _dedupe(values: list[str] | None) -> list[str] | None:
+    return list(dict.fromkeys(values)) if values else None
+
+
 @router.get("", response_model=list[ApiToken])
 async def list_tokens(session: DbSession, admin: AdminUser) -> list[ApiToken]:
     stmt = select(ApiTokenRow).order_by(ApiTokenRow.created_at.desc(), ApiTokenRow.id.desc())
@@ -33,7 +37,14 @@ async def create_token(body: ApiTokenCreate, session: DbSession, admin: AdminUse
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "at least one scope is required")
     token, digest, prefix = generate_api_token()
     row = ApiTokenRow(
-        id=new_id(), name=body.name, token_hash=digest, prefix=prefix, scopes=scopes, created_at=utcnow()
+        id=new_id(),
+        name=body.name,
+        token_hash=digest,
+        prefix=prefix,
+        scopes=scopes,
+        created_at=utcnow(),
+        allowed_sensor_ids=_dedupe(body.allowed_sensor_ids),
+        allowed_datasets=_dedupe(body.allowed_datasets),
     )
     session.add(row)
     await session.flush()
@@ -41,7 +52,13 @@ async def create_token(body: ApiTokenCreate, session: DbSession, admin: AdminUse
         admin.username,
         "token.create",
         row.id,
-        {"name": row.name, "scopes": scopes, "prefix": prefix},
+        {
+            "name": row.name,
+            "scopes": scopes,
+            "prefix": prefix,
+            "allowed_sensor_ids": row.allowed_sensor_ids,
+            "allowed_datasets": row.allowed_datasets,
+        },
         session=session,
     )
     return ApiTokenCreated(**ApiToken.model_validate(row).model_dump(), token=token)

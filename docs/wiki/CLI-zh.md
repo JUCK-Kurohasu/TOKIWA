@@ -46,10 +46,11 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
 默认作用域为 `ingest` 和 `gate`。令牌（`tkw_...`）**仅显示一次**。
+`--sensor-id` / `--dataset`（可重复）把令牌绑定到传感器 ID 和 dataset（[接入传感器](Sensors-zh)）。
 
 ## tokiwa gate run
 

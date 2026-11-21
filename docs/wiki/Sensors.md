@@ -30,6 +30,12 @@ uv run tokiwa token create agent-web01 --scope ingest
 - トークン（`tkw_...`）は **作成時に一度だけ** 表示されます。DB にはハッシュだけが保存されます。
 - Web UI の **設定 → API トークン**（管理者のみ）でも作成・失効できます。
 - コマンドライン引数で渡すと `ps` で他のユーザーに見えるので、**環境変数またはファイル** で渡してください。
+- `--sensor-id` / `--dataset` でトークンを特定のセンサー ID・dataset に **縛れます**（省略時は無制限）。縛ったトークンが
+  範囲外の dataset を送るとバッチごと 403、別のセンサー ID を名乗ると許可された ID に置き換えられます。Gate 以外のセンサーの
+  トークンは縛っておくのがおすすめです（例: `--sensor-id web01 --dataset nginx.access --dataset 'host.*'`）。
+- サーバーはすべてのイベントに、送ってきたトークンを `ingest.token` / `ingest.token_id` ラベルとして記録します。
+  `gate` スコープの無いトークンから来た Gate 由来のデータ（`gate.*` / `deception.*`）には `ingest.trust=low` が付きます。
+  偽造イベントで無実の IP を遮断させられないよう、取引先・CDN・自社の出口 IP は `response.protected_cidrs` に入れておいてください。
 
 ## TOKIWA Gate（リバースプロキシ型センサー）
 

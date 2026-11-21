@@ -46,10 +46,11 @@ La contraseña se solicita de forma interactiva (dos veces, con la entrada ocult
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
 Los ámbitos por defecto son `ingest` y `gate`. El token (`tkw_...`) se muestra **una sola vez**.
+`--sensor-id` / `--dataset` (repetibles) vinculan el token a IDs de sensor y datasets ([Conexión de sensores](Sensors-es)).
 
 ## tokiwa gate run
 

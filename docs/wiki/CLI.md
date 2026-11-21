@@ -46,10 +46,11 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
 既定のスコープは `ingest` と `gate`。トークン（`tkw_...`）は **一度だけ** 表示されます。
+`--sensor-id` / `--dataset`（繰り返し可）はトークンをセンサー ID・dataset に縛ります（[センサーの接続](Sensors)）。
 
 ## tokiwa gate run
 

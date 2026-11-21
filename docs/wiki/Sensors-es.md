@@ -30,6 +30,13 @@ uv run tokiwa token create agent-web01 --scope ingest
 - El token (`tkw_...`) se muestra **una sola vez, al crearlo**. En la base de datos solo se guarda su hash.
 - También pueden crearse y revocarse en **Settings → API tokens** (Configuración → Tokens de API) de la interfaz web (solo administradores).
 - Si se pasa como argumento de línea de comandos, otros usuarios pueden verlo con `ps`; páselo **mediante una variable de entorno o un archivo**.
+- `--sensor-id` / `--dataset` **vinculan** un token a IDs de sensor y datasets concretos (sin restricción si se omiten).
+  Si un token vinculado envía un dataset fuera de su lista, se rechaza el lote entero con 403; si declara otro ID de sensor,
+  se sustituye por uno permitido. Se recomienda vincular los tokens de los sensores que no son Gate
+  (p. ej. `--sensor-id web01 --dataset nginx.access --dataset 'host.*'`).
+- El servidor registra en cada evento el token que lo entregó, en las etiquetas `ingest.token` / `ingest.token_id`. Los datos
+  propios de Gate (`gate.*` / `deception.*`) enviados por un token sin el ámbito `gate` se etiquetan `ingest.trust=low`.
+  Para que eventos falsificados no hagan bloquear una IP inocente, ponga las IP de socios, CDN y de salida propias en `response.protected_cidrs`.
 
 ## TOKIWA Gate (sensor de tipo proxy inverso)
 

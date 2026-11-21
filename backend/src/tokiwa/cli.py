@@ -118,7 +118,13 @@ def user_create(
     typer.echo(f"created user {username} ({role})")
 
 
-async def _create_token(name: str, scopes: list[str]) -> str:
+async def _create_token(
+    name: str,
+    scopes: list[str],
+    *,
+    allowed_sensor_ids: list[str] | None = None,
+    allowed_datasets: list[str] | None = None,
+) -> str:
     from tokiwa.auth.security import generate_api_token
     from tokiwa.db.models.core import ApiTokenRow
     from tokiwa.db.session import create_all, init_engine, session_scope
@@ -130,19 +136,64 @@ async def _create_token(name: str, scopes: list[str]) -> str:
     async with session_scope() as session:
         session.add(
             ApiTokenRow(
-                id=new_id(), name=name, token_hash=digest, prefix=prefix, scopes=scopes, created_at=utcnow()
+                id=new_id(),
+                name=name,
+                token_hash=digest,
+                prefix=prefix,
+                scopes=scopes,
+                created_at=utcnow(),
+                allowed_sensor_ids=list(dict.fromkeys(allowed_sensor_ids)) if allowed_sensor_ids else None,
+                allowed_datasets=list(dict.fromkeys(allowed_datasets)) if allowed_datasets else None,
             )
         )
     return token
+
+
+def _validate_token_options(
+    scopes: list[str], sensor_ids: list[str], datasets: list[str]
+) -> tuple[list[str], list[str] | None, list[str] | None]:
+    """Same rules as the API (schemas.system.ApiTokenCreate), so the CLI cannot create what the API refuses."""
+    from pydantic import ValidationError
+
+    from tokiwa.schemas.system import ApiTokenCreate, ApiTokenScope
+
+    valid = {s.value for s in ApiTokenScope}
+    if not scopes or any(s not in valid for s in scopes):
+        raise typer.BadParameter(f"--scope must be one or more of {sorted(valid)}")
+    try:
+        body = ApiTokenCreate(
+            name="cli",
+            scopes=[ApiTokenScope(s) for s in scopes],
+            allowed_sensor_ids=sensor_ids or None,
+            allowed_datasets=datasets or None,
+        )
+    except ValidationError as exc:
+        raise typer.BadParameter(
+            "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
+        ) from None
+    return (
+        list(dict.fromkeys(str(s) for s in body.scopes)),
+        body.allowed_sensor_ids,
+        body.allowed_datasets,
+    )
 
 
 @token_app.command("create")
 def token_create(
     name: str,
     scope: list[str] = typer.Option(["ingest", "gate"], help="ingest / gate / read"),
+    sensor_id: list[str] = typer.Option(
+        [], "--sensor-id", help="Bind to these sensor ids (repeatable; events are forced to one of them)"
+    ),
+    dataset: list[str] = typer.Option(
+        [], "--dataset", help="Allowed datasets, fnmatch patterns like nginx.access or host.* (repeatable)"
+    ),
 ) -> None:
     """Create an API token (printed once)."""
-    typer.echo(asyncio.run(_create_token(name, scope)))
+    scopes, sensor_ids, datasets = _validate_token_options(scope, sensor_id, dataset)
+    typer.echo(
+        asyncio.run(_create_token(name, scopes, allowed_sensor_ids=sensor_ids, allowed_datasets=datasets))
+    )
 
 
 if __name__ == "__main__":
