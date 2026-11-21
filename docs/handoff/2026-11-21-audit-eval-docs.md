@@ -9,8 +9,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | #177 Sigma 既定パス | 完全（/health の degraded 表示のみ他レーン依頼） | `config.default_sigma_rule_dirs()`: パッケージ位置基準の絶対パス（ソース → `<repo>/rules/sigma`、インストール → `<venv>/../rules/sigma` = Docker の `/app/rules/sigma`）。ローダは見つからないディレクトリを ERROR（ストアごとに 1 回）+ `SigmaRuleStore.missing_dirs`。eval: `RunResults/metrics.pipeline.sigma_rules_loaded`・`sigma_rule_dirs_missing`、0 件・欠落時は note。report.md ヘッダに件数。wiki Configuration 4 言語の既定値行 | 9a7c6e4 |
-| #178 compare の比較可能性 | 完全 | metrics.json に `comparability`（dataset sha256・meta の seed/mix/generator_version・llm_mode/provider・detectors_enabled・sigma_rules_loaded・replay バッチ設定・detection/triage/deception 設定値）。`compare_runs` が `comparable`/`mismatches` を返し、CLI は `NOT COMPARABLE` を表示、`--fail-on-regression` で終了コード 3（`--allow-mismatch` で 1/0 判定）。KEY_METRICS に `detection.attack_session_rate_medium_plus`・`alerts.total`（stable, 相対 10%・最低 2）・`alerts.by_detector[<id>]`（stable, 相対 20%・最低 2）。`MetricSpec` NamedTuple 化。report.md に比較不能の明示。CLI wiki 4 言語・eval/README | (下記) |
-| #176 mock LLM の明示 | 未着手 | | |
+| #178 compare の比較可能性 | 完全 | metrics.json に `comparability`（dataset sha256・meta の seed/mix/generator_version・llm_mode/provider・detectors_enabled・sigma_rules_loaded・replay バッチ設定・detection/triage/deception 設定値）。`compare_runs` が `comparable`/`mismatches` を返し、CLI は `NOT COMPARABLE` を表示、`--fail-on-regression` で終了コード 3（`--allow-mismatch` で 1/0 判定）。KEY_METRICS に `detection.attack_session_rate_medium_plus`・`alerts.total`（stable, 相対 10%・最低 2）・`alerts.by_detector[<id>]`（stable, 相対 20%・最低 2）。`MetricSpec` NamedTuple 化。report.md に比較不能の明示。CLI wiki 4 言語・eval/README | 7c2a8ba |
+| #176 mock LLM の明示 | 完全（提案 (3)(4) の live 評価・ablation は範囲外） | metrics.llm に `provider`・`measures_llm`・`caveat`、mock 時 `by_tier={"rules(mock)": n}`・`by_tier_requested`。metrics.cost に `estimated_cost_usd`・`estimated_cost_by_model_usd`・`estimated_cost_basis`（`pricing.estimate_cost` × llm.pricing 上書き）。report.md: 要約行に「mock: rule fallback, not LLM quality」、想定費用の別行、LLM 節の見出し・注意書き・モデル別 実費/推定 表。CLI 出力も同様 | (下記) |
 | #175 区間・分母・medium+ | 未着手 | | |
 | #72 / #83 / #26 ARTEX 取り込み | 未着手 | | |
 | #107 ラボ文書 | 未着手 | | |
@@ -23,7 +23,8 @@
 attack sessions 5/5, benign FPR 0.0, alerts 87 (precision 1.0), AI P=R=AUC=1.0, LLM calls 154,
 by_tier {deep 64, fast 22, rules 6}, event_recall 0.9617, per_detector 29 行。tokens_per_alert は 5738.8 / 5753.7 と
 実行ごとに揺れる（プロンプトに時刻が入るため）。リポジトリ直下から実行しても editable install なら 87 / 154（下記 #177）。
-監査時の 156 calls との差は未調査（同一コードで 2 回とも 154 なので決定的）。
+その後の実行では 156（incident 目的の呼び出しが 14/16 で揺れる）。alerts 87・検知器別件数は全実行で同一。
+LLM 呼び出し数はタイミング依存で ±2 程度揺れるので比較指標にはしていない（tokens_per_alert は相対 20% 許容）。
 
 mypy: 既知の 4 エラー（detect/context.py:51, db/session.py:39,43, intel/sources/_common.py:311）。
 

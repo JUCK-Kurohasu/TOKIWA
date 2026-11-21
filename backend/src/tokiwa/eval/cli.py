@@ -117,10 +117,16 @@ def run(
             f"(rate {d['attack_session_rate']}), benign FPR {d['benign_session_fpr']}, "
             f"alerts {m['alerts']['total']} (precision {m['alerts']['precision']})"
         )
-        typer.echo(
-            f"AI attribution P={ai['precision']} R={ai['recall']} AUC={ai['auc']}; "
-            f"LLM calls {m['cost']['llm_calls']} cost ${m['cost']['cost_usd']}"
-        )
+        typer.echo(f"AI attribution P={ai['precision']} R={ai['recall']} AUC={ai['auc']}")
+        cost = m["cost"]
+        if cost.get("provider") == "mock":
+            typer.echo(
+                f"LLM: mock provider = rule-based fallback; LLM agreement/triage values are NOT LLM quality. "
+                f"calls {cost['llm_calls']}, actual $0, ~${cost.get('estimated_cost_usd')} if live "
+                "(estimated tokens x price table)"
+            )
+        else:
+            typer.echo(f"LLM ({cost.get('provider')}): calls {cost['llm_calls']} cost ${cost['cost_usd']}")
         for note in m["pipeline"]["notes"]:
             typer.echo(f"note: {note}")
     cmp_doc = doc.get("comparison")

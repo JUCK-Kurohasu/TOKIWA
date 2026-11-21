@@ -198,7 +198,9 @@ def test_metrics_attribution_and_llm_agreement() -> None:
     ai = m["ai_attribution"]
     assert (ai["tp"], ai["fp"], ai["fn"]) == (1, 0, 0) and ai["auc"] == 1.0
     assert ai["confusion"]["ai_agent"] == {"ai_agent": 1}
-    assert m["llm"]["actor_agreement"] == 1.0 and m["llm"]["by_tier"] == {"fast": 1}
+    assert m["llm"]["actor_agreement"] == 1.0 and m["llm"]["by_tier_requested"] == {"fast": 1}
+    # RunResults defaults to the mock provider: every tier is the rule fallback (#176)
+    assert m["llm"]["by_tier"] == {"rules(mock)": 1} and m["llm"]["measures_llm"] is False
     assert m["cost"]["cost_per_alert_usd"] == round(0.01 / 3, 6)
     assert m["latency"]["batch_p50_ms"] == 2.0
 
@@ -226,3 +228,56 @@ async def test_dataset_roundtrip(tmp_path: Path) -> None:
     info = write_dataset(path, events, {"seed": 2})
     assert (tmp_path / "x.meta.json").is_file() and info["summary"]["sessions"] == 1
     assert [e.id for e in read_dataset(path)] == [e.id for e in events]
+
+
+def test_mock_llm_is_labelled_and_priced_as_an_estimate() -> None:
+    """#176: mock runs say they do not measure an LLM and price the estimated tokens; live runs keep raw tiers."""
+    from tokiwa.llm.base import LLMUsage
+    from tokiwa.llm.pricing import estimate_cost
+
+    truth = Truth.from_events([_ev("a1", "ai", "ai_agent", "sqli", "203.0.113.1")])
+    triage = {
+        "tier": "deep",
+        "result": {"actor_type": "ai_agent", "confidence": 0.9, "ai_agent_likelihood": 0.9},
+    }
+    calls = [
+        {
+            "model": "claude-opus-5-5",
+            "input_tokens": 4000,
+            "output_tokens": 200,
+            "status": "ok",
+            "purpose": "triage",
+        },
+        {
+            "model": "claude-haiku-5-5",
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "status": "ok",
+            "purpose": "triage",
+        },
+    ]
+    alerts = [{"id": "x", "rule_id": "r", "severity": "high", "evidence_event_ids": ["a1"], "triage": triage}]
+    mock = compute_metrics(truth, RunResults(alerts=alerts, llm_calls=calls, llm_provider="mock"))
+    expected = estimate_cost(
+        "claude-opus-5-5", LLMUsage(input_tokens=4000, output_tokens=200)
+    ) + estimate_cost("claude-haiku-5-5", LLMUsage(input_tokens=1000, output_tokens=200))
+    assert mock["cost"]["cost_usd"] == 0.0
+    assert mock["cost"]["estimated_cost_usd"] == round(expected, 6) and expected > 0
+    assert set(mock["cost"]["estimated_cost_by_model_usd"]) == {"claude-opus-5-5", "claude-haiku-5-5"}
+    assert mock["llm"]["by_tier"] == {"rules(mock)": 1} and mock["llm"]["by_tier_requested"] == {"deep": 1}
+    assert "not LLM quality" in mock["llm"]["caveat"]
+    # price overrides from llm.pricing are honoured
+    cheap = RunResults(
+        alerts=alerts,
+        llm_calls=calls,
+        llm_provider="mock",
+        llm_pricing={
+            "claude-opus-5-5": {"input": 0.0, "output": 0.0},
+            "claude-haiku-5-5": {"input": 0.0, "output": 0.0},
+        },
+    )
+    assert compute_metrics(truth, cheap)["cost"]["estimated_cost_usd"] == 0.0
+
+    live = compute_metrics(truth, RunResults(alerts=alerts, llm_calls=calls, llm_provider="anthropic"))
+    assert live["llm"]["by_tier"] == {"deep": 1} and live["llm"]["measures_llm"] is True
+    assert live["cost"]["estimated_cost_usd"] is None and live["llm"]["caveat"] is None

@@ -304,6 +304,8 @@ def render_markdown(doc: dict[str, Any]) -> str:
         m["latency"],
         m["alerts"],
     )
+    mock = cost.get("provider") == "mock"
+    llm_tag = " — **mock: rule fallback, not LLM quality**" if mock else ""
     out: list[str] = [
         f"# TOKIWA evaluation report — {run.get('id', '')}",
         "",
@@ -326,10 +328,18 @@ def render_markdown(doc: dict[str, Any]) -> str:
         f"| alert precision | {_pct(al['precision'])} ({al['total']} alerts, {al['unattributed']} unattributed) |",
         f"| AI attribution P / R / F1 | {_fmt(ai['precision'])} / {_fmt(ai['recall'])} / {_fmt(ai['f1'])} |",
         f"| AI attribution ROC-AUC | {_fmt(ai['auc'])} |",
-        f"| LLM agreement actor / verdict / AI | {_pct(llm['actor_agreement'])} / "
+        f"| LLM agreement actor / verdict / AI{llm_tag} | {_pct(llm['actor_agreement'])} / "
         f"{_pct(llm['verdict_agreement'])} / {_pct(llm['ai_agreement'])} ({llm['triaged']} triaged) |",
-        f"| LLM cost total / per alert | ${_fmt(cost['cost_usd'])} / ${_fmt(cost['cost_per_alert_usd'])} |",
-        f"| tokens per alert | {_fmt(cost['tokens_per_alert'])} |",
+        f"| LLM cost actual total / per alert | ${_fmt(cost['cost_usd'])} / ${_fmt(cost['cost_per_alert_usd'])} |",
+        *(
+            [
+                f"| LLM cost if these calls were live (estimate) | ~${_fmt(cost.get('estimated_cost_usd'))} "
+                "(mock token estimates × price table; not measured) |"
+            ]
+            if cost.get("estimated_cost_usd") is not None
+            else []
+        ),
+        f"| tokens per alert{' (estimated: chars/4, output 200)' if mock else ''} | {_fmt(cost['tokens_per_alert'])} |",
         f"| ingest→alert batch p50 / p95 | {_fmt(lat['batch_p50_ms'])} ms / {_fmt(lat['batch_p95_ms'])} ms |",
         f"| alert→triage p50 / p95 | {_fmt(lat['triage_p50_s'])} s / {_fmt(lat['triage_p95_s'])} s "
         f"(source: {lat['triage_source']}) |",
@@ -374,12 +384,35 @@ def render_markdown(doc: dict[str, Any]) -> str:
         out.append("| (no alerts) | | | | | | | |")
     out += [
         "",
-        "## LLM",
+        "## LLM (mock provider — rule-based fallback, NOT an LLM measurement)" if mock else "## LLM",
         "",
-        f"- calls: {cost['llm_calls']} by status {cost['by_status']} by purpose {cost['by_purpose']}",
-        f"- tokens in/out: {cost['input_tokens']} / {cost['output_tokens']}",
-        f"- triage records by tier: {llm['by_tier']}",
     ]
+    if mock:
+        out += [
+            "> The mock provider answers triage with the rule-based fallback: `ai_agent_likelihood` copies the alert's",
+            "> `ai_score`, so the agreement values above are the rules agreeing with themselves, and the triage score",
+            "> adds no information to AI attribution. Not measured here: real LLM triage quality and mistakes,",
+            "> refusals, robustness to prompt injection through telemetry, real cost / latency / budget behaviour.",
+            "> Run `tokiwa eval run --llm live --budget-usd <cap>` for those.",
+            "",
+        ]
+    out += [
+        f"- calls: {cost['llm_calls']} by status {cost['by_status']} by purpose {cost['by_purpose']}",
+        f"- tokens in/out{' (estimated)' if mock else ''}: {cost['input_tokens']} / {cost['output_tokens']}",
+        f"- triage records by tier: {llm['by_tier']}"
+        + (f" (tier the pipeline asked for: {llm.get('by_tier_requested')})" if mock else ""),
+    ]
+    est_by_model = cost.get("estimated_cost_by_model_usd") or {}
+    if est_by_model:
+        out += [
+            "",
+            "| model (would have been called) | calls | actual USD | estimated USD if live |",
+            "|---|---|---|---|",
+        ]
+        calls_by_model = cost.get("by_model") or {}
+        for model, usd in est_by_model.items():
+            out.append(f"| `{model}` | {calls_by_model.get(model, '–')} | 0 | ~{_fmt(usd)} |")
+        out += ["", f"Estimate basis: {cost.get('estimated_cost_basis')}."]
     cmp_doc = doc.get("comparison")
     if cmp_doc:
         out += render_comparison(cmp_doc)

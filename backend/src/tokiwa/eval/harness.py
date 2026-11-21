@@ -88,6 +88,8 @@ class RunResults:
     # Detection / triage / deception knobs in effect (no paths, no secrets): two runs are only comparable when these
     # match (#178).
     settings_snapshot: dict[str, Any] = field(default_factory=dict)
+    # ``llm.pricing`` overrides in effect, for the "what would this cost" estimate of mock runs (#176).
+    llm_pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -307,6 +309,7 @@ async def _replay_inner(events: list[Event], opts: ReplayOptions) -> RunResults:
     res = RunResults(
         ai_agent_threshold=settings.detection.ai_agent_threshold,
         settings_snapshot=settings_snapshot(settings),
+        llm_pricing={k: dict(v) for k, v in settings.llm.pricing.items()},
     )
     provider = gw.build_provider(settings)
     res.llm_provider = provider.name
