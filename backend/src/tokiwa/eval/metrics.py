@@ -369,6 +369,8 @@ def compute_metrics(truth: Truth, res: RunResults, *, ai_threshold: float | None
             "detectors_registered": res.detectors_registered,
             "detectors_enabled": res.detectors_enabled,
             "enrichers": res.enrichers,
+            "sigma_rules_loaded": res.sigma_rules_loaded,
+            "sigma_rule_dirs_missing": res.sigma_rule_dirs_missing,
             "actor_sessions": len(res.sessions),
             "events_stored": len(res.events),
             "notes": res.notes,

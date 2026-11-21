@@ -69,7 +69,7 @@ deception:
 | キー | 既定 | 説明 |
 |---|---|---|
 | `disabled_detectors` | `[]` | 無効にする検知器の ID |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Sigma ルールの置き場所 |
+| `sigma_rule_dirs` | パッケージ位置から解決（ソースでは `<リポジトリ>/rules/sigma`、Docker イメージでは `/app/rules/sigma`） | Sigma ルールの置き場所。起動時の作業ディレクトリには依存しない。見つからないディレクトリは起動時に ERROR ログ。相対パスを指定した場合は作業ディレクトリ → `backend/` の順に探す |
 | `dedup_window_seconds` | 300 | 同じアラートをまとめる時間幅 |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | プロンプトインジェクションの監視対象とする HTTP パス |
 | `session_idle_timeout_seconds` | 1800 | この時間アクセスがなければ別セッションとみなす |

@@ -81,6 +81,10 @@ class RunResults:
     enrichers: list[str] = field(default_factory=list)
     llm_provider: str = "mock"
     ai_agent_threshold: float = 0.7
+    # Sigma file rules actually active in this run (None: sigma module unavailable). A wrong rule directory used to
+    # disable every Sigma rule with a single WARNING and change the alert count without a trace (#177).
+    sigma_rules_loaded: int | None = None
+    sigma_rule_dirs_missing: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -206,6 +210,35 @@ class _TriageObserver:
 # ---------------------------------------------------------------------------------------- replay
 
 
+def _record_sigma_status(res: RunResults) -> None:
+    """Read the Sigma rule store now: the engine (and its store) is reset when the eval env is torn down."""
+    try:
+        from tokiwa.detect.sigma.loader import SIGMA_DETECTOR_ID, get_rule_store
+    except Exception:  # pragma: no cover - sigma module missing/broken
+        log.exception("sigma module unavailable during eval")
+        return
+    if SIGMA_DETECTOR_ID not in res.detectors_registered:
+        return
+    store = get_rule_store()
+    try:
+        rules = store.rules()
+    except Exception:
+        log.exception("could not read the Sigma rule store during eval")
+        return
+    res.sigma_rules_loaded = sum(1 for r in rules if r.origin == "file")
+    res.sigma_rule_dirs_missing = list(store.missing_dirs)
+    if SIGMA_DETECTOR_ID not in res.detectors_enabled:
+        return
+    if res.sigma_rule_dirs_missing:
+        res.notes.append(
+            "sigma rule dir(s) not found: "
+            + ", ".join(res.sigma_rule_dirs_missing)
+            + " (detection.sigma_rule_dirs); alert counts are not comparable with runs that loaded the rules"
+        )
+    if res.sigma_rules_loaded == 0:
+        res.notes.append("sigma detector enabled but 0 Sigma file rules loaded")
+
+
 async def _start_services() -> list[str]:
     """Like ``runtime.start(run_jobs=False)`` but one failing hook does not abort the evaluation."""
     runtime.load_service_packages()
@@ -282,6 +315,7 @@ async def _run_pipeline(events: list[Event], opts: ReplayOptions, res: RunResult
     res.enrichers = [e.id for e in get_enrichers()]
     if not res.detectors_enabled:
         res.notes.append("no detectors enabled: every detection metric will be 0")
+    _record_sigma_status(res)
 
     observer = _TriageObserver()
     queue = bus.listen(maxsize=1_000_000)

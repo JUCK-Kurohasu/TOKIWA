@@ -128,7 +128,8 @@ def render_markdown(doc: dict[str, Any]) -> str:
         f"- dataset: `{run.get('dataset')}` ({ds.get('events')} events, {ds.get('sessions')} sessions)",
         f"- LLM: `{run.get('llm')}` (provider: {cost.get('provider')}), replay speed: {run.get('speed')}",
         f"- detectors enabled: {len(m['pipeline']['detectors_enabled'])} / registered: "
-        f"{len(m['pipeline']['detectors_registered'])}; enrichers: {', '.join(m['pipeline']['enrichers']) or '–'}",
+        f"{len(m['pipeline']['detectors_registered'])}; Sigma file rules loaded: "
+        f"{_fmt(m['pipeline'].get('sigma_rules_loaded'))}; enrichers: {', '.join(m['pipeline']['enrichers']) or '–'}",
         "",
         "## Summary",
         "",

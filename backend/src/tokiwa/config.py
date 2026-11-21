@@ -14,6 +14,7 @@ add fields to *your own* section only, so parallel work does not conflict.
 from __future__ import annotations
 
 import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -116,9 +117,35 @@ class WebDetectionSettings(BaseModel):
     )
 
 
+def default_sigma_rule_dirs(package_file: Path | None = None, prefix: Path | None = None) -> list[Path]:
+    """Where the shipped Sigma rule set lives, independent of the process CWD (#177).
+
+    The old default ``../rules/sigma`` was resolved against the CWD (with ``backend/`` as a fallback derived from
+    the loader's own location), so a copied or non-editable install started from another directory silently ran
+    without any Sigma rule. Fallback order now (first existing directory wins):
+
+    1. source checkout: ``<repo>/rules/sigma`` when ``tokiwa`` is imported from ``<repo>/backend/src/tokiwa``
+       (``uv sync`` installs the project editable: development, CI, ``tokiwa eval``);
+    2. installed layout: ``<virtualenv>/../rules/sigma``. The Docker image keeps the venv in ``/app/.venv`` and the
+       rules in ``/app/rules/sigma`` (deploy/Dockerfile, which also sets TOKIWA_DETECTION__SIGMA_RULE_DIRS).
+
+    When neither exists (e.g. a wheel installed elsewhere) the first candidate is returned anyway, so the loader
+    reports it as missing (ERROR at startup) instead of quietly evaluating without Sigma rules. An explicit
+    ``detection.sigma_rule_dirs`` always wins; the loader resolves relative entries against the CWD and then
+    ``backend/`` as before, so existing configs keep working.
+    """
+    pkg = (package_file or Path(__file__)).resolve().parent  # .../tokiwa
+    candidates: list[Path] = []
+    if pkg.parent.name == "src":
+        candidates.append(pkg.parents[2] / "rules" / "sigma")
+    candidates.append(Path(prefix or sys.prefix).resolve().parent / "rules" / "sigma")
+    return [next((c for c in candidates if c.is_dir()), candidates[0])]
+
+
 class DetectionSettings(BaseModel):
     disabled_detectors: list[str] = Field(default_factory=list)
-    sigma_rule_dirs: list[Path] = Field(default_factory=lambda: [Path("../rules/sigma")])
+    # Absolute path resolved from the package location; see default_sigma_rule_dirs().
+    sigma_rule_dirs: list[Path] = Field(default_factory=lambda: default_sigma_rule_dirs())
     dedup_window_seconds: int = 300
     # Paths of LLM-backed applications protected by TOKIWA (prompt-injection detection applies here).
     llm_app_paths: list[str] = Field(default_factory=lambda: ["/api/chat", "/v1/chat/completions", "/chat"])
