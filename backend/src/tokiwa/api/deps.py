@@ -24,7 +24,10 @@ from tokiwa.db.session import get_session
 from tokiwa.schemas.system import ApiToken, Role, User
 from tokiwa.util import utcnow
 
-DbSession = Annotated[AsyncSession, Depends(get_session)]
+# scope="function": the session is committed (or rolled back) when the route returns, *before* the response is
+# sent -- see tokiwa.db.session.get_session. Keep it: the default "request" scope commits after the client already
+# has its 2xx (audit #91).
+DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 
 def _bearer(authorization: str | None) -> str | None:
