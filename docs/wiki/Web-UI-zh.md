@@ -58,6 +58,15 @@ TOKIWA Agent 发送过来的主机信息。标签页：**Ports**（端口：监�
 **Copilot** 可使用的工具是 **只读** 的，无法修改设置或执行处置。未设置 LLM 时，
 返回的是模拟应答。
 
+考虑到 LLM 可能会听从攻击者埋在遥测数据中的指令，回答中的链接按以下方式处理：
+
+- TOKIWA 内部链接只有指向已知页面（告警、事件（Incident）、会话、事件（Event）等）时才会在同一标签页中打开。
+- 外部链接只有指向允许站点（NVD、MITRE、CISA、JVN、OSV、FIRST）的 https 页面时才可点击，并在显示名称旁显示实际主机名。
+  其他链接显示为不可点击的文本，并附上主机名和“链接已禁用”（link disabled）。
+- 显示名称是 URL 形式但与实际链接目标不同时，会显示“显示名称与链接目标不一致”（label and destination differ）警告。
+
+允许的站点可在 `frontend/src/components/common/linkPolicy.ts` 的 `EXTERNAL_LINK_ALLOWLIST` 中修改（需要重新构建）。
+
 ### Incidents（安全事件）
 
 将相关告警按来源、会话、实体归并而成。

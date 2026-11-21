@@ -55,6 +55,15 @@ A chat where you can ask questions about TOKIWA's data in natural language (for 
 The tools the Copilot can use are **read-only**; it cannot change settings or execute response actions. If no LLM is configured,
 it gives mock responses.
 
+Because the LLM might follow instructions an attacker planted in telemetry, links in answers are handled as follows:
+
+- Links inside TOKIWA open in the same tab only for known screens (alerts, incidents, sessions, events, …).
+- External links are clickable only for https pages on allowed sites (NVD, MITRE, CISA, JVN, OSV, FIRST), and the real host name is shown next to the label.
+  Anything else is shown as non-clickable text, together with its host name and "link disabled".
+- When a label looks like a URL but differs from the real destination, a "label and destination differ" warning is shown.
+
+The allowed sites are set in `EXTERNAL_LINK_ALLOWLIST` in `frontend/src/components/common/linkPolicy.ts` (requires a rebuild).
+
 ### Incidents
 
 Related alerts grouped by source, session, and entity.

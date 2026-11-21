@@ -58,6 +58,15 @@ Chat que permite hacer preguntas en lenguaje natural sobre los datos de TOKIWA (
 Las herramientas que puede usar el copiloto son **de solo lectura**: no puede cambiar la configuración ni ejecutar acciones de respuesta. Si no se ha configurado un LLM,
 las respuestas son simuladas (mock).
 
+Como el LLM podría seguir instrucciones que un atacante haya colocado en la telemetría, los enlaces de las respuestas se tratan así:
+
+- Los enlaces internos de TOKIWA solo se abren en la misma pestaña si apuntan a pantallas conocidas (alertas, incidentes, sesiones, eventos…).
+- Los enlaces externos solo se pueden pulsar si son páginas https de sitios permitidos (NVD, MITRE, CISA, JVN, OSV, FIRST), y junto a la etiqueta se muestra el nombre de host real.
+  El resto se muestra como texto no pulsable, junto con su nombre de host y "link disabled" (enlace desactivado).
+- Si una etiqueta tiene forma de URL pero no coincide con el destino real, se muestra la advertencia "label and destination differ" (la etiqueta y el destino no coinciden).
+
+Los sitios permitidos se configuran en `EXTERNAL_LINK_ALLOWLIST` de `frontend/src/components/common/linkPolicy.ts` (requiere volver a compilar).
+
 ### Incidents (Incidentes)
 
 Agrupaciones de alertas relacionadas por origen, sesión y entidad.
