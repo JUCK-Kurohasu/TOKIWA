@@ -22,6 +22,7 @@ import {
 } from "@/components/common/OpsKit";
 import { alertStatusLabel, fmt, useCanOperate } from "@/components/common/opsLabels";
 import { ProposeActionDialog } from "@/components/common/ResponseActions";
+import { SafeText } from "@/components/common/SafeText";
 import { TriagePanel } from "@/components/common/TriagePanel";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -168,7 +169,9 @@ export function AlertDetailPage() {
               <AlertStatusBadge status={a.status} />
               <CategoryBadge category={a.category} />
             </div>
-            <h1 className="break-words text-xl font-semibold tracking-tight">{a.title}</h1>
+            <h1 className="break-words text-xl font-semibold tracking-tight">
+              <SafeText text={a.title} />
+            </h1>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
               <Mono>{a.rule_id}</Mono>
               {a.tags?.slice(0, 6).map((tag) => (
@@ -264,7 +267,11 @@ export function AlertDetailPage() {
               <div>
                 <SectionTitle>{L.description}</SectionTitle>
                 <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                  {a.description || <span className="text-muted">{L.noDescription}</span>}
+                  {a.description ? (
+                    <SafeText text={a.description} multiline />
+                  ) : (
+                    <span className="text-muted">{L.noDescription}</span>
+                  )}
                 </p>
               </div>
               {entities.length > 0 && (

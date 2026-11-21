@@ -31,6 +31,7 @@ import {
 } from "@/components/common/OpsKit";
 import { incidentStatusLabel, useCanOperate } from "@/components/common/opsLabels";
 import { ActionCard, ApprovalNotice, ProposeActionDialog } from "@/components/common/ResponseActions";
+import { SafeText } from "@/components/common/SafeText";
 import { TriagePanel } from "@/components/common/TriagePanel";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -327,7 +328,9 @@ export function IncidentDetailPage() {
               <CategoryBadge category={inc.category} />
               <Mono className="text-muted">INC-{inc.id.slice(0, 8)}</Mono>
             </div>
-            <h1 className="break-words text-xl font-semibold tracking-tight">{inc.title}</h1>
+            <h1 className="break-words text-xl font-semibold tracking-tight">
+              <SafeText text={inc.title} />
+            </h1>
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div>
@@ -520,7 +523,7 @@ export function IncidentDetailPage() {
                       </TD>
                       <TD className="max-w-[320px]">
                         <Link to={`/alerts/${a.id}`} className="line-clamp-2 hover:text-accent">
-                          {a.title}
+                          <SafeText text={a.title} />
                         </Link>
                         <CategoryBadge category={a.category} />
                       </TD>

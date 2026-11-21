@@ -18,6 +18,7 @@ import {
   TableSkeleton,
 } from "@/components/common/OpsKit";
 import { fmt, incidentStatusLabel } from "@/components/common/opsLabels";
+import { SafeText } from "@/components/common/SafeText";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
   Button,
@@ -268,7 +269,7 @@ export function IncidentsListPage() {
                           to={`/incidents/${inc.id}`}
                           className="line-clamp-1 font-medium hover:text-accent"
                         >
-                          {inc.title}
+                          <SafeText text={inc.title} />
                         </Link>
                         {inc.summary && <p className="line-clamp-1 text-xs text-muted">{inc.summary}</p>}
                       </TD>

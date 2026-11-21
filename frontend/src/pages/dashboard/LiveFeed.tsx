@@ -6,6 +6,7 @@ import type { ActorType, Severity } from "@/api/types";
 import { AiScore, SeverityDot } from "@/components/common";
 import { LiveDot } from "@/components/common/LiveDot";
 import { formatClock } from "@/components/common/numfmt";
+import { SafeText } from "@/components/common/SafeText";
 import { Badge, Card, CardHeader, EmptyState } from "@/components/ui";
 import { type LiveMessage, useLiveFeed, useLiveStatus } from "@/hooks/useLiveStream";
 import { useLocal } from "@/lib/i18n";
@@ -193,7 +194,7 @@ export function LiveFeed({ className }: { className?: string }) {
                     </span>
                     <span className="mt-0.5 flex items-center gap-1.5 text-sm">
                       {it.severity && <SeverityDot severity={it.severity} />}
-                      <span className="truncate">{it.title}</span>
+                      <SafeText text={it.title} className="truncate" />
                     </span>
                     {(it.sub || it.aiScore != null) && (
                       <span className="mt-0.5 flex items-center justify-between gap-2 text-xs text-muted">

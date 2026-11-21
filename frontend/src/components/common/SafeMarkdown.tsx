@@ -17,7 +17,9 @@ import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
 import { getLang, type Lang, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { hasInvisible } from "./invisible";
 import { type LinkTarget, labelMismatch, safeHref } from "./linkPolicy";
+import { SafeText } from "./SafeText";
 
 export { safeHref };
 
@@ -118,19 +120,24 @@ function renderLink(
   );
 }
 
+/** Text run with invisible / bidi control characters made visible (#150: answers quote attacker data). */
+function visible(text: string, key: string, multiline = false): ReactNode {
+  return hasInvisible(text, multiline) ? <SafeText key={key} text={text} multiline={multiline} /> : text;
+}
+
 /** Plain text with bare URLs turned into links. */
 function autolink(text: string, key: string, opts: MarkdownOptions): ReactNode[] {
-  if (opts.inLink) return [text];
+  if (opts.inLink) return [visible(text, key)];
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
   for (const m of text.matchAll(URL_RE)) {
     const idx = m.index ?? 0;
-    if (idx > last) out.push(text.slice(last, idx));
-    out.push(renderLink(m[0], m[0], m[0], `${key}-u${n++}`, opts));
+    if (idx > last) out.push(visible(text.slice(last, idx), `${key}-p${n}`));
+    out.push(renderLink(m[0], visible(m[0], `${key}-v${n}`), m[0], `${key}-u${n++}`, opts));
     last = idx + m[0].length;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(visible(text.slice(last), `${key}-p${n}`));
   return out;
 }
 
@@ -160,7 +167,7 @@ export function renderInline(text: string, key = "i", opts: MarkdownOptions = de
             key={`${key}-c${n++}`}
             className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[0.85em] text-fg"
           >
-            {text.slice(i + 1, end)}
+            <SafeText text={text.slice(i + 1, end)} />
           </code>,
         );
         i = end + 1;
@@ -371,7 +378,9 @@ export function SafeMarkdown({
                 {b.lang && (
                   <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">{b.lang}</div>
                 )}
-                <code>{b.text}</code>
+                <code>
+                  <SafeText text={b.text} multiline />
+                </code>
               </pre>
             );
           case "list": {

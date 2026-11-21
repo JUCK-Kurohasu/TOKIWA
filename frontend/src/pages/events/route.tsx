@@ -12,8 +12,10 @@ import { Mono, PageHeader } from "@/components/common";
 import { DataState, RowsSkeleton } from "@/components/common/DataState";
 import { EventDrawer, endpointText, isAiTag, KindBadge } from "@/components/common/EventInspector";
 import { HttpStatusBadge } from "@/components/common/HttpStatusBadge";
+import { escapeInvisible } from "@/components/common/invisible";
 import { LiveDot } from "@/components/common/LiveDot";
 import { PagerBar } from "@/components/common/PagerBar";
+import { InvisibleCharsBadge, SafeText } from "@/components/common/SafeText";
 import { Badge, Button, Card, Input, Label, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { retryUnlessClientError } from "@/hooks/useApi";
 import { useLiveStream } from "@/hooks/useLiveStream";
@@ -503,10 +505,11 @@ function EventsPage() {
                           {s.method && (
                             <span className="shrink-0 font-mono text-xs font-semibold">{s.method}</span>
                           )}
-                          <span className="truncate font-mono text-xs" title={s.text}>
-                            {s.text || <span className="text-muted">-</span>}
+                          <span className="truncate font-mono text-xs" title={escapeInvisible(s.text)}>
+                            {s.text ? <SafeText text={s.text} /> : <span className="text-muted">-</span>}
                           </span>
                           {ev.http && <HttpStatusBadge status={s.status} className="shrink-0" />}
+                          <InvisibleCharsBadge value={ev} compact />
                           {aiTags.slice(0, 2).map((t) => (
                             <Badge key={t} tone="ai" className="shrink-0 font-mono">
                               {t}

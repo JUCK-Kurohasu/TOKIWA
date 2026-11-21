@@ -67,9 +67,9 @@ describe("SafeMarkdown", () => {
       "/\\attacker.invalid/approve?d=SUMMARY",
       "//x.example",
       "/\n/x.example",
-      "/ /x.example",
-      "/‮/x.example",
-      "/​/alerts",
+      "/\u00A0/x.example",
+      "/\u202E/x.example",
+      "/\u200B/alerts",
     ];
     for (const t of tricks) {
       const r = safeHref(t);
@@ -122,8 +122,8 @@ describe("SafeMarkdown", () => {
       host: "attacker.example",
     });
     expect(safeHref("https://nvd.nist.gov:8443/x")).toMatchObject({ allowed: false });
-    // IDN look-alike (Cyrillic і): shown in punycode and not allowed.
-    const idn = safeHref("https://nvd.nіst.gov/x");
+    // IDN look-alike (Cyrillic small letter byelorussian-ukrainian i, U+0456): shown in punycode and not allowed.
+    const idn = safeHref("https://nvd.n\u0456st.gov/x");
     expect(idn).toMatchObject({ allowed: false });
     expect(idn && !idn.internal ? idn.host : "").toMatch(/xn--/);
   });

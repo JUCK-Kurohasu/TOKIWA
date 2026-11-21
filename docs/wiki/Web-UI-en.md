@@ -78,6 +78,12 @@ The server verifies that the evidence (event IDs) included in the LLM triage ref
 
 Search the raw ingested events. You can filter by type, dataset, source IP, host, time range, and keyword (path / User-Agent).
 
+When a path, User-Agent, header or body contains **invisible characters or characters that reorder the display**
+(the bidirectional control U+202E, the zero-width U+200B, …), each one is shown as `⟨U+202E⟩` in a warning colour and the row or event
+gets a "Contains invisible / bidi control characters" badge (this defeats tricks such as showing `invoice⟨U+202E⟩fdp.exe` as `invoiceexe.pdf`).
+The raw (JSON) view shows them as `\u202E`. Only the display changes; searches and filters use the original string. This applies to the event list,
+event details, alert evidence, session details, and Copilot answers and tool results.
+
 ## Intelligence
 
 ### Intelligence

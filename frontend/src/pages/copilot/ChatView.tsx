@@ -18,8 +18,10 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "@/api/client";
 import type { CopilotConversationDetail, CopilotMessage, CopilotToolCall } from "@/api/types-intel";
+import { escapeInvisible } from "@/components/common/invisible";
 import { ApiErrorState, LoadingRows } from "@/components/common/QueryView";
 import { SafeMarkdown } from "@/components/common/SafeMarkdown";
+import { SafeText } from "@/components/common/SafeText";
 import { Button, Textarea } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 import { useLang, useLocal } from "@/lib/i18n";
@@ -116,7 +118,8 @@ function compactInput(input: unknown): string {
   } catch {
     s = String(input);
   }
-  return s.length > 140 ? `${s.slice(0, 140)}…` : s;
+  // Tool inputs can echo attacker data (paths, UAs): make invisible / bidi characters visible (#150).
+  return escapeInvisible(s.length > 140 ? `${s.slice(0, 140)}…` : s);
 }
 
 function ToolName({ name }: { name: string }) {
@@ -156,7 +159,9 @@ function StepRow({ step }: { step: ToolStep }) {
         </div>
       )}
       {step.summary && step.status !== "running" && (
-        <div className="ml-5 line-clamp-2 text-[11px] text-muted">{step.summary}</div>
+        <div className="ml-5 line-clamp-2 text-[11px] text-muted">
+          <SafeText text={step.summary} />
+        </div>
       )}
     </li>
   );
@@ -177,7 +182,11 @@ function ToolCallsUsed({ calls }: { calls: CopilotToolCall[] }) {
             {c.input != null && (
               <div className="truncate font-mono text-[10px] text-muted">{compactInput(c.input)}</div>
             )}
-            {c.summary && <div className="text-[11px] text-muted">{c.summary}</div>}
+            {c.summary && (
+              <div className="text-[11px] text-muted">
+                <SafeText text={c.summary} />
+              </div>
+            )}
           </li>
         ))}
       </ul>

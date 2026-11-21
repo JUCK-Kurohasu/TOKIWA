@@ -81,6 +81,11 @@ TOKIWA Agent 发送过来的主机信息。标签页：**Ports**（端口：监�
 
 检索已摄取的原始事件。可以按类型、数据集、来源 IP、主机、时间范围、关键字（路径 / User-Agent）筛选。
 
+当路径、User-Agent、请求头、请求体等包含 **不可见字符或会改变显示顺序的字符**（双向控制字符 U+202E、零宽字符 U+200B 等）时，
+这些字符会以警告色显示为 `⟨U+202E⟩` 的形式，并在该行或事件上加上“包含不可见/双向控制字符”（Contains invisible / bidi control characters）标记
+（用于防范把 `invoice⟨U+202E⟩fdp.exe` 伪装成 `invoiceexe.pdf` 的手法）。原始数据（JSON）中显示为 `\u202E`。
+替换仅作用于显示，搜索和筛选仍使用原始字符串。适用于事件列表、事件详情、告警证据、会话详情以及 Copilot 的回答和工具结果。
+
 ## Intelligence（情报）
 
 ### Intelligence

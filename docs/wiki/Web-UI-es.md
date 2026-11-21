@@ -81,6 +81,13 @@ El servidor verifica que las evidencias citadas en el triaje del LLM (ID de evid
 
 Búsqueda de los eventos sin procesar ingeridos. Puede filtrarse por tipo, dataset, IP de origen, host, periodo y palabra clave (ruta / User-Agent).
 
+Si una ruta, un User-Agent, una cabecera o un cuerpo contiene **caracteres invisibles o que alteran el orden de visualización**
+(el control bidireccional U+202E, el de ancho cero U+200B…), cada uno se muestra como `⟨U+202E⟩` en color de advertencia y la fila o el evento
+recibe la insignia "Contains invisible / bidi control characters" (contiene caracteres invisibles o de control bidireccional). Así se evitan trucos
+como mostrar `invoice⟨U+202E⟩fdp.exe` como `invoiceexe.pdf`. La vista de datos sin procesar (JSON) los muestra como `\u202E`.
+Solo cambia la visualización; las búsquedas y los filtros usan la cadena original. Se aplica a la lista de eventos, el detalle de eventos,
+la evidencia de alertas, el detalle de sesiones y las respuestas y resultados de herramientas del copiloto.
+
 ## Intelligence (Inteligencia)
 
 ### Intelligence
