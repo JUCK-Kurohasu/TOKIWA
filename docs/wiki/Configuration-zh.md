@@ -57,6 +57,7 @@ deception:
 | `server.data_dir` | `./data` | 数据的保存位置（签名密钥等） |
 | `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥。未设置时生成并保存到 `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | 登录的有效时间 |
+| `auth.setup_code_required` | `true` | 初始设置（创建第一个管理员）时要求输入启动日志和 `data_dir/setup-code` 中的一次性设置码 |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL 为 `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

@@ -19,7 +19,8 @@ cp .env.example .env     # 必要な行だけコメントを外す
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. <http://localhost:8788/setup> で最初の管理者を作成します（CLI の場合:
+1. <http://localhost:8788/setup> で最初の管理者を作成します。画面で求められる **セットアップコード** は、起動ログ（`docker compose -f deploy/compose.yaml logs tokiwa`。コード入りの URL が出ます）か
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` で確認します（1 回限り。CLI の場合:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`。パスワードは対話入力）。
 2. LLM を使う場合は `.env` に `ANTHROPIC_API_KEY=...` を書きます（未設定ならモック LLM で動作）。
 3. 既定では `127.0.0.1:8788` にだけ公開されます。LAN に出す場合は `.env` の `TOKIWA_BIND=0.0.0.0` ですが、

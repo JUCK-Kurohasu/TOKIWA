@@ -36,6 +36,15 @@ class ServerSettings(BaseModel):
     token_ttl_minutes: int = 60 * 12
 
 
+class AuthSettings(BaseModel):
+    """Login and first-run setup protection (owned by tokiwa.auth / routes/auth.py)."""
+
+    # POST /auth/setup (the unauthenticated "create the first admin" call) requires the one-time code that the
+    # server writes to data_dir/setup-code and to its log while setup is pending. Disable only on a host that no
+    # one else can reach before setup (or create the first admin with `tokiwa user create --role admin`).
+    setup_code_required: bool = True
+
+
 class DatabaseSettings(BaseModel):
     # SQLite (default, lab scale) or PostgreSQL: postgresql+asyncpg://user:pass@host/db
     url: str = "sqlite+aiosqlite:///./data/tokiwa.db"
@@ -325,6 +334,7 @@ class Settings(BaseSettings):
     env: Literal["dev", "prod", "test"] = "dev"
     log_level: str = "INFO"
     server: ServerSettings = Field(default_factory=ServerSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     detection: DetectionSettings = Field(default_factory=DetectionSettings)

@@ -14,8 +14,8 @@
 ## 認証・ユーザー（`routes/auth.py` 実装済, `routes/users.py`, `routes/tokens.py`）
 | Method | Path | 権限 | 入出力 |
 |---|---|---|---|
-| GET | /auth/status | public | → `AuthStatus` |
-| POST | /auth/setup | public(初回のみ) | `UserCreate` → `TokenResponse`。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
+| GET | /auth/status | public | → `AuthStatus {setup_required, version, setup_code_required}` |
+| POST | /auth/setup | public(初回のみ) | `SetupRequest`（`UserCreate` + `setup_code`。`schemas/auth.py`）→ `TokenResponse`。`auth.setup_code_required`（既定 true）のとき、起動ログと `data_dir/setup-code` に出る 1 回限りのコードが無い・違うと 403。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
 | POST | /auth/login | public | `LoginRequest` → `TokenResponse` |
 | GET | /auth/me | user | → `User` |
 | GET | /users | admin | → `User[]` |

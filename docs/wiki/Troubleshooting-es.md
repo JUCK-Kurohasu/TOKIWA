@@ -10,7 +10,7 @@ arranque el servidor con `TOKIWA_SERVER__STATIC_DIR=../frontend/dist`. Durante e
 En la imagen Docker, compruebe que no haya sobrescrito `TOKIWA_SERVER__STATIC_DIR` (por defecto `/app/frontend/dist`).
 
 **Aparece la pantalla de inicio de sesión en lugar de la de registro del administrador en el primer arranque**
-La pantalla de configuración inicial del administrador (/setup) solo se muestra mientras la base de datos del servidor no tenga ningún usuario. Compruebe primero el estado.
+La pantalla de configuración inicial del administrador (/setup) solo se muestra hasta que ese servidor se haya configurado una vez (después no vuelve a aparecer aunque se borren todos los usuarios). Compruebe primero el estado.
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -22,6 +22,14 @@ curl -s http://localhost:8788/api/v1/auth/status
   en la pantalla de inicio de sesión al abrir `/login` directamente, aunque hiciera falta la configuración inicial (ahora redirige a /setup).
 - Sin conexión → el servidor no está en marcha (`cd backend && uv run tokiwa serve`). Las versiones anteriores de la interfaz también mostraban
   la pantalla de inicio de sesión cuando la API no respondía (ahora muestra **Cannot reach the server** (No se puede conectar con el servidor)).
+
+**La pantalla de configuración dice "missing or wrong setup code"**
+Para crear el primer administrador hace falta el código de un solo uso que el servidor escribe al arrancar en su log y en `data/setup-code` (`/data/setup-code` en Docker).
+Abra la URL de la línea `TOKIWA is not set up yet ...` del log o escriba el contenido del archivo en el campo **Setup code**. Si el archivo no existe, un intento de configuración crea uno nuevo y lo muestra en el log.
+En un host al que nadie más puede acceder, puede desactivarlo con `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` ([Referencia de configuración](Configuration-es)).
+
+**No queda ningún administrador (el log de arranque dice "no user has the admin role")**
+Con la misma configuración que el servidor, ejecute `uv run tokiwa user create <nombre> --role admin` (en Docker: `docker compose ... exec tokiwa tokiwa user create ...`).
 
 **Ha olvidado la contraseña del administrador**
 Con la misma configuración que el servidor, ejecute `uv run tokiwa user create <nuevo nombre> --role admin` para crear otro administrador

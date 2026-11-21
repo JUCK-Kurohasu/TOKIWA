@@ -35,7 +35,7 @@ TOKIWA（常磐）は、AI 自律型ペネトレーションテストシステ�
 # backend
 cd backend
 uv sync
-uv run tokiwa serve --reload        # http://localhost:8788 （初回は /setup で管理者作成）
+uv run tokiwa serve --reload        # http://localhost:8788 （初回は /setup で管理者作成。セットアップコードは起動ログに出る）
 
 # frontend（別ターミナル）
 cd frontend

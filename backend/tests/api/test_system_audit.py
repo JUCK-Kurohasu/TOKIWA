@@ -111,7 +111,12 @@ async def test_audit_log(client: httpx.AsyncClient, role_headers: dict[str, dict
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == 4 and body["limit"] == 50 and body["offset"] == 0
-    assert [e["action"] for e in body["items"]] == ["token.create", "user.create", "user.create", "auth.setup"]
+    assert [e["action"] for e in body["items"]] == [
+        "token.create",
+        "user.create",
+        "user.create",
+        "auth.setup",
+    ]
     assert all(e["actor"] == "admin" for e in body["items"])
 
     page = (

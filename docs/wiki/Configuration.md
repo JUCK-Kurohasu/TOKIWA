@@ -57,6 +57,7 @@ deception:
 | `server.data_dir` | `./data` | データの保存先（署名鍵など） |
 | `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵。未設定なら `data_dir/secret.key` に生成・保存 |
 | `server.token_ttl_minutes` | 720 | ログインの有効時間 |
+| `auth.setup_code_required` | `true` | 初回セットアップ（最初の管理者作成）に、起動ログと `data_dir/setup-code` に出る 1 回限りのコードを要求する |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL は `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

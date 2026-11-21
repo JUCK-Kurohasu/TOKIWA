@@ -27,6 +27,7 @@
 ```bash
 docker compose -f lab/compose.yaml up --build -d          # tokiwa + gate + victim
 open http://localhost:8788                                 # 初回は UI でセットアップ（管理者作成）
+docker compose -f lab/compose.yaml logs tokiwa | grep 'not set up'   # ↑で入力するセットアップコード（1 回限り）
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # 既定ミックス
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # AI エージェントのみ

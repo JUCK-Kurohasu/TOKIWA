@@ -30,7 +30,7 @@ These are the steps in "3. Build a mini lab and send attacks" in [Quick start](Q
 
 ```bash
 docker compose -f lab/compose.yaml up --build -d            # tokiwa + gate + victim
-# Open http://localhost:8788 and create an admin the first time
+# Open http://localhost:8788 and create an admin the first time (setup code: docker compose -f lab/compose.yaml logs tokiwa)
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # Default mix
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # AI agents only

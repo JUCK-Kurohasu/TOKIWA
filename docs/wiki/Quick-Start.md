@@ -36,7 +36,13 @@ cd backend && uv sync                                   # バックエンドの�
 TOKIWA_SERVER__STATIC_DIR=../frontend/dist uv run tokiwa serve
 ```
 
-ブラウザで <http://localhost:8788> を開きます。初回は **セットアップ画面（/setup）** になるので、最初の管理者を作成します。
+初回は、サーバーのログに次のような行が出ます。
+
+> `TOKIWA is not set up yet. Create the first admin at http://localhost:8788/setup#code=ABCD-EFGH-JKLM-NPQR ...`
+
+この URL をブラウザで開くと **セットアップ画面（/setup）** に **セットアップコード** が入力された状態で表示されるので、最初の管理者を作成します。
+<http://localhost:8788> を開いた場合は、ログのコード（`backend/data/setup-code` にも保存）を「セットアップコード」欄に入力します。
+コードは 1 回限りで、セットアップが終わると削除されます（同じネットワークの第三者が先に管理者を作るのを防ぐため）。
 
 - ユーザー名: 3〜64 文字（英数字と `_` `.` `-`）
 - パスワード: 10 文字以上

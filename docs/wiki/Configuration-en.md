@@ -57,6 +57,7 @@ deception:
 | `server.data_dir` | `./data` | Where data is stored (signing key, and so on) |
 | `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
+| `auth.setup_code_required` | `true` | First-run setup (creating the first admin) requires the single-use code printed in the startup log and saved to `data_dir/setup-code` |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | For PostgreSQL: `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

@@ -19,7 +19,8 @@ cp .env.example .env     # 只取消注释需要的行
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. 在 <http://localhost:8788/setup> 创建第一个管理员（使用 CLI 时：
+1. 在 <http://localhost:8788/setup> 创建第一个管理员。页面要求输入的 **Setup code**（设置码）可在启动日志（`docker compose -f deploy/compose.yaml logs tokiwa`，会输出包含设置码的 URL）中找到，或通过
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` 查看（仅可使用一次。使用 CLI 时：
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`。密码以交互方式输入）。
 2. 如需使用 LLM，在 `.env` 中写入 `ANTHROPIC_API_KEY=...`（未设置时以模拟 LLM 运行）。
 3. 默认只在 `127.0.0.1:8788` 上公开。若要对局域网公开，可在 `.env` 中设置 `TOKIWA_BIND=0.0.0.0`，但

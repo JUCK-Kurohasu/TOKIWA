@@ -57,6 +57,7 @@ deception:
 | `server.data_dir` | `./data` | Ubicación de los datos (clave de firma, etc.) |
 | `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
+| `auth.setup_code_required` | `true` | La configuración inicial (crear el primer administrador) exige el código de un solo uso que aparece en el log de arranque y en `data_dir/setup-code` |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | Para PostgreSQL, `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

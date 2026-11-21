@@ -30,7 +30,7 @@ TOKIWA には、検知を試すための **ラボ環境**・**攻撃トラフィ
 
 ```bash
 docker compose -f lab/compose.yaml up --build -d            # tokiwa + gate + victim
-# http://localhost:8788 を開き、初回は管理者を作成
+# http://localhost:8788 を開き、初回は管理者を作成（セットアップコード: docker compose -f lab/compose.yaml logs tokiwa）
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # 既定のミックス
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # AI エージェントだけ

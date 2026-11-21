@@ -10,7 +10,7 @@ UI 尚未构建，或者没有设置提供 UI 的目录。执行 `cd frontend &&
 使用 Docker 镜像时，请检查是否覆盖了 `TOKIWA_SERVER__STATIC_DIR`（默认 `/app/frontend/dist`）。
 
 **首次启动时出现的是登录界面，而不是管理员注册界面**
-首次的管理员注册界面（/setup）只会在服务器数据库中一个用户都没有时显示。请先确认状态。
+首次的管理员注册界面（/setup）只会在该服务器从未完成过初始设置时显示（设置过一次后，即使所有用户都被删除也不会再显示）。请先确认状态。
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -22,6 +22,14 @@ curl -s http://localhost:8788/api/v1/auth/status
   即使需要初始设置也会停留在登录界面（现在会跳转到 /setup）。
 - 无法连接 → 服务器没有运行（`cd backend && uv run tokiwa serve`）。旧版本的 UI 在无法连接 API 时也会显示登录界面
   （现在会显示 **Cannot reach the server**（无法连接到服务器））。
+
+**初始设置界面提示“missing or wrong setup code”**
+创建第一个管理员需要服务器启动时写入日志和 `data/setup-code`（Docker 中为 `/data/setup-code`）的一次性设置码。
+请打开日志中 `TOKIWA is not set up yet ...` 一行里的 URL，或将该文件的内容填入 **Setup code**（设置码）栏。如果文件不存在，尝试设置时会重新生成并输出到日志。
+在其他人无法访问的主机上，可以用 `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` 关闭此功能（[配置参考](Configuration-zh)）。
+
+**一个管理员都没有了（启动日志中出现“no user has the admin role”）**
+在与服务器相同的设置下执行 `uv run tokiwa user create <名称> --role admin` 创建管理员（Docker 中为 `docker compose ... exec tokiwa tokiwa user create ...`）。
 
 **忘记了管理员密码**
 在与服务器相同的设置下执行 `uv run tokiwa user create <新名称> --role admin` 创建另一个管理员，

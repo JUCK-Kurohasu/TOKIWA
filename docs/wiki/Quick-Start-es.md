@@ -36,7 +36,13 @@ cd backend && uv sync                                   # Instala las dependenci
 TOKIWA_SERVER__STATIC_DIR=../frontend/dist uv run tokiwa serve
 ```
 
-Abra <http://localhost:8788> en el navegador. La primera vez se muestra la página **/setup** (configuración inicial), donde se crea el primer administrador.
+En el primer arranque, el log del servidor muestra una línea como esta:
+
+> `TOKIWA is not set up yet. Create the first admin at http://localhost:8788/setup#code=ABCD-EFGH-JKLM-NPQR ...`
+
+Abra esa URL en el navegador: aparece la página **/setup** (configuración inicial) con el **Setup code** (código de configuración) ya rellenado, y se crea el primer administrador.
+Si abre <http://localhost:8788>, introduzca el código del log (también guardado en `backend/data/setup-code`) en el campo **Setup code**.
+El código sirve una sola vez y se borra tras la configuración (para que nadie más en la red pueda crear el primer administrador antes que usted).
 
 - Nombre de usuario: de 3 a 64 caracteres (alfanuméricos y `_` `.` `-`)
 - Contraseña: 10 caracteres o más

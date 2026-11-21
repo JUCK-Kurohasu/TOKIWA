@@ -20,6 +20,7 @@ from tokiwa.api import deps
 from tokiwa.api.routes import auth as auth_routes
 from tokiwa.auth.accounts import lock_accounts, setup_completed
 from tokiwa.auth.security import hash_password
+from tokiwa.auth.setup_code import ensure_setup_code
 from tokiwa.db.models.auth import AUTH_STATE_ID, AuthStateRow
 from tokiwa.db.models.core import UserRow
 from tokiwa.db.session import session_scope
@@ -138,9 +139,14 @@ async def test_concurrent_setup_creates_one_admin(
 
     monkeypatch.setattr(auth_routes, "hash_password", counting_hash)
     monkeypatch.setattr(auth_routes, "lock_accounts", gated_lock)
+    code = ensure_setup_code()
     r1, r2 = await asyncio.gather(
-        client.post("/api/v1/auth/setup", json={"username": "first", "password": "p" * 12}),
-        client.post("/api/v1/auth/setup", json={"username": "second", "password": "p" * 12}),
+        client.post(
+            "/api/v1/auth/setup", json={"username": "first", "password": "p" * 12, "setup_code": code}
+        ),
+        client.post(
+            "/api/v1/auth/setup", json={"username": "second", "password": "p" * 12, "setup_code": code}
+        ),
     )
     assert sorted([r1.status_code, r2.status_code]) == [200, 409], (r1.text, r2.text)
     winner = r1 if r1.status_code == 200 else r2

@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 
-export type AuthStatus = { setup_required: boolean; version?: string };
+export type AuthStatus = {
+  setup_required: boolean;
+  version?: string;
+  /** Setup needs the one-time code from the server log / data_dir/setup-code. */
+  setup_code_required?: boolean;
+};
 
 /** GET /auth/status, shared by the protected-route guard and the login/setup pages (same cache key). */
 export function useAuthStatus() {

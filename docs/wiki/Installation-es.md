@@ -19,7 +19,8 @@ cp .env.example .env     # Descomente solo las líneas necesarias
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. Cree el primer administrador en <http://localhost:8788/setup> (con la CLI:
+1. Cree el primer administrador en <http://localhost:8788/setup>. La página pide un **Setup code** (código de configuración): está en el log de arranque (`docker compose -f deploy/compose.yaml logs tokiwa`, que muestra una URL con el código) o se obtiene con
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` (de un solo uso; con la CLI:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`; la contraseña se introduce de forma interactiva).
 2. Si usa un LLM, escriba `ANTHROPIC_API_KEY=...` en `.env` (si no se define, funciona con el LLM simulado, mock).
 3. Por defecto solo se publica en `127.0.0.1:8788`. Para exponerlo en la LAN se usa `TOKIWA_BIND=0.0.0.0` en `.env`, pero
