@@ -17,6 +17,7 @@ import { Mono } from "@/components/common";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
 import { SecretReveal } from "@/components/common/SecretReveal";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -33,7 +34,7 @@ import {
   TR,
 } from "@/components/ui";
 import { errorMessage, useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { type Flash, MutationError } from "./shared";
@@ -300,9 +301,9 @@ export function TokensTab({ flash }: { flash: Flash }) {
                   </span>
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
-                  {formatDateTime(t.created_at)}
+                  <Time iso={t.created_at} />
                 </TD>
-                <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(t.last_used)}>
+                <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(t.last_used)}>
                   {t.last_used ? timeAgo(t.last_used) : L.never}
                 </TD>
                 <TD>{t.revoked ? <Badge>{L.revoked}</Badge> : <Badge tone="accent">{L.active}</Badge>}</TD>

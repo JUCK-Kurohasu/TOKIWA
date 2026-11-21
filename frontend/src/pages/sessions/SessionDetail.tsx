@@ -11,6 +11,7 @@ import { HttpStatusBadge } from "@/components/common/HttpStatusBadge";
 import { escapeInvisible } from "@/components/common/invisible";
 import { formatMs, toEpochMs } from "@/components/common/numfmt";
 import { InvisibleCharsBadge, SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Card,
@@ -26,7 +27,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, formatNumber, pct } from "@/lib/format";
+import { formatNumber, pct } from "@/lib/format";
 import { useLang, useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { GapHistogram, RhythmScatter } from "./RhythmCharts";
@@ -333,11 +334,15 @@ export function SessionDetailPage() {
               </div>
               <div>
                 <dt className="text-[11px] text-muted">{L.first}</dt>
-                <dd>{formatDateTime(session.first_seen)}</dd>
+                <dd>
+                  <Time iso={session.first_seen} />
+                </dd>
               </div>
               <div>
                 <dt className="text-[11px] text-muted">{L.last}</dt>
-                <dd>{formatDateTime(session.last_seen)}</dd>
+                <dd>
+                  <Time iso={session.last_seen} />
+                </dd>
               </div>
             </dl>
           </CardBody>
@@ -466,7 +471,7 @@ export function SessionDetailPage() {
                             setOpenEvent(ev);
                           }}
                         >
-                          {formatDateTime(ev.timestamp)}
+                          <Time iso={ev.timestamp} />
                         </button>
                       </TD>
                       <TD className="text-right text-xs tabular-nums">

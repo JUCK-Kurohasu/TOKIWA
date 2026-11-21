@@ -32,6 +32,7 @@ import {
 import { incidentStatusLabel, useCanOperate } from "@/components/common/opsLabels";
 import { ActionCard, ApprovalNotice, ProposeActionDialog } from "@/components/common/ResponseActions";
 import { SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import { TriagePanel } from "@/components/common/TriagePanel";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -52,7 +53,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, pct, timeAgo } from "@/lib/format";
+import { dateTimeTitle, pct, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/stores/auth";
@@ -397,9 +398,11 @@ export function IncidentDetailPage() {
       <AttributionCard incident={inc} />
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <MetaItem label={L.firstSeen}>{formatDateTime(inc.first_seen)}</MetaItem>
+        <MetaItem label={L.firstSeen}>
+          <Time iso={inc.first_seen} />
+        </MetaItem>
         <MetaItem label={L.lastSeen}>
-          <span title={formatDateTime(inc.last_seen)}>{timeAgo(inc.last_seen)}</span>
+          <span title={dateTimeTitle(inc.last_seen)}>{timeAgo(inc.last_seen)}</span>
         </MetaItem>
         <MetaItem label={L.alertCount}>
           <span className="tabular-nums">{inc.alert_count}</span>
@@ -537,10 +540,7 @@ export function IncidentDetailPage() {
                       <TD>
                         <AlertStatusBadge status={a.status} />
                       </TD>
-                      <TD
-                        className="whitespace-nowrap text-xs text-muted"
-                        title={formatDateTime(a.last_seen)}
-                      >
+                      <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(a.last_seen)}>
                         {timeAgo(a.last_seen)}
                       </TD>
                     </TR>

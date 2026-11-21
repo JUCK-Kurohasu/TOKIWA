@@ -1,5 +1,6 @@
 /** Extra number/time formatters for dense SOC tables (complements src/lib/format.ts). */
 import { getLang } from "@/lib/i18n";
+import { intlTimeZone } from "@/lib/timezone";
 
 /** 12 ms / 1.4 s / 2m 05s / 1h 02m */
 export function formatMs(ms: number | null | undefined): string {
@@ -29,19 +30,29 @@ export function formatBytes(v: number | null | undefined): string {
   return `${(v / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** HH:MM:SS in the UI language/locale. */
+/** HH:MM:SS in the UI language/locale and the display time zone (the zone is shown in the top bar). */
 export function formatClock(t: number | string | Date): string {
   const d = t instanceof Date ? t : new Date(t);
-  return d.toLocaleTimeString(getLang() === "ja" ? "ja-JP" : "en-US", { hour12: false });
+  return d.toLocaleTimeString(getLang() === "ja" ? "ja-JP" : "en-US", {
+    hourCycle: "h23",
+    timeZone: intlTimeZone(),
+  });
 }
 
-/** Axis tick for time-series: "14:00" within a day, "10/21 14:00" otherwise. */
+/** Axis tick for time-series: "14:00" within a day, "10/21 14:00" otherwise (display time zone). */
 export function formatTick(t: number, spanMs: number): string {
   const d = new Date(t);
   const locale = getLang() === "ja" ? "ja-JP" : "en-US";
-  const hm = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const timeZone = intlTimeZone();
+  const hm = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone });
   if (spanMs <= 26 * 3600 * 1000) return hm;
-  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    timeZone,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("month")}/${get("day")} ${hm}`;
 }
 
 /** Parse ISO strings and epoch seconds/ms into epoch ms. */

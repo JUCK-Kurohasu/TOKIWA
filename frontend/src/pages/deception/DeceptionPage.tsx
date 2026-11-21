@@ -30,7 +30,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatDateTime, formatNumber, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { CreateAssetDialog } from "./CreateAssetDialog";
@@ -418,7 +418,7 @@ export function DeceptionPage() {
                         </TD>
                         <TD
                           className="whitespace-nowrap text-xs text-muted"
-                          title={formatDateTime(a.last_tripped)}
+                          title={dateTimeTitle(a.last_tripped)}
                         >
                           {a.last_tripped ? timeAgo(a.last_tripped) : L.never}
                         </TD>
@@ -525,7 +525,7 @@ export function DeceptionPage() {
                                   )}
                                 </button>
                               </TD>
-                              <TD className="whitespace-nowrap text-xs" title={formatDateTime(ev.timestamp)}>
+                              <TD className="whitespace-nowrap text-xs" title={dateTimeTitle(ev.timestamp)}>
                                 {timeAgo(ev.timestamp)}
                               </TD>
                               <TD>

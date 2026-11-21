@@ -37,7 +37,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -497,10 +497,7 @@ export function AlertsListPage() {
                       <TD>
                         <AlertStatusBadge status={a.status} />
                       </TD>
-                      <TD
-                        className="whitespace-nowrap text-xs text-muted"
-                        title={formatDateTime(a.last_seen)}
-                      >
+                      <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(a.last_seen)}>
                         {timeAgo(a.last_seen)}
                       </TD>
                     </TR>

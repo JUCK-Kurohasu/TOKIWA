@@ -10,8 +10,9 @@ import { SeverityBadge } from "@/components/common";
 import { CvssScore, EpssBar, KevBadge, PriorityBadge, SafeLink } from "@/components/common/IntelBadges";
 import { ApiErrorState, LoadingRows } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
+import { Time } from "@/components/common/Time";
 import { Badge, Button, Dialog, Spinner, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { formatDateTime, pct } from "@/lib/format";
+import { pct } from "@/lib/format";
 import { useLocal, useT } from "@/lib/i18n";
 import { AdvisoryView } from "./AdvisoryView";
 import { softwareLabel, useMatchStatusLabel } from "./labels";
@@ -176,15 +177,21 @@ export function VulnDetailDialog({ id, onClose }: { id: string | null; onClose: 
                 )}
               </span>
             </Fact>
-            <Fact label={L.published}>{formatDateTime(v.published)}</Fact>
-            <Fact label={L.modified}>{formatDateTime(v.modified)}</Fact>
+            <Fact label={L.published}>
+              <Time iso={v.published} />
+            </Fact>
+            <Fact label={L.modified}>
+              <Time iso={v.modified} />
+            </Fact>
             {v.kev && (
               <>
-                <Fact label={L.kevAdded}>{formatDateTime(v.kev_date_added)}</Fact>
+                <Fact label={L.kevAdded}>
+                  <Time iso={v.kev_date_added} />
+                </Fact>
                 <Fact label={L.kevDue}>
                   <span className="inline-flex items-center gap-1 font-medium text-sev-critical">
                     <CalendarClock className="h-3.5 w-3.5" aria-hidden />
-                    {formatDateTime(v.kev_due_date)}
+                    <Time iso={v.kev_due_date} />
                   </span>
                 </Fact>
               </>
@@ -325,7 +332,9 @@ export function VulnDetailDialog({ id, onClose }: { id: string | null; onClose: 
                     >
                       <PriorityBadge priority={adv.priority} />
                       <span className="min-w-0 flex-1 truncate">{adv.title}</span>
-                      <span className="shrink-0 text-xs text-muted">{formatDateTime(adv.created_at)}</span>
+                      <span className="shrink-0 text-xs text-muted">
+                        <Time iso={adv.created_at} />
+                      </span>
                     </button>
                     {expanded === adv.id && (
                       <div className="border-t border-line p-3">

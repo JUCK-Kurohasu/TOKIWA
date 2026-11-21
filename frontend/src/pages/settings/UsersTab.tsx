@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import { ROLES, type Role, type User, type UserCreate, type UserUpdate } from "@/api/types-core";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -24,7 +25,7 @@ import {
 } from "@/components/ui";
 import { errorMessage, useApiQuery } from "@/hooks/useApi";
 import { useCurrentUserId } from "@/hooks/useRole";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { type Flash, MutationError, RoleBadge } from "./shared";
 
@@ -308,9 +309,9 @@ export function UsersTab({ flash }: { flash: Flash }) {
                   )}
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
-                  {formatDateTime(u.created_at)}
+                  <Time iso={u.created_at} />
                 </TD>
-                <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(u.last_login)}>
+                <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(u.last_login)}>
                   {u.last_login ? timeAgo(u.last_login) : L.never}
                 </TD>
                 <TD className="whitespace-nowrap text-right">

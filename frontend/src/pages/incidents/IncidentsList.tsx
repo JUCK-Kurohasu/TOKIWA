@@ -33,7 +33,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -297,7 +297,7 @@ export function IncidentsListPage() {
                       <TD className="text-xs">{inc.assignee ?? <span className="text-muted">-</span>}</TD>
                       <TD
                         className="whitespace-nowrap text-xs text-muted"
-                        title={formatDateTime(inc.last_seen)}
+                        title={dateTimeTitle(inc.last_seen)}
                       >
                         {timeAgo(inc.last_seen)}
                       </TD>

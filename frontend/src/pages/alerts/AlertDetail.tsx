@@ -23,6 +23,7 @@ import {
 import { alertStatusLabel, fmt, useCanOperate } from "@/components/common/opsLabels";
 import { ProposeActionDialog } from "@/components/common/ResponseActions";
 import { SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import { TriagePanel } from "@/components/common/TriagePanel";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -36,7 +37,7 @@ import {
   Select,
   Skeleton,
 } from "@/components/ui";
-import { formatDateTime, pct, timeAgo } from "@/lib/format";
+import { dateTimeTitle, pct, timeAgo } from "@/lib/format";
 import { useLabel, useLocal } from "@/lib/i18n";
 
 const strings = {
@@ -241,10 +242,12 @@ export function AlertDetailPage() {
           <AiScore score={a.ai_score} className={aiLikely ? "font-semibold text-ai" : undefined} />
         </MetaItem>
         <MetaItem label={L.firstSeen}>
-          <span title={formatDateTime(a.first_seen)}>{formatDateTime(a.first_seen)}</span>
+          <span title={dateTimeTitle(a.first_seen)}>
+            <Time iso={a.first_seen} />
+          </span>
         </MetaItem>
         <MetaItem label={L.lastSeen}>
-          <span title={formatDateTime(a.last_seen)}>{timeAgo(a.last_seen)}</span>
+          <span title={dateTimeTitle(a.last_seen)}>{timeAgo(a.last_seen)}</span>
         </MetaItem>
         <MetaItem label={L.incident}>
           {a.incident_id ? (

@@ -6,6 +6,11 @@ La interfaz de TOKIWA se abre en `http://<servidor>:8788`. La barra lateral izqu
 Con los botones de la esquina superior derecha se puede cambiar el **idioma de visualización (japonés / English)** y el **tema claro / oscuro**.
 Las alertas y los incidentes se actualizan en tiempo real (SSE).
 
+Las fechas y horas siempre llevan el nombre de la zona horaria (por ejemplo `11/11/2026, 09:43:09 GMT+9`). El botón del reloj de la esquina superior derecha
+(muestra `JST`, `UTC`…) cambia la **zona horaria de visualización (local del navegador / UTC)**; la elección se recuerda en cada navegador. Al pasar el ratón
+sobre una hora también se muestra el valor ISO 8601 en UTC (por ejemplo `2026-11-11T00:43:09.000Z`). La API, la vista de datos sin procesar (JSON), el Gate y los registros usan siempre UTC.
+El periodo personalizado de la pantalla Events (eventos) también se interpreta en la zona horaria de visualización.
+
 > La interfaz web solo está disponible en japonés e inglés. En esta wiki, las etiquetas de la interfaz se citan en inglés y en negrita,
 > con su traducción al español entre paréntesis la primera vez que aparecen en cada página.
 

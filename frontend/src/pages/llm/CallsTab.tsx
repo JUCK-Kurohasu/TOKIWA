@@ -12,7 +12,7 @@ import { ApiErrorState, LoadingRows, QueryView } from "@/components/common/Query
 import { useCan } from "@/components/common/RoleGate";
 import { useUrlParams } from "@/components/common/urlState";
 import { Badge, Card, Dialog, EmptyState, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { formatDateTime, formatNumber, formatUsd, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatDateTime, formatNumber, formatUsd, timeAgo } from "@/lib/format";
 import { useLang, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -305,7 +305,7 @@ export function CallsTab() {
                 <TBody>
                   {page.items.map((c) => (
                     <TR key={c.id} className="cursor-pointer" onClick={() => update({ call: c.id })}>
-                      <TD className="whitespace-nowrap text-xs" title={formatDateTime(c.created_at)}>
+                      <TD className="whitespace-nowrap text-xs" title={dateTimeTitle(c.created_at)}>
                         <button
                           type="button"
                           className="hover:text-accent hover:underline"

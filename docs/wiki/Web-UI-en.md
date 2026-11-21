@@ -6,6 +6,11 @@ Open the TOKIWA UI at `http://<server>:8788`. The sidebar on the left is divided
 Use the buttons at the top right to switch the **display language (Japanese / English)** and the **light / dark theme**.
 Alerts and incidents update in real time (SSE).
 
+Dates and times always carry a time zone name (for example `11/11/2026, 09:43:09 GMT+9`). The clock button at the top right (showing `JST`, `UTC`, …)
+switches the **display time zone (browser local / UTC)**; the choice is remembered per browser. Hovering over a time also shows
+the ISO 8601 value in UTC (for example `2026-11-11T00:43:09.000Z`). The API, raw (JSON) views, the Gate and logs always use UTC.
+A custom time range on the Events screen is read in the display time zone as well.
+
 ## Roles (permissions)
 
 | Role | What it can do |

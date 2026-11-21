@@ -21,6 +21,7 @@ import { JsonView, Mono } from "@/components/common";
 import { DataState, RowsSkeleton } from "@/components/common/DataState";
 import { formatMs } from "@/components/common/numfmt";
 import { PagerBar } from "@/components/common/PagerBar";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -37,7 +38,7 @@ import {
   TR,
 } from "@/components/ui";
 import { errorMessage, useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatNumber, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { Flash } from "./shared";
@@ -233,7 +234,7 @@ function JobsCard({ flash }: { flash: Flash }) {
                 </TD>
                 <TD
                   className="whitespace-nowrap text-xs text-muted"
-                  title={formatDateTime(j.last_finished ?? j.last_started)}
+                  title={dateTimeTitle(j.last_finished ?? j.last_started)}
                 >
                   {j.last_started ? timeAgo(j.last_finished ?? j.last_started) : L.never}
                 </TD>
@@ -379,7 +380,9 @@ function AuditCard() {
                           </button>
                         )}
                       </TD>
-                      <TD className="whitespace-nowrap text-xs">{formatDateTime(a.created_at)}</TD>
+                      <TD className="whitespace-nowrap text-xs">
+                        <Time iso={a.created_at} />
+                      </TD>
                       <TD className="text-sm">{a.actor}</TD>
                       <TD>
                         <Mono>{a.action}</Mono>

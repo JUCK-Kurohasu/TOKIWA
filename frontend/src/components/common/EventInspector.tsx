@@ -9,9 +9,10 @@ import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { Endpoint, TkEvent } from "@/api/types";
 import { JsonView, Mono } from "@/components/common";
+import { Time } from "@/components/common/Time";
 import { Badge, Table, Tabs, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { DataState } from "./DataState";
@@ -354,7 +355,9 @@ function Overview({ event }: { event: TkEvent }) {
         <KV label={L.asset}>
           <Mono>{event.asset_id ?? "-"}</Mono>
         </KV>
-        <KV label={L.ingested}>{formatDateTime(event.ingested_at)}</KV>
+        <KV label={L.ingested}>
+          <Time iso={event.ingested_at} />
+        </KV>
       </dl>
       {(event.tags?.length ?? 0) > 0 && (
         <Section title={L.tags}>
@@ -420,7 +423,9 @@ export function EventInspector({ event }: { event: TkEvent }) {
           <KindBadge kind={event.kind} />
           <Mono className="text-muted">{event.dataset}</Mono>
           <span className="text-muted">·</span>
-          <span title={event.timestamp}>{formatDateTime(event.timestamp)}</span>
+          <span title={event.timestamp}>
+            <Time iso={event.timestamp} />
+          </span>
           <span className="text-muted">({timeAgo(event.timestamp)})</span>
           <InvisibleCharsBadge value={event} />
         </div>

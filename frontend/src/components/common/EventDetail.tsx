@@ -9,8 +9,9 @@ import { Braces, ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
 import type { HttpInfo, TkEvent } from "@/api/types";
+import { Time } from "@/components/common/Time";
 import { Badge } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { JsonView } from "./index";
@@ -242,7 +243,9 @@ export function EventDetail({
           <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         )}
         <Badge>{event.kind}</Badge>
-        <span className="shrink-0 font-mono text-[11px] text-muted">{formatDateTime(event.timestamp)}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted">
+          <Time iso={event.timestamp} />
+        </span>
         {src && <span className="shrink-0 font-mono text-xs">{src}</span>}
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">
           <SafeText text={summaryLine(event)} />

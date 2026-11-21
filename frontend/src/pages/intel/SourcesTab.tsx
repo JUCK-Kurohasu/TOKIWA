@@ -9,7 +9,7 @@ import { InlineNotice, useFlash } from "@/components/common/InlineNotice";
 import { ApiErrorState, QueryView } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
 import { Button, Card, EmptyState, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatNumber, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -150,7 +150,7 @@ export function SourcesTab() {
                           </span>
                         )}
                       </TD>
-                      <TD className="text-xs" title={formatDateTime(s.last_sync)}>
+                      <TD className="text-xs" title={dateTimeTitle(s.last_sync)}>
                         {s.last_sync ? timeAgo(s.last_sync) : <span className="text-muted">{L.never}</span>}
                       </TD>
                       <TD className="text-right tabular-nums text-xs">{formatNumber(s.records)}</TD>

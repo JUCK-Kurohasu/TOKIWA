@@ -22,8 +22,9 @@ import { escapeInvisible } from "@/components/common/invisible";
 import { ApiErrorState, LoadingRows } from "@/components/common/QueryView";
 import { SafeMarkdown } from "@/components/common/SafeMarkdown";
 import { SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import { Button, Textarea } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+
 import { useLang, useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { StreamState, ToolStep } from "./useCopilotStream";
@@ -214,7 +215,9 @@ function MessageBubble({ m }: { m: CopilotMessage }) {
       <div className="flex justify-end gap-2">
         <div className="max-w-[80%] rounded-lg rounded-tr-sm border border-line bg-surface-2 px-3 py-2">
           <p className="whitespace-pre-wrap break-words text-sm">{m.content}</p>
-          <div className="mt-1 text-right text-[10px] text-muted">{formatDateTime(m.created_at)}</div>
+          <div className="mt-1 text-right text-[10px] text-muted">
+            <Time iso={m.created_at} />
+          </div>
         </div>
         <Avatar who="user" />
       </div>
@@ -226,7 +229,9 @@ function MessageBubble({ m }: { m: CopilotMessage }) {
       <div className="min-w-0 max-w-[85%] rounded-lg rounded-tl-sm border border-ai/20 bg-surface px-3 py-2">
         {m.content ? <SafeMarkdown text={m.content} /> : null}
         {m.tool_calls && m.tool_calls.length > 0 && <ToolCallsUsed calls={m.tool_calls} />}
-        <div className="mt-1 text-[10px] text-muted">{formatDateTime(m.created_at)}</div>
+        <div className="mt-1 text-[10px] text-muted">
+          <Time iso={m.created_at} />
+        </div>
       </div>
     </div>
   );
