@@ -50,6 +50,7 @@ El LLM realiza el triaje de las alertas detectadas, con su fundamentación, y **
 | Usar señuelos y canarios de IA | [Engaño (Mirage)](Deception-es) |
 | Cotejar información de 0day y vulnerabilidades con sus activos | [Inteligencia de vulnerabilidades](Threat-Intel-es) |
 | Hacer pruebas con el simulador de ataques o con ARTEX | [Laboratorio y evaluación](Lab-and-Evaluation-es) |
+| Comprobar qué se recopila, se guarda y se envía al exterior, y quién puede verlo | [Tratamiento de datos](Data-Handling-es) |
 | Consultar opciones de configuración y comandos | [Referencia de configuración](Configuration-es) / [Referencia de la CLI](CLI-es) |
 | Algo no funciona | [Solución de problemas](Troubleshooting-es) |
 

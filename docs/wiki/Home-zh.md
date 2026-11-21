@@ -50,6 +50,7 @@
 | 想使用诱饵或 AI 金丝雀 | [欺骗防御（Mirage）](Deception-zh) |
 | 想将 0day 和漏洞信息与资产进行比对 | [漏洞情报](Threat-Intel-zh) |
 | 想用攻击模拟器或 ARTEX 进行测试 | [实验环境与评估](Lab-and-Evaluation-zh) |
+| 想确认收集、保存和向外部发送哪些数据，以及谁能查看 | [数据处理](Data-Handling-zh) |
 | 想查询配置项和命令 | [配置参考](Configuration-zh) / [CLI 参考](CLI-zh) |
 | 运行不正常 | [故障排除](Troubleshooting-zh) |
 
