@@ -65,11 +65,17 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 async def create_all() -> None:
-    """Create tables. (Alembic migrations are planned before v1.0 - see ADR-0002.)"""
+    """Create tables, then add any new nullable columns / indexes to tables that already exist.
+
+    Alembic migrations are planned before v1.0 (ADR-0002, audit #162); until then
+    :func:`tokiwa.db.schema_sync.sync_additive` keeps an upgraded database usable.
+    """
     from tokiwa.db import models  # noqa: F401  - registers all model modules
+    from tokiwa.db.schema_sync import sync_additive
 
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(sync_additive, Base.metadata)
 
 
 async def dispose_engine() -> None:
