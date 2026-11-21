@@ -8,8 +8,11 @@ Design constraints (from docs/tasks/gate.md):
   for an in-progress incident) and the drop is counted in :class:`ShipperStats`.
 - Fail-open: server down / slow / erroring never affects proxied traffic. Transient failures (network, 5xx,
   408, 429) are retried with exponential backoff, keeping the batch at the head of the queue; permanent ones
-  (other 4xx, e.g. a revoked token or a schema mismatch) drop the batch with an error log, because retrying
+  (other 4xx, e.g. a missing scope or a schema mismatch) drop the batch with an error log, because retrying
   them forever would only pin memory.
+- 401 (token revoked / expired / rotated, audit #163) is *not* permanent: the token file is re-read and the
+  batch is re-sent at once when the token changed; otherwise the events stay queued (bounded, oldest dropped)
+  and are retried with backoff until the operator writes a valid token to the file.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from datetime import datetime
 
 import httpx
 
+from tokiwa.gate.tokens import TokenSource
 from tokiwa.schemas.events import Event
 from tokiwa.util import utcnow
 
@@ -56,7 +60,7 @@ class EventShipper:
         self,
         client: httpx.AsyncClient,
         server_url: str,
-        token: str | None,
+        token: str | TokenSource | None,
         *,
         batch_size: int = 100,
         flush_interval: float = 1.0,
@@ -66,7 +70,7 @@ class EventShipper:
     ) -> None:
         self._client = client
         self._url = server_url.rstrip("/") + INGEST_PATH
-        self._token = token
+        self._tokens = TokenSource.of(token)
         self.batch_size = max(1, min(batch_size, MAX_BATCH))
         self.flush_interval = max(0.05, flush_interval)
         self.max_queue = max(self.batch_size, max_queue)
@@ -152,17 +156,23 @@ class EventShipper:
         self.stats.queued = len(self._queue)
         return delivered
 
-    async def _send(self, batch: list[Event]) -> str:
+    async def _post(self, payload: bytes) -> httpx.Response:
         headers = {"Content-Type": "application/json"}
-        if self._token:
-            headers["X-Tokiwa-Token"] = self._token
+        token = self._tokens.get()
+        if token:
+            headers["X-Tokiwa-Token"] = token
+        return await self._client.post(self._url, content=payload, headers=headers, timeout=self._timeout)
+
+    async def _send(self, batch: list[Event]) -> str:
         payload = json.dumps(
             {"events": [e.model_dump(mode="json", exclude_none=True) for e in batch]},
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
         try:
-            resp = await self._client.post(self._url, content=payload, headers=headers, timeout=self._timeout)
+            resp = await self._post(payload)
+            if resp.status_code == 401 and self._tokens.reload():
+                resp = await self._post(payload)  # the token file was replaced: retry once right away
         except httpx.HTTPError as exc:
             return self._transient(f"{type(exc).__name__}: {exc}")
         if 200 <= resp.status_code < 300:
@@ -177,6 +187,9 @@ class EventShipper:
             return "ok"
         if resp.status_code in (408, 429) or resp.status_code >= 500:
             return self._transient(f"HTTP {resp.status_code}")
+        if resp.status_code == 401:
+            # Keep the events: the operator is expected to write a new token to the token file.
+            return self._transient("HTTP 401 (API token rejected; waiting for a new token in the token file)")
         self.stats.dropped_rejected += len(batch)
         self.stats.last_error = f"HTTP {resp.status_code} (batch of {len(batch)} dropped)"
         log.error(

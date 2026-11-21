@@ -18,6 +18,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tokiwa.auth.api_tokens import is_expired
 from tokiwa.auth.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token
 from tokiwa.db.models.core import ApiTokenRow, UserRow
 from tokiwa.db.session import get_session
@@ -96,6 +97,8 @@ def require_token_scope(scope: str) -> Callable[..., Coroutine[Any, Any, ApiToke
         ).scalar_one_or_none()
         if row is None or row.revoked:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid API token")
+        if is_expired(row):  # audit #163: expires_at NULL = never
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API token expired")
         if scope not in row.scopes:
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"token lacks scope {scope!r}")
         row.last_used = utcnow()

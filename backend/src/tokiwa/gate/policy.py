@@ -22,6 +22,7 @@ import httpx
 from pydantic import ValidationError
 
 from tokiwa.gate.netmatch import IpTable
+from tokiwa.gate.tokens import TokenSource
 from tokiwa.schemas.response import DecoyRoute, GatePolicy
 from tokiwa.util import utcnow
 
@@ -173,14 +174,14 @@ class PolicyManager:
         self,
         client: httpx.AsyncClient,
         server_url: str,
-        token: str | None,
+        token: str | TokenSource | None,
         *,
         refresh_seconds: float = 5.0,
         timeout: float = 5.0,
     ) -> None:
         self._client = client
         self._url = server_url.rstrip("/") + POLICY_PATH
-        self._token = token
+        self._tokens = TokenSource.of(token)
         self.refresh_seconds = max(0.5, refresh_seconds)
         self._timeout = timeout
         self._current = CompiledPolicy.empty()
@@ -208,11 +209,10 @@ class PolicyManager:
     async def refresh(self) -> bool:
         """Fetch once. Never raises (fail-open); returns True when a new policy was installed."""
         self.fetches += 1
-        headers = {"Accept": "application/json"}
-        if self._token:
-            headers["X-Tokiwa-Token"] = self._token
         try:
-            resp = await self._client.get(self._url, headers=headers, timeout=self._timeout)
+            resp = await self._get()
+            if resp.status_code == 401 and self._tokens.reload():
+                resp = await self._get()  # the token file was replaced (rotation): retry once right away
         except httpx.HTTPError as exc:
             self._failed(f"{type(exc).__name__}: {exc}")
             return False
@@ -234,6 +234,13 @@ class PolicyManager:
         self.last_error = None
         self.last_success = utcnow()
         return self.apply(policy)
+
+    async def _get(self) -> httpx.Response:
+        headers = {"Accept": "application/json"}
+        token = self._tokens.get()
+        if token:
+            headers["X-Tokiwa-Token"] = token
+        return await self._client.get(self._url, headers=headers, timeout=self._timeout)
 
     def _failed(self, reason: str) -> None:
         self.errors += 1

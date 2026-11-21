@@ -62,8 +62,10 @@ def resolve_settings(
         update["server_url"] = server
     if token_file is not None:
         update["ingest_token"] = SecretStr(token_file.read_text(encoding="utf-8").strip())
+        update["token_file"] = token_file  # watched for rotation (gate.tokens.TokenSource)
     if token:
         update["ingest_token"] = SecretStr(token)
+        update["token_file"] = None  # an explicit --token wins and is not reloaded
     if sensor_id:
         update["sensor_id"] = sensor_id
     if capture_body_bytes is not None:
@@ -85,7 +87,9 @@ def run(
     listen: str | None = typer.Option(None, help="Listen address host:port (default 0.0.0.0:8080)"),
     server: str | None = typer.Option(None, help="TOKIWA server URL, e.g. http://127.0.0.1:8788"),
     token: str | None = typer.Option(None, help="API token (scopes ingest+gate). Prefer --token-file / env"),
-    token_file: Path | None = typer.Option(None, help="File containing the API token"),
+    token_file: Path | None = typer.Option(
+        None, help="File containing the API token; re-read when it changes (rotation without restart)"
+    ),
     sensor_id: str | None = typer.Option(None, help="Sensor id recorded on events (default gate-1)"),
     capture_body_bytes: int | None = typer.Option(None, help="Request body prefix to capture (bytes)"),
     trust_forwarded_for: bool | None = typer.Option(

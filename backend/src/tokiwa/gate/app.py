@@ -50,6 +50,7 @@ from tokiwa.gate.proxy import (
 )
 from tokiwa.gate.ratelimit import TokenBucketLimiter
 from tokiwa.gate.shipper import EventShipper
+from tokiwa.gate.tokens import TokenSource
 from tokiwa.schemas.response import DecoyRoute
 
 log = logging.getLogger(__name__)
@@ -110,7 +111,9 @@ class Gate:
     ) -> None:
         self.settings = settings
         self.options = options or GateOptions()
-        self.token = settings.ingest_token.get_secret_value() if settings.ingest_token else None
+        self.tokens = TokenSource(
+            settings.ingest_token.get_secret_value() if settings.ingest_token else None, settings.token_file
+        )
         self.target = UpstreamTarget(settings.upstream)
         opts = self.options
         # trust_env=False: never route upstream/server traffic through HTTP(S)_PROXY from the environment.
@@ -128,13 +131,13 @@ class Gate:
         self.policy = PolicyManager(
             self.server_client,
             settings.server_url,
-            self.token,
+            self.tokens,
             refresh_seconds=settings.policy_refresh_seconds,
         )
         self.shipper = EventShipper(
             self.server_client,
             settings.server_url,
-            self.token,
+            self.tokens,
             batch_size=settings.batch_size,
             flush_interval=settings.flush_interval_seconds,
             max_queue=opts.max_queue,
@@ -149,6 +152,11 @@ class Gate:
         self.counters: Counter[str] = Counter()
         self._tasks: list[asyncio.Task[None]] = []
         self._upstream_server: bytes | None = None  # mimicked on gate-generated responses
+
+    @property
+    def token(self) -> str | None:
+        """Current API token (re-read from ``settings.token_file`` when it changes)."""
+        return self.tokens.get()
 
     # ------------------------------------------------------------------------------------------ lifecycle
     async def start(self) -> None:

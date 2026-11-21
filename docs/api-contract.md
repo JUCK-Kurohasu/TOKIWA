@@ -23,10 +23,13 @@
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409） |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409） |
 | GET | /tokens | admin | → `ApiToken[]` |
-| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 省略時は `[ingest]`（`gate` は明示が必要、監査 #33）、空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
+| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?, expires_in_days?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 省略時は `[ingest]`（`gate` は明示が必要、監査 #33）、空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
+| POST | /tokens/{id}/rotate | admin | `ApiTokenRotate {grace_hours=24 (0..720), expires_in_days?}` → `ApiTokenCreated`（201。同じ name/scopes/縛りの新トークン、`rotated_from`=旧 id。旧トークンは grace_hours 後に期限切れ、0 なら即失効。失効済み/期限切れは 409） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
 users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
+`ApiToken` は `expires_at`（null=無期限。期限切れは token 認証で 401 `API token expired`）、`created_by`（作成者のユーザー名、CLI は `cli`）、
+`rotated_from` を持つ。CLI `tokiwa token list|revoke|rotate` も同じ処理（`tokiwa.auth.api_tokens`）で監査に actor `cli` を残す。
 
 ## 取り込み（`routes/ingest.py` 実装済）
 | POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult`。トークンに `allowed_datasets` があり範囲外の dataset を含むバッチは **丸ごと 403**（Gate の送信側は 403 を恒久エラーとしてバッチを破棄する） |

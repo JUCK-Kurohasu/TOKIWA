@@ -52,6 +52,7 @@ const strings = {
     status: "状態",
     active: "有効",
     revoked: "失効",
+    expired: "期限切れ",
     revoke: "失効させる",
     revokedMsg: "トークンを失効させました",
     empty: "トークンはまだありません",
@@ -84,6 +85,7 @@ const strings = {
     status: "Status",
     active: "active",
     revoked: "revoked",
+    expired: "expired",
     revoke: "Revoke",
     revokedMsg: "Token revoked",
     empty: "No tokens yet",
@@ -306,7 +308,15 @@ export function TokensTab({ flash }: { flash: Flash }) {
                 <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(t.last_used)}>
                   {t.last_used ? timeAgo(t.last_used) : L.never}
                 </TD>
-                <TD>{t.revoked ? <Badge>{L.revoked}</Badge> : <Badge tone="accent">{L.active}</Badge>}</TD>
+                <TD title={t.expires_at ? formatDateTime(t.expires_at) : undefined}>
+                  {t.revoked ? (
+                    <Badge>{L.revoked}</Badge>
+                  ) : t.expires_at && Date.parse(t.expires_at) <= Date.now() ? (
+                    <Badge>{L.expired}</Badge>
+                  ) : (
+                    <Badge tone="accent">{L.active}</Badge>
+                  )}
+                </TD>
                 <TD className="text-right">
                   {!t.revoked && (
                     <ConfirmButton

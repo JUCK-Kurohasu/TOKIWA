@@ -113,6 +113,7 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `gate.listen_host` / `gate.listen_port` | `0.0.0.0` / 8080 | Dirección y puerto de escucha |
 | `gate.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `gate.ingest_token` | Ninguno | Token de API (ámbito: ingest + gate) |
+| `gate.token_file` | Ninguno | Archivo con el token de API. Se relee cuando cambia y tras un 401 (sin reiniciar al rotar). Tiene prioridad sobre `ingest_token` si se puede leer |
 | `gate.capture_body_bytes` | 4096 | Número de bytes iniciales del cuerpo que se capturan |
 | `gate.trust_forwarded_for` | false | Confiar en `X-Forwarded-For` |
 | `agent.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |

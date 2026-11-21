@@ -65,6 +65,9 @@ class ApiToken(ORMModel):
     # Ingest binding (None = unrestricted). See db.models.core.ApiTokenRow.
     allowed_sensor_ids: list[str] | None = None
     allowed_datasets: list[str] | None = None
+    expires_at: datetime | None = None  # None = never expires
+    created_by: str | None = None
+    rotated_from: str | None = None
 
 
 # sensor ids are host names / "gate-1" style ids; dataset patterns are "<family>.<stream>" with fnmatch "*".
@@ -79,6 +82,15 @@ class ApiTokenCreate(BaseModel):
     # Optional ingest binding. Omitted / null = unrestricted. An empty list is rejected (it would mean "deny all").
     allowed_sensor_ids: list[SensorIdItem] | None = Field(default=None, min_length=1, max_length=64)
     allowed_datasets: list[DatasetPatternItem] | None = Field(default=None, min_length=1, max_length=64)
+    # None = never expires (backwards compatible default). TODO(decide): default to 90 days? (NOTES #163)
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class ApiTokenRotate(BaseModel):
+    """Issue a replacement with the same name / scopes / binding; the old token stays valid for ``grace_hours``."""
+
+    grace_hours: int = Field(default=24, ge=0, le=24 * 30)  # 0 = revoke the old token immediately
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # for the new token (None = never)
 
 
 class ApiTokenCreated(ApiToken):

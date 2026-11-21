@@ -51,6 +51,20 @@ tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] 
 
 The default scope is `ingest` **only**. For a Gate token pass `--scope ingest --scope gate` explicitly (the `gate` scope can read the Gate policy, including decoy paths, canary values and the block list, so give it to Gates only). The token (`tkw_...`) is shown **only once**.
 `--sensor-id` / `--dataset` (repeatable) bind the token to sensor ids and datasets ([Connecting sensors](Sensors-en)).
+`--expires-in-days N` sets an expiry (default: never). An expired token gets 401.
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # list (never shows secrets; --all includes revoked)
+tokiwa token revoke <id|name>                              # revoke now
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # issue a new token (printed once on stdout)
+```
+
+These work on the server host without an admin login (lost password, incident in progress). Each operation is recorded
+in the audit log with actor `cli`. `rotate` issues a new token with the same name, scopes and binding and keeps the old
+one valid for `--grace-hours` (default 24 hours; 0 revokes it now). The Gate re-reads its token file when it changes, so
+writing the new token to the file switches over without a restart. If a name matches several active tokens, pass the id.
 
 ## tokiwa gate run
 
@@ -64,7 +78,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | Configured value | URL to forward requests to |
 | `--listen` | `0.0.0.0:8080` | Listen `host:port` |
 | `--server` | Configured value | TOKIWA server URL |
-| `--token` / `--token-file` | — | API token (the environment variable `TOKIWA_GATE__INGEST_TOKEN` or a file is recommended) |
+| `--token` / `--token-file` | — | API token (the environment variable `TOKIWA_GATE__INGEST_TOKEN` or a file is recommended; the file is re-read when it changes and after a 401) |
 | `--sensor-id` | `gate-1` | Sensor ID recorded in events |
 | `--capture-body-bytes` | 4096 | Number of leading body bytes to capture |
 | `--trust-forwarded-for` | off | Use the rightmost `X-Forwarded-For` entry as the source (only behind a trusted LB) |

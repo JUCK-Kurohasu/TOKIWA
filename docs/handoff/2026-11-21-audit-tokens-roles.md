@@ -9,8 +9,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | #40 | 部分 | 出所ラベル（`ingest.token_id`/`ingest.token`、クライアントの `ingest.*` は破棄）、トークンの `allowed_sensor_ids`/`allowed_datasets`（API・CLI `--sensor-id`/`--dataset`）、gate スコープ無しトークンの `gate.*`/`deception.*`/kind=deception に `ingest.trust=low`。protected_cidrs は既存（`response.protected_cidrs`）なので文書化のみ。repro をテスト化（`tests/api/test_ingest_provenance.py`） | 608ef21 |
-| #33 | 部分 | `tokiwa token create` / `ApiTokenCreate` / UI の既定スコープを `ingest` のみに。Gate 用は `--scope ingest --scope gate` を明示。`token create` の全呼び出し（AGENTS.md, README, .env.example, docs/deploy.md, docs/gate.md, wiki Installation/Quick-Start/Sensors/CLI ×4 言語）を更新（lab/scripts/init-tokens.sh・Makefile・scripts は既に明示）。Gate はポリシー取得 403 時に「gate スコープ不足」のヒントをログ。docs/gate.md・docs/deception.md・wiki Deception×4 に「gate トークン漏えい＝デセプション配置の漏えい」。既存トークンの scopes は不変 | (このコミット) |
-| #163 | 未着手 | | |
+| #33 | 部分 | `tokiwa token create` / `ApiTokenCreate` / UI の既定スコープを `ingest` のみに。Gate 用は `--scope ingest --scope gate` を明示。`token create` の全呼び出し（AGENTS.md, README, .env.example, docs/deploy.md, docs/gate.md, wiki Installation/Quick-Start/Sensors/CLI ×4 言語）を更新（lab/scripts/init-tokens.sh・Makefile・scripts は既に明示）。Gate はポリシー取得 403 時に「gate スコープ不足」のヒントをログ。docs/gate.md・docs/deception.md・wiki Deception×4 に「gate トークン漏えい＝デセプション配置の漏えい」。既存トークンの scopes は不変 | 3bc39ab |
+| #163 | 部分（(a)(b) は完全、(c)(d) は auth レーン） | (a) `ApiTokenRow` に `expires_at`/`created_by`/`rotated_from`（nullable）。期限切れは 401 `API token expired`。API `expires_in_days`（既定は無期限のまま）と `POST /tokens/{id}/rotate`。CLI `tokiwa token create --expires-in-days` / `list [--all]` / `revoke <id\|name>` / `rotate <id\|name> --grace-hours --expires-in-days`（共通処理 `tokiwa/auth/api_tokens.py`、監査 actor `cli`。CLI 作成も監査に残るようになった）。(b) Gate: `gate/tokens.py` の `TokenSource` がトークンファイルを mtime/サイズ/inode 変化で再読込、401 で強制再読込して変わっていれば即再送、変わらなければイベントをキューに保持してバックオフ（以前は 401 でバッチ破棄）。空・読めないファイルは直前のトークンを維持。`GateSettings.token_file`（`TOKIWA_GATE__TOKEN_FILE`）を追加し lab の gate に設定。UI のトークン一覧に「期限切れ」バッジ | (このコミット) |
 | #157 | 未着手 | | |
 | #164 | 未着手 | | |
 | #167 | 未着手 | | |
@@ -32,6 +32,12 @@
 - (3) トークンを送信元 IP に縛る（allowed_cidrs）・last_used の IP 記録: 未実装（#40 の残りと同じ）。
 - UI での警告（gate スコープにチェックしたときの注意書き）: 既定値の変更のみ。文言追加は frontend レーンへ依頼。
 
+### #163 で残したもの
+- (c) `tokiwa user reset-password`、(d) CLI の DB 例外で SQL パラメータを出さない（hide_parameters）: auth レーン担当のため未着手。
+- TOKIWA Agent（`tokiwa agent run`、sensors モジュール）のトークンファイル再読込: 担当外のため未実装。`gate/tokens.py` の
+  `TokenSource` を sensors の shipper でも使えば同じ挙動にできる。
+- 期限切れが近いトークンの通知（UI バナー・notify）: 未実装。
+
 ## 要判断
 
 - **#40 既定は「印を付ける」で拒否しない**: gate スコープの無いトークンからの `gate.*` を既定で拒否すると、ラボの
@@ -45,6 +51,13 @@
   ポリシー取得が 403 になる（fail-open でプロキシは動くが遮断・デコイが効かない）ため、Gate のログに
   「--scope ingest --scope gate で作り直す」ヒントを出す。
 
+- **#163 トークンの既定有効期限は無期限のまま**（後方互換）。recommendation の「既定 90 日」は、期限切れで Gate/agent の
+  取り込みが黙って止まる運用リスクがあるため（期限通知が未実装）、`--expires-in-days` / `expires_in_days` の opt-in にした。
+  既定 90 日にするかは要判断（するなら期限通知とセットで）。
+- **#163 Gate の 401 を「保持して再試行」に変更**: 以前は 401 でバッチ破棄（`dropped_rejected`）。トークン失効後に誰も直さないと
+  キュー上限（既定 10000）まで溜まり古いものから捨てる（メモリは有界）。403/422 は従来どおり破棄。
+- **#163 rotate の猶予の既定は 24 時間**（API/CLI とも）。0 で即時失効。
+
 ## 失敗した試み
 
 （なし）
@@ -56,8 +69,17 @@
 - `schemas/system.py` の `ApiToken`/`ApiTokenCreate` にフィールド追加（default 付き）。`ApiTokenCreate.scopes` の既定を `[ingest]` に（#33）。
 - `frontend/src/pages/settings/TokensTab.tsx`: 作成フォームの既定スコープを `["ingest"]` に（1 行）。
 - `AGENTS.md` / `README.md` / `.env.example` / `docs/deploy.md` の `token create` 例（#33）。
+- `config.py` の `GateSettings` に `token_file: Path | None = None`（#163。gate セクションのみ）。
+- `gate/app.py`: `Gate.token` を `TokenSource` 経由のプロパティに（`self.tokens`）。shipper / policy に `TokenSource` を渡す（数行）。
+- `api/deps.py` の `require_token_scope` に期限切れ判定（担当部分）。
+- `lab/compose.yaml`: gate サービスに `TOKIWA_GATE__TOKEN_FILE`（with-token.sh の env と併用。ファイルが読めればファイル優先）。
+- `frontend/src/pages/settings/TokensTab.tsx`: 状態列に「期限切れ」バッジ（数行）。
+- `tests/gate/test_gate_shipper.py`: 401 を恒久エラーの parametrize から外した（挙動変更のため）。
 
 ## 他レーンへの依頼
+
+- frontend: トークン画面に「ローテーション」ボタン（`POST /tokens/{id}/rotate`、新トークンを一度だけ表示）と有効期限の入力
+  （`expires_in_days`）、`created_by` 列（#163）。
 
 - frontend: 承認画面・アラート詳細の evidence に `labels["ingest.token"]`（送信トークン名）、`ingest.trust=low` の
   バッジ、`ingest.claimed_sensor_id` を表示（#40 (3)）。トークン作成フォームに `allowed_sensor_ids`/`allowed_datasets`
