@@ -17,8 +17,8 @@ Sensors authenticate with **API tokens**, not user logins.
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # Default scopes: ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # for Gate: add the gate scope explicitly
+uv run tokiwa token create agent-web01            # default scope: ingest only
 ```
 
 | Scope | What it allows |

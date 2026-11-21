@@ -23,7 +23,7 @@
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409） |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409） |
 | GET | /tokens | admin | → `ApiToken[]` |
-| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
+| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 省略時は `[ingest]`（`gate` は明示が必要、監査 #33）、空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
 users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。

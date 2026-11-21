@@ -17,8 +17,8 @@ Los sensores no se autentican con el inicio de sesión de un usuario, sino con u
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # Ámbitos por defecto: ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # para Gate: añada el ámbito gate explícitamente
+uv run tokiwa token create agent-web01            # ámbito por defecto: solo ingest
 ```
 
 | Ámbito | Qué permite |

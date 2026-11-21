@@ -74,7 +74,8 @@ DatasetPatternItem = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.*-]
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    scopes: list[ApiTokenScope] = Field(default_factory=lambda: [ApiTokenScope.INGEST, ApiTokenScope.GATE])
+    # Default ingest only (audit #33): the gate scope reads the whole deception layout, so it is opt-in.
+    scopes: list[ApiTokenScope] = Field(default_factory=lambda: [ApiTokenScope.INGEST])
     # Optional ingest binding. Omitted / null = unrestricted. An empty list is rejected (it would mean "deny all").
     allowed_sensor_ids: list[SensorIdItem] | None = Field(default=None, min_length=1, max_length=64)
     allowed_datasets: list[DatasetPatternItem] | None = Field(default=None, min_length=1, max_length=64)

@@ -17,8 +17,8 @@ TOKIWA 服务器不会自己去收集数据，而是分析 **传感器发送过�
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # 默认作用域：ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # Gate 用：需显式指定 gate 作用域
+uv run tokiwa token create agent-web01            # 默认作用域：仅 ingest
 ```
 
 | 作用域（scope） | 允许的操作 |

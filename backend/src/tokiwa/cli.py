@@ -181,7 +181,10 @@ def _validate_token_options(
 @token_app.command("create")
 def token_create(
     name: str,
-    scope: list[str] = typer.Option(["ingest", "gate"], help="ingest / gate / read"),
+    scope: list[str] = typer.Option(
+        ["ingest"],
+        help="ingest / gate / read (repeatable). Default: ingest only. A Gate needs --scope ingest --scope gate",
+    ),
     sensor_id: list[str] = typer.Option(
         [], "--sensor-id", help="Bind to these sensor ids (repeatable; events are forced to one of them)"
     ),

@@ -17,8 +17,8 @@ TOKIWA サーバーはデータを自分で集めに行かず、**センサー�
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # 既定のスコープ: ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # Gate 用: gate スコープを明示
+uv run tokiwa token create agent-web01            # 既定のスコープ: ingest のみ
 ```
 
 | スコープ | 許可されること |

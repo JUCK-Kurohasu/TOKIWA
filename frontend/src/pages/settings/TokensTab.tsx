@@ -109,7 +109,8 @@ function CreateTokenDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const L = useLocal(strings);
   const qc = useQueryClient();
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<ApiTokenScope[]>(["ingest", "gate"]);
+  // ingest only by default: the gate scope reads decoys / canaries / block list (Gate tokens only).
+  const [scopes, setScopes] = useState<ApiTokenScope[]>(["ingest"]);
   const [touched, setTouched] = useState(false);
   const [created, setCreated] = useState<ApiTokenCreated | null>(null);
   const nameOk = name.trim().length >= 1 && name.trim().length <= 64;

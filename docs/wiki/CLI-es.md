@@ -49,7 +49,7 @@ La contraseña se solicita de forma interactiva (dos veces, con la entrada ocult
 tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-Los ámbitos por defecto son `ingest` y `gate`. El token (`tkw_...`) se muestra **una sola vez**.
+El ámbito por defecto es **solo** `ingest`. Para un token de Gate indique `--scope ingest --scope gate` explícitamente (el ámbito `gate` puede leer la política de Gate, con rutas señuelo, valores canario y la lista de bloqueo, así que délo solo a los Gate). El token (`tkw_...`) se muestra **una sola vez**.
 `--sensor-id` / `--dataset` (repetibles) vinculan el token a IDs de sensor y datasets ([Conexión de sensores](Sensors-es)).
 
 ## tokiwa gate run

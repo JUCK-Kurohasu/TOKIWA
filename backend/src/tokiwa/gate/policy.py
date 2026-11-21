@@ -217,7 +217,11 @@ class PolicyManager:
             self._failed(f"{type(exc).__name__}: {exc}")
             return False
         if resp.status_code != 200:
-            self._failed(f"HTTP {resp.status_code}")
+            reason = f"HTTP {resp.status_code}"
+            if resp.status_code == 403:
+                # `tokiwa token create` defaults to scope ingest only (audit #33): the gate scope is opt-in.
+                reason += " (token lacks the 'gate' scope? create it with --scope ingest --scope gate)"
+            self._failed(reason)
             return False
         try:
             policy = GatePolicy.model_validate_json(resp.content)

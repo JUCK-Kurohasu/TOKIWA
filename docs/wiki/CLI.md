@@ -49,7 +49,7 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-既定のスコープは `ingest` と `gate`。トークン（`tkw_...`）は **一度だけ** 表示されます。
+既定のスコープは `ingest` **のみ**。Gate 用のトークンは `--scope ingest --scope gate` を明示します（`gate` スコープはデコイ経路・カナリア値・ブロックリストを含む Gate ポリシーを読めるため、Gate 以外に付けない）。トークン（`tkw_...`）は **一度だけ** 表示されます。
 `--sensor-id` / `--dataset`（繰り返し可）はトークンをセンサー ID・dataset に縛ります（[センサーの接続](Sensors)）。
 
 ## tokiwa gate run

@@ -49,7 +49,7 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-默认作用域为 `ingest` 和 `gate`。令牌（`tkw_...`）**仅显示一次**。
+默认作用域 **仅为** `ingest`。Gate 用的令牌需显式指定 `--scope ingest --scope gate`（`gate` 作用域可以读取包含诱饵路径、金丝雀值和封禁列表的 Gate 策略，只应授予 Gate）。令牌（`tkw_...`）**仅显示一次**。
 `--sensor-id` / `--dataset`（可重复）把令牌绑定到传感器 ID 和 dataset（[接入传感器](Sensors-zh)）。
 
 ## tokiwa gate run

@@ -15,7 +15,7 @@ client ──▶ Gate (:8080) ──▶ upstream app
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                 # scope ingest+gate（平文は一度だけ表示）
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # 平文は一度だけ表示（既定は ingest のみ）
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...          # --token より安全（ps に出ない）。--token-file も可
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --server http://127.0.0.1:8788
 ```
@@ -27,7 +27,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | upstream | `--upstream` | http://127.0.0.1:3000 | パス接頭辞可（`http://app/base`） |
 | listen_host / listen_port | `--listen host:port` | 0.0.0.0:8080 | `[::]:8080`, `:8080` 可 |
 | server_url | `--server` | http://127.0.0.1:8788 | |
-| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要 |
+| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示） |
 | sensor_id | `--sensor-id` | gate-1 | イベントの `sensor_id` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 0 で本文捕捉なし |
 | batch_size / flush_interval_seconds | `--batch-size` / `--flush-interval` | 100 / 1.0 | |
@@ -81,6 +81,12 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 - サーバー停止中もプロキシは止まらない。終了時は最大 5 s で残りを flush。
 
 ## 5. ポリシー
+
+> **gate トークンの漏えい＝デセプション配置の漏えい。** `gate` スコープのトークンで `GET /api/v1/gate/policy` を読むと、
+> 全デコイ経路（秘匿プレフィックス含む）・デコイ本文（ハニートークン値入り）・AI カナリアの注入文とカナリアヘッダ名・
+> blocked/deceive/tarpit リストがそのまま得られる。攻撃者はデコイを一切踏まずに回避できるようになる。
+> `gate` スコープは Gate 専用トークンにだけ付け（`tokiwa token create` の既定は `ingest` のみ）、トークンファイルは
+> Gate ホストで権限 600 にする。漏えいが疑われたらトークンを失効し、`/deception` で資産のトークンをローテーションする。
 
 - `version` が変わったときだけ差し替える（同じなら既存テーブル・レートリミッタ状態を維持）。差し替えは参照の一括置換。
 - 初回取得前は何も強制しない（純粋なセンサー兼プロキシ）。取得失敗時は **最後のポリシーを維持**（fail-static）。

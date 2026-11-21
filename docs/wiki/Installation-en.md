@@ -46,7 +46,7 @@ If the first argument to the container is one of `serve gate agent sim eval inte
 
 ```bash
 # API token for a sensor (shown only once)
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate (the gate profile in compose; set TOKIWA_GATE__INGEST_TOKEN and TOKIWA_GATE__UPSTREAM in .env)
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d

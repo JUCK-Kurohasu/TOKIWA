@@ -79,7 +79,7 @@ cd lab/victim
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1        # tkw_... se muestra una sola vez; anótelo
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # tkw_... se muestra una sola vez; anótelo
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...  # Más seguro que un argumento de línea de comandos (no aparece en ps)
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 127.0.0.1:8080 \
   --server http://127.0.0.1:8788 --trust-forwarded-for

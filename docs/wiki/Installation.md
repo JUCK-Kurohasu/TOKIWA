@@ -46,7 +46,7 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 ```bash
 # センサー用 API トークン（一度だけ表示）
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate（compose の gate プロファイル。.env に TOKIWA_GATE__INGEST_TOKEN と TOKIWA_GATE__UPSTREAM を設定）
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
