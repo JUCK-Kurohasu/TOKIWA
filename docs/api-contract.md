@@ -10,6 +10,10 @@
   バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
 - 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。
 - ロール: viewer=閲覧, analyst=アラート/インシデント/対処の操作, admin=ユーザー/トークン/設定。
+  viewer にはイベントを **伏字済み射影** で返す（`tokiwa.api.visibility`、監査 #157）: `http.query`・`http.request_body`・
+  ヘッダ値（user-agent/host/content-type/accept/content-length 以外）・referrer のクエリ・`raw`・Gate 以外の `message`・
+  `process.cmdline`・`llm_app.prompt`・`deception.token` を `[redacted: analyst role required]` に置換（`raw` は null）。
+  対象: `GET /events`・`/events/{id}`・`/sessions/{id}` の events・`/alerts/{id}` の evidence・`/deception/trips`。
 
 ## 認証・ユーザー（`routes/auth.py` 実装済, `routes/users.py`, `routes/tokens.py`）
 | Method | Path | 権限 | 入出力 |

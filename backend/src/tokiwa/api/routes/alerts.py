@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import ColumnElement, func, or_, select
 
 from tokiwa.api.deps import AnalystUser, CurrentUser, DbSession
+from tokiwa.api.visibility import project_events
 from tokiwa.audit import record_audit
 from tokiwa.bus import bus
 from tokiwa.db.models.detection import AlertRow
@@ -109,10 +110,11 @@ async def _get_row(session: DbSession, alert_id: str) -> AlertRow:
 
 
 @router.get("/{alert_id}", response_model=AlertDetail)
-async def get_alert(alert_id: str, session: DbSession, _: CurrentUser) -> AlertDetail:
+async def get_alert(alert_id: str, session: DbSession, user: CurrentUser) -> AlertDetail:
     row = await _get_row(session, alert_id)
     detail = AlertDetail.model_validate(row)
-    detail.evidence = await get_events(session, list(row.evidence_event_ids or [])[-_MAX_EVIDENCE:])
+    evidence = await get_events(session, list(row.evidence_event_ids or [])[-_MAX_EVIDENCE:])
+    detail.evidence = project_events(evidence, user)  # viewers: masked bodies (audit #157)
     return detail
 
 

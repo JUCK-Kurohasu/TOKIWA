@@ -10,7 +10,7 @@ Alerts and incidents update in real time (SSE).
 
 | Role | What it can do |
 |---|---|
-| `viewer` | View only |
+| `viewer` | View only. Request bodies, query strings, header values, command lines and prompts in events are masked (`[redacted: analyst role required]`) |
 | `analyst` | Everything a viewer can do, plus running triage, updating incidents, **approving, rejecting, and reverting response actions**, editing deception assets, and more |
 | `admin` | Everything. Manages users, API tokens, notification channels, and LLM settings |
 
