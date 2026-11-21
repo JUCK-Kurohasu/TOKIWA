@@ -10,7 +10,11 @@ Usage in a route module::
         return await paginate(session, stmt, page, Alert.model_validate)
 
 Kept deliberately small and generic: every list endpoint in docs/api-contract.md shares the same
-``?limit`` (default 50, max 500) / ``?offset`` contract and the ``Page[T]`` envelope.
+``?limit`` (default 50, max 500) / ``?offset`` (max 1,000,000) contract and the ``Page[T]`` envelope.
+
+``offset`` is bounded because an unbounded int reaches the DB driver: ``?offset=99999999999999999999`` made SQLite
+raise ``OverflowError`` -> 500 (audit #94). Routes that still declare their own ``offset`` Query are covered by
+:func:`offset_guard`, which the app factory attaches to every auto-discovered router.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Request
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +32,8 @@ from tokiwa.schemas.common import Page
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
+# Deep offsets are an O(offset) scan anyway; past this, narrow the query with filters instead.
+MAX_OFFSET = 1_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +46,41 @@ class PageQuery:
 
 def page_query(
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT, description="Page size (max 500)")] = DEFAULT_LIMIT,
-    offset: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    offset: Annotated[
+        int, Query(ge=0, le=MAX_OFFSET, description="Number of items to skip (max 1,000,000)")
+    ] = 0,
 ) -> PageQuery:
     return PageQuery(limit=limit, offset=offset)
+
+
+def _too_large(raw: str) -> bool:
+    """True for a plain non-negative integer above :data:`MAX_OFFSET` (length check first: no huge ``int()``)."""
+    text = raw.strip().removeprefix("+")
+    if not text.isascii() or not text.isdigit():
+        return False  # not a plain integer: left to the route's own validation (-> 422)
+    digits = text.lstrip("0") or "0"
+    return len(digits) > len(str(MAX_OFFSET)) or int(digits) > MAX_OFFSET
+
+
+async def offset_guard(request: Request) -> None:
+    """Router-level dependency: reject ``?offset`` above :data:`MAX_OFFSET` on every API route with a 422.
+
+    Covers list routes that declare ``offset: int = Query(0, ge=0)`` themselves instead of :data:`PageParams`
+    (no ``le``), so a huge value never reaches the database driver.
+    """
+    for raw in request.query_params.getlist("offset"):
+        if _too_large(raw):
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "less_than_equal",
+                        "loc": ("query", "offset"),
+                        "msg": f"Input should be less than or equal to {MAX_OFFSET}",
+                        "input": raw if len(raw) <= 64 else raw[:64] + "...",
+                        "ctx": {"le": MAX_OFFSET},
+                    }
+                ]
+            )
 
 
 # FastAPI dependency: ``page: PageParams`` in a route signature adds ``?limit&offset``.

@@ -6,8 +6,8 @@
 
 | Issue | 状態 | 内容 | コミット |
 |---|---|---|---|
-| #91 コミットが応答送信後 | 完全 | `DbSession` を `Depends(get_session, scope="function")` に変更（コミットはルート関数の終了後・応答送信前）。`IntegrityError` → 409 の共通ハンドラ（app.py）。応答開始時点で別セッションから DB を見るテストを追加 | （本コミット） |
-| #94 巨大 offset / IntegrityError 500 | 未着手 | | |
+| #91 コミットが応答送信後 | 完全 | `DbSession` を `Depends(get_session, scope="function")` に変更（コミットはルート関数の終了後・応答送信前）。`IntegrityError` → 409 の共通ハンドラ（app.py）。応答開始時点で別セッションから DB を見るテストを追加 | c5d9741 |
+| #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | （本コミット） |
 | #57 ボディ・フィールド長上限 | 未着手 | | |
 | #93 docs / openapi / version 公開・/api/* の SPA 200 | 未着手 | | |
 | #66 セキュリティヘッダ | 未着手 | | |
@@ -32,9 +32,20 @@
 - `IntegrityError` ハンドラは `str(exc)` を出さない（SQL とバインド値＝パスワードハッシュ等を含むことをテストの失敗出力で確認）。
   ドライバメッセージの 1 行目のみ warning ログ。応答は固定文言の 409。
 
+## #94 の詳細
+
+- 独自に `offset: int = Query(0, ge=0)` を宣言しているルート（alerts, assets, deception, incidents, intel_advice×3, llm,
+  response, rules, sessions）は他レーンのファイルなので書き換えず、`app._include_routers` で
+  `include_router(router, dependencies=[Depends(offset_guard)])` とした。将来追加されるルートにも自動で効く。
+  OpenAPI の各ルートの `offset` には `le` が表示されない（PageParams 利用ルートのみ表示）。各ルートを `PageParams` に
+  寄せるのは各担当レーンの任意の後続作業。
+- `offset_guard` は「数字だけの値で 1,000,000 超」だけを拒否（桁数で先に判定するので `int()` の桁数上限に当たらない）。
+  負数・非数値はルート自身の検証（422）に任せる。`?offset=1&offset=<巨大>` のような重複指定も全値を検査。
+
 ## 要判断
 
 - （#91）なし。既定動作の変更だが外部仕様（エンドポイント・形式）は変わらない。409 は従来 500 だったケースのみ。
+- （#94）offset 上限 1,000,000（例示値どおり）。これより深いページングが必要な運用があればフィルタで絞る前提。
 
 ## 失敗した試み
 

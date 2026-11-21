@@ -11,13 +11,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request, status
+from fastapi import APIRouter, Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from tokiwa import __version__, runtime
+from tokiwa.api.pagination import offset_guard
 from tokiwa.config import get_settings
 from tokiwa.db.session import create_all, dispose_engine, init_engine
 from tokiwa.plugins import import_submodules
@@ -29,7 +30,8 @@ def _include_routers(app: FastAPI) -> None:
     for module in import_submodules("tokiwa.api.routes"):
         router = getattr(module, "router", None)
         if isinstance(router, APIRouter):
-            app.include_router(router)
+            # offset_guard: bounded ?offset on every list route, also those not using PageParams (#94).
+            app.include_router(router, dependencies=[Depends(offset_guard)])
 
 
 async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:
