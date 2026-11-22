@@ -162,7 +162,8 @@ tokiwa sim ingest   [--server http://localhost:8788] [--token-file PATH] [--prof
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
                 [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
 tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -176,3 +177,5 @@ tokiwa eval info FILE.jsonl
 | `--speed` | 0 = 最速、1 = 実時間、10 = 10 倍速 |
 | `--enable-detector` / `--disable-detector` | 検知器を強制的に有効 / 無効にする |
 | `--keep-work` | 評価用の一時 DB を残す |
+| `import-artex --since` / `--until` | ARTEX の記録をこの時間帯だけ取り込む（unix 秒または ISO 8601。オフセットなしは UTC） |
+| `import-artex --split-gap-minutes` | ホストごとに、記録が N 分以上途切れたところで別セッション（別の送信元 IP）にする。既定は分割しない |

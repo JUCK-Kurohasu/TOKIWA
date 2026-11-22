@@ -164,7 +164,8 @@ Con `--time-scale` inferior a 1 termina antes, pero cambia el ritmo de las solic
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
                 [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
 tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -178,3 +179,5 @@ tokiwa eval info FILE.jsonl
 | `--speed` | 0 = lo más rápido posible, 1 = tiempo real, 10 = 10 veces más rápido |
 | `--enable-detector` / `--disable-detector` | Fuerza la activación / desactivación de un detector |
 | `--keep-work` | Conserva la base de datos temporal de la evaluación |
+| `import-artex --since` / `--until` | Importa solo los registros de ARTEX de este intervalo (segundos unix o ISO 8601; UTC si no hay desfase) |
+| `import-artex --split-gap-minutes` | Por host, inicia una nueva sesión (con su propia IP de origen) donde el registro se interrumpe N minutos o más. Por defecto no se divide |

@@ -22,7 +22,8 @@ uv run tokiwa eval run --dataset ../eval/datasets/lab-mini.jsonl                
 uv run tokiwa eval run --dataset ... --compare ../eval/runs/<前回> --fail-on-regression
 uv run tokiwa eval run --dataset ... --llm live --budget-usd 0.50                # 実 LLM（費用が発生）
 uv run tokiwa eval compare ../eval/runs/<今回> ../eval/runs/<前回>
-uv run tokiwa eval import-artex <ARTEX traffic> --out ../eval/datasets/artex-x.jsonl --host gate
+uv run tokiwa eval import-artex <ARTEX traffic> --out ../eval/datasets/artex-x.jsonl --host gate \
+    [--since 2026-11-21T09:00:00Z --until 2026-11-21T10:30:00Z] [--split-gap-minutes 30]   # docs/purple-team.md §5
 uv run tokiwa eval info ../eval/datasets/lab-mini.jsonl
 ```
 
@@ -35,7 +36,7 @@ uv run tokiwa eval info ../eval/datasets/lab-mini.jsonl
 | key | 値 |
 |---|---|
 | `actor` | `benign` / `automated_scanner` / `human` / `ai_agent`（`ActorType`） |
-| `profile` | `benign_browser` / `scanner` / `human_attacker` / `ai_agent` / `llm_app_attacker` / `artex` |
+| `profile` | `benign_browser` / `scanner` / `human_attacker` / `ai_agent` / `llm_app_attacker` / `artex`、保留（holdout）の `api_only_agent` / `slow_rotating_agent` |
 | `session` | 正解セッション ID（例 `ai_agent-01`） |
 | `attack` | `none` / `recon` / `sqli` / `xss` / `path_traversal` / `cmd_injection` / `ssti` / `log4shell` / `idor` / `prompt_injection` / `ai_canary_follow` / `artex` |
 | `phase` | プロファイル内の段階（recon / enumerate / exploit / canary ...） |
@@ -52,18 +53,31 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 
 | 指標 | 定義 |
 |---|---|
-| attack session detection rate | アラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（プロファイル別も） |
+| attack session detection rate (medium+) | **主指標**。medium 以上のアラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（プロファイル別も） |
+| attack session detection rate | 副指標。重大度を問わずアラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（info/low 1 件でも検知扱い） |
 | benign session FPR | アラートが帰属した正常セッション / 正常セッション（全重大度 / medium 以上） |
 | event recall | 攻撃ラベルのイベントのうちアラート証拠に含まれた割合（**下限値**: 窓集計型は一部の証拠しか引用しない） |
 | benign event FPR | 正常アクターのイベントのうち証拠に含まれた割合 |
 | alert precision | 攻撃セッションのみに帰属したアラート / 何らかに帰属したアラート。検知器別にも出す |
 | AI attribution P/R/F1/AUC | セッションスコア = max(actor_session.ai_score, alert.ai_score, triage.ai_agent_likelihood)。`detection.ai_agent_threshold` 以上、または sessionizer の分類が `ai_agent` で AI と判定。AUC は Mann–Whitney |
+| by generator | `by_generator.<scripted/holdout/artex/other>`: 生成元ごとの medium+ 攻撃検知・AI 判定の再現率・非 AI の AI 誤判定（区間付き）。`scripted` は検知仮説を台本化したプロファイル、`holdout` は調整に使っていないプロファイル、`artex` は ARTEX 取り込み。`ai_attribution.per_profile` にプロファイル別の AI 判定率。`--compare` は生成元別の値も比較する |
 | LLM agreement | トリアージ済みアラート/インシデントで actor_type・悪性判定・AI 判定が正解と一致した割合（tier 別件数）。**`--llm mock` ではルール fallback の自己一致で LLM 品質ではない**（`llm.measures_llm=false`、`by_tier` は `rules(mock)`、要求された tier は `by_tier_requested`） |
 | cost | `llm_calls` のトークン・USD 合計、アラートあたり / トリアージあたり。mock では実費 $0 に加え `estimated_cost_usd`（mock の推定トークン〔入力 文字数/4・出力 200 固定〕× 料金表 `tokiwa.llm.pricing` + `llm.pricing`。実測ではない目安）と `estimated_cost_by_model_usd` |
 | latency | バッチ処理時間（取り込み→アラート）p50/p95、アラート→トリアージ p50/p95（バス観測、無ければ DB の updated_at） |
 
 アラートの正解帰属は `evidence_event_ids` 経由が基本。証拠に正解付きイベントが無い場合のみ `source_ip` で帰属する
-（シミュレータはセッションごとに別の送信元 IP を使う）。
+（シミュレータはセッションごとに別の送信元 IP を使う）。この「IP フォールバック」で帰属したアラート数を
+`alerts.attributed_by_ip_fallback`（検知器別は `per_detector[].ip_fallback`）に出す。NAT・CDN・IP 回転のある実運用では
+この帰属は成り立たないので、件数が多いほど帰属系の指標は楽観側。
+
+### 区間と分母（#175）
+
+率はすべて `metrics.json` の `intervals.<指標パス>` に分子 `x`・分母 `n`・95% 区間（`ci_low`/`ci_high`、
+**Clopper–Pearson の正確な両側区間**。`tokiwa/eval/stats.py` に Wilson も実装）を持つ。`n < 30` は `reference_only: true`
+で、report.md では「参考値」と表示する。lab-mini（正常 3・AI 2 セッション）では「誤検知 0/3」の 95% 区間は 0〜70.8%、
+「AI 再現率 2/2」は 15.8〜100% で、点推定だけでは何も言えない。イベント単位の率（event recall / event FPR）は
+セッション内で相関するため区間が狭く出すぎる（`clustered: true`）。複数シードの平均±SD、母比率を変えた PR 曲線、
+time-to-first-alert は未実装（docs/handoff/2026-11-21-audit-eval-docs.md）。
 
 ## 回帰比較（要件 7-6）
 
@@ -81,6 +95,13 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
   「NOT COMPARABLE」と差分を表示し、`--fail-on-regression` では終了コード **3** にする（悪化は 1）。
   意図して条件を変えた比較（検知器を 1 つ外した効果を見る等）は `--allow-mismatch` を付ける。
   `comparability` の無い古い `metrics.json` との比較も「比較不能」になるので、ベースラインを取り直す。
+
+## 保留（holdout）プロファイル
+
+`api_only_agent`（API だけを叩く LLM ツールループ）と `slow_rotating_agent`（ブラウザ駆動・長い推論待ち・送信元 IP の回転）は、
+`ai_agent` の台本（JS/robots 偵察・バースト・カナリア追従・自然言語のプローブ値）を **なぞらない** 形で、検知器の設計・調整に
+使っていない。`DEFAULT_MIX` には入れていない（既存の seed の生成結果は変わらない）。`--profile all --sessions N` か名前指定で使う。
+重みや閾値を台本プロファイルで調整したら、保留プロファイルの値（report.md の「By generator」）で汎化を確かめる。
 
 ## 調整できるところ
 

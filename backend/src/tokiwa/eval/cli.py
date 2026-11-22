@@ -5,6 +5,7 @@
     tokiwa eval compare <run-or-metrics.json> <previous-run-or-metrics.json> [--fail-on-regression]
                         [--allow-mismatch]
     tokiwa eval import-artex <artex traffic> --out eval/datasets/artex-<name>.jsonl [--host gate]
+                             [--since T] [--until T] [--split-gap-minutes 30]
     tokiwa eval info <dataset.jsonl>
 
 ``--llm live`` calls the configured real LLM (cost!). It requires an explicit ``--budget-usd`` which becomes the
@@ -20,11 +21,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
-from tokiwa.eval.artex import DEFAULT_SOURCE_IP, ArtexImportError, import_artex
+from tokiwa.eval.artex import (
+    DEFAULT_SOURCE_IP,
+    ArtexImportError,
+    ImportStats,
+    import_artex,
+    parse_time_bound,
+)
 from tokiwa.eval.dataset import dataset_summary, read_dataset, write_dataset
 from tokiwa.eval.harness import EvalError, ReplayOptions
 from tokiwa.eval.report import (
@@ -48,6 +56,15 @@ def default_runs_dir() -> Path:
         if base.is_dir():
             return base / "runs"
     return Path("eval/runs")
+
+
+def _rate(intervals: dict[str, dict[str, object]], path: str) -> str:
+    """``5/5 [95% CI 0.478-1]*`` (``*`` = n < 30, reference only)."""
+    iv = intervals.get(path)
+    if not iv or not iv.get("n"):
+        return "-"
+    star = "*" if iv.get("reference_only") else ""
+    return f"{iv['x']}/{iv['n']} [95% CI {iv['ci_low']:.3g}-{iv['ci_high']:.3g}]{star}"
 
 
 def _overrides(enable: list[str], disable: list[str]) -> dict[str, bool]:
@@ -110,14 +127,31 @@ def run(
     if as_json:
         typer.echo(json.dumps(m, ensure_ascii=False, indent=2, default=str))
     else:
-        d, ai = m["detection"], m["ai_attribution"]
+        ivs = m.get("intervals") or {}
         typer.echo(f"report: {out_dir / 'report.md'}")
         typer.echo(
-            f"attack sessions detected {d['attack_sessions_detected']}/{d['attack_sessions']} "
-            f"(rate {d['attack_session_rate']}), benign FPR {d['benign_session_fpr']}, "
-            f"alerts {m['alerts']['total']} (precision {m['alerts']['precision']})"
+            "attack sessions detected (medium+) "
+            + _rate(ivs, "detection.attack_session_rate_medium_plus")
+            + ", any severity "
+            + _rate(ivs, "detection.attack_session_rate")
         )
-        typer.echo(f"AI attribution P={ai['precision']} R={ai['recall']} AUC={ai['auc']}")
+        typer.echo(
+            "benign session FPR (medium+) "
+            + _rate(ivs, "detection.benign_session_fpr_medium_plus")
+            + ", any severity "
+            + _rate(ivs, "detection.benign_session_fpr")
+            + f"; alerts {m['alerts']['total']} (precision {m['alerts']['precision']}, "
+            f"{m['alerts'].get('attributed_by_ip_fallback', 0)} via source-IP fallback)"
+        )
+        typer.echo(
+            "AI attribution precision "
+            + _rate(ivs, "ai_attribution.precision")
+            + ", recall "
+            + _rate(ivs, "ai_attribution.recall")
+            + f", AUC {m['ai_attribution']['auc']}"
+        )
+        if any(iv.get("reference_only") for iv in ivs.values()):
+            typer.echo("(*) n < 30: reference value only — read the 95% interval, not the point value")
         cost = m["cost"]
         if cost.get("provider") == "mock":
             typer.echo(
@@ -176,18 +210,76 @@ def import_artex_cmd(
     source_ip: str = typer.Option(
         DEFAULT_SOURCE_IP, help="Synthetic source IP (ARTEX does not record its own)"
     ),
+    since: str | None = typer.Option(
+        None, help="Keep exchanges at/after this time (unix seconds or ISO 8601; UTC if no offset)"
+    ),
+    until: str | None = typer.Option(None, help="Keep exchanges at/before this time (same formats)"),
+    split_gap_minutes: float | None = typer.Option(
+        None,
+        help="Start a new session (own label #n and source IP) after this many silent minutes, per host. "
+        "ARTEX archives are per host, so separate tasks would otherwise merge into one session",
+    ),
 ) -> None:
     """Convert ARTEX recorded traffic into a labelled dataset (actor=ai_agent) for `tokiwa eval run`."""
+    stats = ImportStats()
     try:
-        events = import_artex(source, source_ip=source_ip, session=session, host=host)
+        events = import_artex(
+            source,
+            source_ip=source_ip,
+            session=session,
+            host=host,
+            since=parse_time_bound(since) if since else None,
+            until=parse_time_bound(until) if until else None,
+            split_gap_seconds=split_gap_minutes * 60 if split_gap_minutes else None,
+            stats=stats,
+        )
     except (ArtexImportError, ValueError, OSError) as exc:
         typer.echo(f"import failed: {exc}", err=True)
         raise typer.Exit(2) from exc
     if not events:
-        typer.echo("no exchanges found", err=True)
+        for line in _empty_import_hints(stats, host):
+            typer.echo(line, err=True)
         raise typer.Exit(1)
-    write_dataset(out, events, {"mode": "artex-import", "source": str(source), "host": host})
-    typer.echo(f"imported {len(events)} exchange(s) -> {out}")
+    meta = {
+        "mode": "artex-import",
+        "source": str(source),
+        "host": host,
+        "since": since,
+        "until": until,
+        "split_gap_minutes": split_gap_minutes,
+        "timing": "approx (1 s resolution, response-completion time)",
+    }
+    write_dataset(out, events, meta)
+    typer.echo(f"imported {len(events)} exchange(s) in {len(stats.sessions)} session(s) -> {out}")
+    for label, count in sorted(stats.sessions.items()):
+        typer.echo(f"  {label}: {count}")
+    typer.echo(
+        "note: ARTEX timestamps are approximate; rhythm (gap/burst) features of this data are importer artefacts"
+    )
+
+
+def _empty_import_hints(stats: ImportStats, host: str | None) -> list[str]:
+    """Different causes need different advice: nothing recorded vs. a filter that removed everything."""
+    if stats.read == 0:
+        return [
+            "no exchanges found in the ARTEX source.",
+            "hint: ARTEX records target traffic only while traffic recording is ON (system setting "
+            "traffic_capture, default OFF; LLM records: llm_record). It may have been OFF during the task — "
+            "enable it before creating the task (docs/purple-team.md §2).",
+        ]
+    if stats.after_host == 0:
+        seen = ", ".join(f"{h} ({n})" for h, n in stats.hosts_seen.most_common(10))
+        return [f"no exchanges for --host {host!r}; hosts in the source: {seen}"]
+    lines = ["no exchanges inside --since/--until"]
+    if stats.first_ts is not None and stats.last_ts is not None:
+        lines.append(f"source covers {_utc(stats.first_ts)} .. {_utc(stats.last_ts)} (UTC, response times)")
+    if stats.no_timestamp:
+        lines.append(f"{stats.no_timestamp} exchange(s) had no timestamp and were dropped by the time filter")
+    return lines
+
+
+def _utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")
 
 
 @app.command("info")

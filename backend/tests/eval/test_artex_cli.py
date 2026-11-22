@@ -141,3 +141,78 @@ def test_cli_generate_eval_import_and_refusal(settings: Settings, tmp_path: Path
     assert r.exit_code == 0, r.output
     r = runner.invoke(eval_app, ["info", str(tmp_path / "artex.jsonl")])
     assert '"artex"' in r.output
+
+
+def _write_traffic(path: Path, exchanges: list[dict[str, object]]) -> Path:
+    path.write_text(json.dumps({"version": 1, "exchanges": exchanges}))
+    return path
+
+
+def test_timing_label_and_seq_wrap_within_a_second(tmp_path: Path) -> None:
+    """#72: ids are <unix>-<counter % 10000>; a second holding 9998, 9999, 0000, 0001 wrapped (small ones later)."""
+    ids = ["1700000000-0001", "1700000000-9998", "1700000000-0000", "1700000000-9999"]
+    path = _write_traffic(tmp_path / "t.json", [_exchange(i, 1700000000) for i in ids])
+    events = import_artex(path)
+    assert [e.labels["artex_id"] for e in events] == [
+        "1700000000-9998",
+        "1700000000-9999",
+        "1700000000-0000",
+        "1700000000-0001",
+    ]
+    assert all(e.labels["timing"] == "approx" for e in events)
+
+
+def test_since_until_and_gap_split(tmp_path: Path) -> None:
+    """#83: archives are per host, so two tasks an hour apart must be separable."""
+    t0 = 1700000000
+    times = [t0, t0 + 5, t0 + 20, t0 + 3600, t0 + 3610]
+    path = _write_traffic(tmp_path / "t.json", [_exchange(f"{t}-{n:04d}", t) for n, t in enumerate(times)])
+
+    one = import_artex(path)
+    assert {e.labels["session"] for e in one} == {"artex:gate"}
+
+    split = import_artex(path, split_gap_seconds=1800)
+    sessions = {e.labels["session"]: e.source_ip for e in split}
+    assert sessions == {"artex:gate#1": "198.51.100.200", "artex:gate#2": "198.51.100.201"}
+    assert [e.labels["session"] for e in split] == ["artex:gate#1"] * 3 + ["artex:gate#2"] * 2
+
+    assert len(import_artex(path, since=t0 + 3000)) == 2
+    assert len(import_artex(path, since=t0, until=t0 + 20)) == 3
+
+
+def test_parse_time_bound() -> None:
+    from tokiwa.eval.artex import parse_time_bound
+
+    assert parse_time_bound("1700000000") == 1700000000.0
+    assert parse_time_bound("2023-11-14T22:13:20Z") == 1700000000.0
+    assert parse_time_bound("2023-11-15T07:13:20+09:00") == 1700000000.0
+    assert parse_time_bound("2023-11-14T22:13:20") == 1700000000.0  # no offset -> UTC
+
+
+def test_cli_import_options_and_empty_hints(tmp_path: Path) -> None:
+    """#26 / #83: an empty import says why (recording OFF vs. host filter vs. time window)."""
+    runner = CliRunner()
+    t0 = 1700000000
+    traffic = _write_traffic(
+        tmp_path / "t.json", [_exchange(f"{t}-0001", t) for t in (t0, t0 + 10, t0 + 4000)]
+    )
+    out = tmp_path / "a.jsonl"
+    r = runner.invoke(
+        eval_app, ["import-artex", str(traffic), "--out", str(out), "--split-gap-minutes", "30"]
+    )
+    assert r.exit_code == 0, r.output
+    assert "2 session(s)" in r.output and "artex:gate#2: 1" in r.output
+    meta = json.loads((tmp_path / "a.meta.json").read_text())
+    assert meta["split_gap_minutes"] == 30 and meta["timing"].startswith("approx")
+
+    empty = _write_traffic(tmp_path / "empty.json", [])
+    r = runner.invoke(eval_app, ["import-artex", str(empty), "--out", str(tmp_path / "e.jsonl")])
+    assert r.exit_code == 1 and "traffic_capture" in r.output
+
+    r = runner.invoke(eval_app, ["import-artex", str(traffic), "--out", str(out), "--host", "victim"])
+    assert r.exit_code == 1 and "gate (3)" in r.output and "traffic_capture" not in r.output
+
+    r = runner.invoke(
+        eval_app, ["import-artex", str(traffic), "--out", str(out), "--since", "2030-01-01T00:00:00Z"]
+    )
+    assert r.exit_code == 1 and "--since/--until" in r.output and "2023-11-14T22:13:20" in r.output

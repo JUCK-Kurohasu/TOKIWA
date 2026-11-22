@@ -1,7 +1,9 @@
 """Import ARTEX (ARTEX-JP) recorded traffic as a labelled TOKIWA dataset (purple-team evaluation, FR-20).
 
-ARTEX records every target HTTP exchange through its MITM proxy. Formats observed in the ARTEX-JP source tree
-(read for the format only — AGPL-3.0, no code reused; see docs/purple-team.md):
+ARTEX records target HTTP exchanges through its MITM proxy **only while traffic recording is ON** — per the 2026-11
+audit (finding L01-01, read from the ARTEX-JP source) the system settings ``traffic_capture`` and ``llm_record`` both
+default to OFF, and with recording OFF the task archive and the index are empty. Formats observed in the ARTEX-JP
+source tree (read for the format only — AGPL-3.0, no code reused; see docs/purple-team.md):
 
 1. **Task-archive traffic snapshot** ``traffic/traffic.json`` (``{"version": 1, "exchanges": [...], "blobs": [...]}``)
    with large bodies under ``traffic/blobs/<sha256>.bin``. Each exchange carries ``id`` (``<unix>-<seq>``), ``ts``
@@ -19,10 +21,26 @@ ARTEX records every target HTTP exchange through its MITM proxy. Formats observe
 Raw request heads look like ``"GET /path?x=1 HTTP/1.1\\nHost: target\\nUser-Agent: ...\\n"``; response heads like
 ``"HTTP 200\\nContent-Type: ...\\n"``.
 
-Caveats (TODO(verify) against newer ARTEX releases): timestamps have 1 s resolution, so exchanges within the same
-second are spread evenly in ``<seq>`` order — sub-second rhythm features are approximate. ARTEX stores traffic
-in plain text (no redaction); the importer applies :mod:`tokiwa.llm.redact` to headers, query and body. ARTEX
-does not record its own client address, so ``source_ip`` is synthetic (``--source-ip``).
+Timing caveats (audit finding L01-03, from the ARTEX-JP source at the time; TODO(verify) against newer releases):
+
+* ``ts`` (and the unix-seconds prefix of ``id``) is taken with ``time.Now()`` in the proxy's *response* hook, i.e. it
+  is the time the **response completed**, not when the request was sent — slow responses shift later — and it has
+  **1 s resolution**;
+* the ``<seq>`` part of ``id`` is ``n % 10000`` of one atomic counter shared by **all tasks and hosts** of the recorder
+  (it restarts at 0 with the ARTEX process), so it orders exchanges within a second but says nothing about tasks;
+* the header lines of ``req_head`` come from a Go map iteration (only ``Host`` is put first), so **header order is
+  meaningless** in ARTEX records — do not tune header-order features on them.
+
+Exchanges within the same second are therefore spread evenly in ``<seq>`` order (handling the 9999 -> 0000 wrap):
+gap / burst rhythm features of imported data are artefacts of this importer. Every imported event carries
+``labels.timing = "approx"`` and the evaluation adds a note; judge rhythm features on live Gate captures only.
+
+The task archive and the index are per *host*, not per task: other tasks against the same host, manual operations
+and ARTEX's own enrichment probes can be mixed in (finding L01-04). Use ``since`` / ``until`` and
+``split_gap_seconds`` to cut the import into sessions.
+
+ARTEX stores traffic in plain text (no redaction); the importer applies :mod:`tokiwa.llm.redact` to headers, query and
+body. ARTEX does not record its own client address, so ``source_ip`` is synthetic (``--source-ip``).
 """
 
 from __future__ import annotations
@@ -35,7 +53,7 @@ import json
 import sqlite3
 import tarfile
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -48,6 +66,7 @@ from tokiwa.schemas.events import Endpoint, Event, EventKind, HttpInfo
 
 DEFAULT_SOURCE_IP = "198.51.100.200"
 MAX_BODY_CHARS = 4096
+SEQ_MODULUS = 10000  # ARTEX ids: <unix seconds>-<counter % 10000>
 _TEXTUAL = ("text/", "json", "xml", "javascript", "x-www-form-urlencoded", "graphql")
 
 
@@ -314,7 +333,15 @@ def _spread_timestamps(exchanges: list[RawExchange]) -> dict[str, datetime]:
         groups[ts].append(ex)
     out: dict[str, datetime] = {}
     for ts, items in groups.items():
-        items.sort(key=lambda e: (_seq_from_id(e.id), e.id))
+        seqs = [_seq_from_id(e.id) for e in items]
+        # the counter is mod 10000: a second that holds both ~9999 and ~0 wrapped, the small ones came later
+        wrapped = bool(seqs) and max(seqs) - min(seqs) > SEQ_MODULUS // 2
+
+        def order(e: RawExchange, wrapped: bool = wrapped) -> tuple[int, str]:
+            seq = _seq_from_id(e.id)
+            return (seq + SEQ_MODULUS if wrapped and seq < SEQ_MODULUS // 2 else seq, e.id)
+
+        items.sort(key=order)
         for i, ex in enumerate(items):
             out[ex.id] = datetime.fromtimestamp(ts, UTC) + timedelta(seconds=i / len(items))
     return out
@@ -383,6 +410,8 @@ def raw_to_event(
             "attack": "artex",
             "source": "artex",
             "artex_id": ex.id or str(index),
+            # 1 s resolution, response-completion time, evenly spread within a second (module docstring)
+            "timing": "approx",
         },
     )
 
@@ -395,27 +424,122 @@ def _host_of(r: RawExchange) -> str:
     return urlsplit(f"//{host}").hostname or ""
 
 
+@dataclass
+class ImportStats:
+    """What the importer saw, so the CLI can explain an empty result (recording OFF vs. a too narrow filter)."""
+
+    read: int = 0
+    after_host: int = 0
+    after_time: int = 0
+    no_timestamp: int = 0  # dropped by --since/--until because neither ts nor id carries a time
+    hosts_seen: Counter[str] = field(default_factory=Counter)
+    first_ts: float | None = None
+    last_ts: float | None = None
+    sessions: dict[str, int] = field(default_factory=dict)
+
+
+def _ts_of(r: RawExchange) -> float | None:
+    return r.ts if r.ts is not None else _ts_from_id(r.id)
+
+
+def parse_time_bound(value: str) -> float:
+    """``--since`` / ``--until``: unix seconds (``1763712000``) or ISO 8601 (``2026-11-21T09:00:00+09:00``; UTC if
+    no offset)."""
+    text = value.strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"not a unix timestamp or ISO 8601 date-time: {value!r}") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
+
+
+def _split_sessions(raws: list[RawExchange], gap_seconds: float) -> list[list[RawExchange]]:
+    """Cut a time-ordered list wherever two consecutive exchanges are more than ``gap_seconds`` apart."""
+    ordered = sorted(raws, key=lambda r: (_ts_of(r) or 0.0, _seq_from_id(r.id), r.id))
+    chunks: list[list[RawExchange]] = []
+    prev: float | None = None
+    for r in ordered:
+        ts = _ts_of(r)
+        if not chunks or (ts is not None and prev is not None and ts - prev > gap_seconds):
+            chunks.append([])
+        chunks[-1].append(r)
+        if ts is not None:
+            prev = ts
+    return chunks
+
+
 def import_artex(
     path: Path,
     *,
     source_ip: str = DEFAULT_SOURCE_IP,
     session: str | None = None,
     host: str | None = None,
+    since: float | None = None,
+    until: float | None = None,
+    split_gap_seconds: float | None = None,
+    stats: ImportStats | None = None,
 ) -> list[Event]:
-    """Read ARTEX traffic and convert it to labelled events (``actor=ai_agent``), optionally for one host only."""
+    """Read ARTEX traffic and convert it to labelled events (``actor=ai_agent``).
+
+    ``host`` keeps one target host; ``since`` / ``until`` (unix seconds, inclusive) keep one time window — both are
+    applied before the same-second spreading. ``split_gap_seconds`` (opt-in) starts a new session wherever the
+    recording is silent for longer than that, per target host: ARTEX archives are per host, so separate tasks or
+    manual pokes at the same host would otherwise become one long "session". Each split session gets its own
+    synthetic source IP (``source_ip`` + n) so that neither the sessionizer nor IP-based attribution merges them
+    back. Session labels then read ``<label>#<n>`` (``<label>`` = ``session`` or ``artex:<host>``).
+    """
+    st = stats if stats is not None else ImportStats()
     raws = read_artex(path)
+    st.read = len(raws)
+    st.hosts_seen.update(_host_of(r) or "?" for r in raws)
+    known = [t for t in (_ts_of(r) for r in raws) if t is not None]
+    st.first_ts, st.last_ts = (min(known), max(known)) if known else (None, None)
     if host:
         raws = [r for r in raws if _host_of(r) == host.lower()]
+    st.after_host = len(raws)
+    if since is not None or until is not None:
+        kept = []
+        for r in raws:
+            ts = _ts_of(r)
+            if ts is None:
+                st.no_timestamp += 1
+            elif (since is None or ts >= since) and (until is None or ts <= until):
+                kept.append(r)
+        raws = kept
+    st.after_time = len(raws)
     seen: set[str] = set()
     for i, r in enumerate(raws):
         if not r.id or r.id in seen:
             r.id = f"{r.id or 'ex'}#{i}"
         seen.add(r.id)
     stamps = _spread_timestamps(raws)
+
+    # (session label, source ip) per exchange
+    assignment: dict[str, tuple[str | None, str]] = {r.id: (session, source_ip) for r in raws}
+    if split_gap_seconds is not None and split_gap_seconds > 0:
+        by_host: dict[str, list[RawExchange]] = defaultdict(list)
+        for r in raws:
+            by_host[_host_of(r)].append(r)
+        base_ip = ipaddress.ip_address(source_ip)
+        n = 0
+        for h in sorted(by_host):
+            label = session or f"artex:{h or 'unknown'}"
+            for chunk in _split_sessions(by_host[h], split_gap_seconds):
+                n += 1
+                for r in chunk:
+                    assignment[r.id] = (f"{label}#{n}", str(base_ip + (n - 1)))
     events = []
     for i, r in enumerate(raws):
-        ev = raw_to_event(r, stamps[r.id], source_ip=source_ip, session=session, index=i)
+        sess, ip = assignment[r.id]
+        ev = raw_to_event(r, stamps[r.id], source_ip=ip, session=sess, index=i)
         if ev is not None:
             events.append(ev)
     events.sort(key=lambda e: e.timestamp)
+    st.sessions = dict(Counter(e.labels["session"] for e in events))
     return events

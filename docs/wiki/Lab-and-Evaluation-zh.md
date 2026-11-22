@@ -43,7 +43,13 @@ docker compose -f lab/compose.yaml down                                         
 使用真实 LLM 运行时，请像 `TOKIWA_LLM_PROVIDER=auto ANTHROPIC_API_KEY=... TOKIWA_LLM_BUDGET_USD=2` 这样附加变量后启动
 （实验环境的默认每日预算为 $1）。
 
-> ⏳ `lab/compose.yaml` 仅做了语法验证，通过 `up` 启动尚未验证。如有问题，请通过 Issue 告知。
+> ✅ **已确认（2026-11-10，审计 L14，沙箱环境；未记录 Docker / Compose 版本）**：执行 `up -d` 后 `tokiwa-init` 正常结束，
+> `tokiwa` / `gate` / `victim` 均为 healthy；在 UI 中完成初始设置；从 `--profile sim` 的 `sim` 开始，经过告警 → 安全事件 →
+> 处置提议 → 批准 → 在 Gate 处封禁（403）。从批准到封禁生效约需 4〜8 秒。
+>
+> ⚠️ 在该环境中，由于 Docker Hub 的速率限制（429）、ghcr.io 的 403 以及拦截 TLS 的代理，直接执行 `up --build` 失败；
+> 通过构建参数（`NODE_IMAGE` / `PYTHON_IMAGE` / `UV_IMAGE`）替换基础镜像，并手动重新标记 victim 的基础镜像后才启动成功
+> （详见 `lab/README.md` 的“検証状況”）。**未确认**：`--profile ingest` 和 `--profile agent`，以及使用真实 LLM 运行。
 
 ## 模拟器（`tokiwa sim`）
 
@@ -54,6 +60,10 @@ docker compose -f lab/compose.yaml down                                         
 | `human_attacker` | 人类 | 以人类的节奏手动尝试 SQLi / XSS |
 | `ai_agent` | AI 智能体 | 类似 ARTEX 的自主智能体（从 JS / OpenAPI 发现 API、出错后变异、突发与等待思考、遵循金丝雀） |
 | `llm_app_attacker` | 人类 | 针对 `/api/chat` 的提示注入、越狱 |
+| `api_only_agent` | AI 智能体（保留） | 只调用 API 的 LLM 工具循环（从 OpenAPI 开始，不接触 HTML、robots 和金丝雀，每轮 1 个请求，通用 HTTP 客户端的 UA） |
+| `slow_rotating_agent` | AI 智能体（保留） | 浏览器驱动的智能体（完整的 Chrome 请求头），推理等待中位数约 20 秒，每隔几个请求更换一次源 IP |
+
+**保留（holdout）profile** 的形态未用于检测器的设计和调整，不包含在默认组合中。请显式指定（`--profile api_only_agent=2,...`），或用 `--profile all --sessions N` 包含它们。评估结果中会与按脚本行动的profile 分开显示。只有加上 `--spoof-xff` 时，Gate 才能看到 IP 的轮换。
 
 ```bash
 cd backend
@@ -87,12 +97,19 @@ uv run tokiwa eval compare ../eval/runs/<本次> ../eval/runs/<上次>
 
 | 指标 | 含义 |
 |---|---|
-| 攻击会话检测率 | 至少带有 1 条告警的攻击会话所占的比例 |
+| 攻击会话检测率（medium 及以上） | **主要指标**。至少带有 1 条 medium 及以上告警的攻击会话所占的比例 |
+| 攻击会话检测率（不限严重程度） | 次要指标。即使只有 1 条 info / low 告警也视为已检测 |
 | 正常会话误报率 | 被打上告警的正常会话所占的比例 |
 | 告警精确率 | 仅归属于攻击会话的告警所占的比例（也按检测器分别给出） |
 | AI 归因 P / R / F1 / AUC | 按“是否为 AI 智能体”判定会话时的精度 |
 | LLM 一致率 | 分诊的判定（行为者类型、是否恶意、是否 AI）与真实标签一致的比例 |
 | 成本与延迟 | LLM 的费用，摄取 → 告警、告警 → 分诊的延迟 |
+
+所有比率都会附带分子 / 分母和 95% 区间（Clopper–Pearson）输出，试验次数少于 30 的值在 `report.md` 中标为 **参考值**
+（附带的 lab-mini 只有 3 个正常会话和 2 个 AI 会话，“误报 0/3”的区间为 0〜70.8%）。`--llm mock` 下的“LLM 一致率”是基于规则的
+替代判定与自身的一致，**并非 LLM 的质量**；费用分别显示实际费用 $0 和“估算 token × 价格表”的预估费用。
+`--compare` 在两次运行的条件（数据集 sha256、LLM 提供商、启用的检测器、已加载的 Sigma 规则数、阈值）不同时警告“不可比较”，
+此时 `--fail-on-regression` 的退出码为 3（有意的比较请使用 `--allow-mismatch`）。告警总数和各检测器的告警数也会被比较。
 
 > 附带的数据集（`eval/datasets/lab-mini.jsonl`）是基于与检测器相同的假设合成的。请认为此处的数值
 > **会高于真实环境**。
@@ -104,23 +121,28 @@ uv run tokiwa eval compare ../eval/runs/<本次> ../eval/runs/<上次>
 1. 启动实验环境（见上文）。
 2. 启动 ARTEX。ARTEX 默认的流量记录代理 **使用 :8788，会与 TOKIWA 冲突**，因此请将
    ARTEX 一方改为其他端口（例如：`./start.sh -addr :8787 -proxy :18788`）。
-3. 将 ARTEX 任务的目标 **仅设为实验环境的 Gate（`http://<实验环境主机>:8080`）**。
-4. 演练期间在 TOKIWA 中观察以下内容：
+3. **创建任务之前**，在 ARTEX 的系统设置中开启流量记录（设置键 `traffic_capture`）和 LLM 记录（`llm_record`），并清除目标主机
+   以往的记录。两种记录默认都是关闭的，关闭时不会留下事后评估所需的数据。ARTEX 的记录按主机而非按任务保存
+   （详见 `docs/purple-team.md` §2）。
+4. 将 ARTEX 任务的目标 **仅设为实验环境的 Gate（`http://<实验环境主机>:8080`）**。
+5. 演练期间在 TOKIWA 中观察以下内容：
    - **AI sessions**（AI 会话）：ARTEX 的会话是否被归类为 AI 智能体并获得高评分
    - **Alerts**（告警）：`ai.agent_session`、`ai.adaptive_mutation`、`ai.semantic_recon`、`ai.llm_client_fingerprint`、`deception.trip` 等
    - **Incidents**（安全事件）：行为者判定是否为 AI 智能体，攻击阶段是否逐步推进
    - **Response**（处置）：封禁等是否 **停留在提议阶段**，在批准之前不会执行
-5. 事后可以将 ARTEX 的记录转换为数据集，反复进行再评估。
+6. 事后可以将 ARTEX 的记录转换为数据集，反复进行再评估。
 
 ```bash
 cd backend
 uv run tokiwa eval import-artex <解压 ARTEX 任务归档后的目录> --host <实验环境主机> \
-  --out ../eval/datasets/artex-<日期>.jsonl
+  --since <演练开始 UTC> --until <演练结束 UTC> --split-gap-minutes 30 --out ../eval/datasets/artex-<日期>.jsonl
 uv run tokiwa sim generate --profile benign_browser=10 --out ../eval/datasets/benign.jsonl
 cat ../eval/datasets/artex-<日期>.jsonl ../eval/datasets/benign.jsonl > ../eval/datasets/purple-<日期>.jsonl
 uv run tokiwa eval run --dataset ../eval/datasets/purple-<日期>.jsonl
 ```
 
 `import-artex` 可以读取任务归档（`traffic/traffic.json`）、证据 ZIP、记录索引（SQLite）和 API 转储。
-请注意，ARTEX 记录的时间分辨率为 1 秒，并且不包含来源 IP（使用 `--source-ip` 补充）。
+ARTEX 记录的时间是 **响应完成时间，精度为 1 秒**，并且不包含来源 IP（使用 `--source-ip` 补充）。导入事件的间隔和突发只是
+近似值，请务必以演练期间 Gate 的实时捕获来评估请求节奏。请求头的顺序也没有意义。可以用 `--since` / `--until` 缩小时间段，
+用 `--split-gap-minutes` 在无通信的间隔处拆分会话。导入 0 条时，会显示记录可能处于关闭状态、记录中包含的主机以及时间范围。
 TOKIWA 只读取 ARTEX 的记录格式，不包含 ARTEX 的代码。
