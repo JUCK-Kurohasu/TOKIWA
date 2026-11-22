@@ -17,8 +17,8 @@ TOKIWA 服务器不会自己去收集数据，而是分析 **传感器发送过�
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # 默认作用域：ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # Gate 用：需显式指定 gate 作用域
+uv run tokiwa token create agent-web01            # 默认作用域：仅 ingest
 ```
 
 | 作用域（scope） | 允许的操作 |
@@ -30,6 +30,12 @@ uv run tokiwa token create agent-web01 --scope ingest
 - 令牌（`tkw_...`）**仅在创建时显示一次**。数据库中只保存其哈希值。
 - 也可以在 Web UI 的 **Settings → API tokens**（设置 → API 令牌，仅限管理员）中创建和吊销。
 - 通过命令行参数传递时，其他用户可以通过 `ps` 看到，因此请 **通过环境变量或文件** 传递。
+- 可以用 `--sensor-id` / `--dataset` 把令牌 **绑定** 到特定的传感器 ID 和 dataset（省略时不限制）。已绑定的令牌发送
+  范围外的 dataset 时整批返回 403；冒充其他传感器 ID 时会被替换为允许的 ID。建议为 Gate 以外的传感器令牌设置绑定
+  （例：`--sensor-id web01 --dataset nginx.access --dataset 'host.*'`）。
+- 服务器会在每个事件上以 `ingest.token` / `ingest.token_id` 标签记录发送它的令牌。没有 `gate` 作用域的令牌发送的
+  Gate 专属数据（`gate.*` / `deception.*`）会带上 `ingest.trust=low`。
+  为避免伪造事件导致无辜 IP 被封禁，请把合作方、CDN 和自身出口 IP 加入 `response.protected_cidrs`。
 
 ## TOKIWA Gate（反向代理型传感器）
 

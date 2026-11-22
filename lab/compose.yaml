@@ -60,6 +60,8 @@ services:
     environment:
       TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/gate.token
       TOKIWA_TOKEN_ENV: TOKIWA_GATE__INGEST_TOKEN
+      # Also watch the file: a rotated token written there is picked up without restarting the gate.
+      TOKIWA_GATE__TOKEN_FILE: /tokiwa-data/lab-tokens/gate.token
       TOKIWA_GATE__UPSTREAM: http://victim:3000
       TOKIWA_GATE__SERVER_URL: http://tokiwa:8788
       TOKIWA_GATE__LISTEN_HOST: 0.0.0.0

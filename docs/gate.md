@@ -15,7 +15,7 @@ client ──▶ Gate (:8080) ──▶ upstream app
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                 # scope ingest+gate（平文は一度だけ表示）
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # 平文は一度だけ表示（既定は ingest のみ）
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...          # --token より安全（ps に出ない）。--token-file も可
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --server http://127.0.0.1:8788
 ```
@@ -27,7 +27,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | upstream | `--upstream` | http://127.0.0.1:3000 | パス接頭辞可（`http://app/base`） |
 | listen_host / listen_port | `--listen host:port` | 0.0.0.0:8080 | `[::]:8080`, `:8080` 可 |
 | server_url | `--server` | http://127.0.0.1:8788 | |
-| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要 |
+| token_file | `--token-file` | なし | 変更（mtime/サイズ/inode）時と 401 受信時に読み直す。空・読めないときは直前のトークンを維持 |
+| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示） |
 | sensor_id | `--sensor-id` | gate-1 | イベントの `sensor_id` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 0 で本文捕捉なし |
 | batch_size / flush_interval_seconds | `--batch-size` / `--flush-interval` | 100 / 1.0 | |
@@ -72,15 +73,25 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 ## 4. 送信（シッパー）と fail-open
 
+- 401（失効・期限切れ・ローテーション後の旧トークン）は恒久エラーとして捨てない: トークンファイルを読み直し、変わっていれば
+  その場で再送。変わっていなければイベントをキューに保持したままバックオフで再試行（キュー上限で古いものから捨てる）。
+  無停止ローテーション: `tokiwa token rotate gate-1 --grace-hours 24` → 出力をトークンファイルへ書く → Gate が自動で切替。
+
 - `submit()` は O(1) 同期。ネットワーク I/O はバックグラウンドタスク。応答送信後にイベントを作るのでレイテンシに乗らない。
 - フルバッチ（`batch_size`）は即送信、端数は最長 `flush_interval_seconds` 待つ（小さな POST の乱発 = サーバー DB の
   トランザクション乱発を防ぐ）。
 - キュー上限（既定 10000）を超えたら **古いものから捨て**、`dropped_overflow` に計上（1 回目と 1000 件ごとに WARN）。
 - 一時障害（接続失敗・5xx・408・429）→ バッチをキュー先頭に戻し指数バックオフ（最大 30 s）。
-  恒久エラー（その他 4xx: トークン失効・スキーマ不一致）→ バッチ破棄 + ERROR（`dropped_rejected`）。
+  恒久エラー（401 以外の 4xx: スコープ不足 403・スキーマ不一致 422）→ バッチ破棄 + ERROR（`dropped_rejected`）。
 - サーバー停止中もプロキシは止まらない。終了時は最大 5 s で残りを flush。
 
 ## 5. ポリシー
+
+> **gate トークンの漏えい＝デセプション配置の漏えい。** `gate` スコープのトークンで `GET /api/v1/gate/policy` を読むと、
+> 全デコイ経路（秘匿プレフィックス含む）・デコイ本文（ハニートークン値入り）・AI カナリアの注入文とカナリアヘッダ名・
+> blocked/deceive/tarpit リストがそのまま得られる。攻撃者はデコイを一切踏まずに回避できるようになる。
+> `gate` スコープは Gate 専用トークンにだけ付け（`tokiwa token create` の既定は `ingest` のみ）、トークンファイルは
+> Gate ホストで権限 600 にする。漏えいが疑われたらトークンを失効し、`/deception` で資産のトークンをローテーションする。
 
 - `version` が変わったときだけ差し替える（同じなら既存テーブル・レートリミッタ状態を維持）。差し替えは参照の一括置換。
 - 初回取得前は何も強制しない（純粋なセンサー兼プロキシ）。取得失敗時は **最後のポリシーを維持**（fail-static）。

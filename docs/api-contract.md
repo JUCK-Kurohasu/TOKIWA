@@ -12,6 +12,10 @@
 - 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。一意制約などの整合性違反（`IntegrityError`）は 409。
 - 書き込みは応答の送信前にコミットされる（`DbSession` は `scope="function"`）。2xx を受け取った直後の再読込には反映済み。
 - ロール: viewer=閲覧, analyst=アラート/インシデント/対処の操作, admin=ユーザー/トークン/設定。
+  viewer にはイベントを **伏字済み射影** で返す（`tokiwa.api.visibility`、監査 #157）: `http.query`・`http.request_body`・
+  ヘッダ値（user-agent/host/content-type/accept/content-length 以外）・referrer のクエリ・`raw`・Gate 以外の `message`・
+  `process.cmdline`・`llm_app.prompt`・`deception.token` を `[redacted: analyst role required]` に置換（`raw` は null）。
+  対象: `GET /events`・`/events/{id}`・`/sessions/{id}` の events・`/alerts/{id}` の evidence・`/deception/trips`。
 
 ## 認証・ユーザー（`routes/auth.py` 実装済, `routes/users.py`, `routes/tokens.py`）
 | Method | Path | 権限 | 入出力 |
@@ -25,13 +29,21 @@
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
 | GET | /tokens | admin | → `ApiToken[]` |
-| POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |
+| POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?, expires_in_days?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 省略時は `[ingest]`（`gate` は明示が必要、監査 #33）、空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
+| POST | /tokens/{id}/rotate | admin | `ApiTokenRotate {grace_hours=24 (0..720), expires_in_days?}` → `ApiTokenCreated`（201。同じ name/scopes/縛りの新トークン、`rotated_from`=旧 id。旧トークンは grace_hours 後に期限切れ、0 なら即失効。失効済み/期限切れは 409） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
 users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
+`ApiToken` は `expires_at`（null=無期限。期限切れは token 認証で 401 `API token expired`）、`created_by`（作成者のユーザー名、CLI は `cli`）、
+`rotated_from` を持つ。CLI `tokiwa token list|revoke|rotate` も同じ処理（`tokiwa.auth.api_tokens`）で監査に actor `cli` を残す。
 
 ## 取り込み（`routes/ingest.py` 実装済）
-| POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult` |
+| POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult`。トークンに `allowed_datasets` があり範囲外の dataset を含むバッチは **丸ごと 403**（Gate の送信側は 403 を恒久エラーとしてバッチを破棄する） |
+
+出所の記録（監査 #40）: サーバーは全イベントの `labels` に `ingest.token_id` / `ingest.token`（送ってきたトークンの id / 名前）を
+付ける。クライアントが送った `ingest.*` ラベルは先に捨てる。トークンに `allowed_sensor_ids` があれば `sensor_id` をその中に強制し、
+主張された値は `ingest.claimed_sensor_id` に残す（無制限トークンは従来どおり、未指定時のみ `token:<name>` で補完）。
+`gate` スコープを持たないトークンが `gate.*` / `deception.*` dataset または kind=deception を送ると `ingest.trust=low` を付ける（受理はする）。
 
 ## イベント（`routes/events.py`）
 | GET | /events | user | `?kind&dataset&source_ip&session_id&host&q&since&until&limit&offset` → `Page[Event]`（新しい順。`q` は HTTP path / UA の部分一致・大小無視） |

@@ -77,6 +77,10 @@ Disable `html_injection` if the app has a mechanism that sends the page DOM back
 
 ## Usage notes
 
+- **A leaked Gate token (`gate` scope) leaks your whole deception layout.** The Gate policy contains the decoy paths,
+  honeytoken values and AI-canary text, so an attacker holding it can walk around every trap. Give the `gate` scope only
+  to Gate tokens (`tokiwa token create` defaults to `ingest` only), and if a leak is suspected, revoke the token and
+  rotate the asset tokens.
 - Place traps **only on your own organization's assets**. TOKIWA does not strike back at the attack source or send back malware-like payloads.
 - How strong the wording of the hidden instructions is, which language they use, and whether to place them in robots.txt / llms.txt are operational decisions. Before deploying,
   check with your organization's policies and your legal team.

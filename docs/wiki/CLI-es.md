@@ -46,10 +46,26 @@ La contraseña se solicita de forma interactiva (dos veces, con la entrada ocult
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-Los ámbitos por defecto son `ingest` y `gate`. El token (`tkw_...`) se muestra **una sola vez**.
+El ámbito por defecto es **solo** `ingest`. Para un token de Gate indique `--scope ingest --scope gate` explícitamente (el ámbito `gate` puede leer la política de Gate, con rutas señuelo, valores canario y la lista de bloqueo, así que délo solo a los Gate). El token (`tkw_...`) se muestra **una sola vez**.
+`--sensor-id` / `--dataset` (repetibles) vinculan el token a IDs de sensor y datasets ([Conexión de sensores](Sensors-es)).
+`--expires-in-days N` fija una caducidad (por defecto: nunca). Un token caducado recibe 401.
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # lista (nunca muestra secretos; --all incluye revocados)
+tokiwa token revoke <id|name>                              # revocar ahora
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # emite un token nuevo (una sola vez en stdout)
+```
+
+Funcionan en el host del servidor sin iniciar sesión como administrador (contraseña perdida, incidente en curso). Cada
+operación queda en el registro de auditoría con el actor `cli`. `rotate` emite un token nuevo con el mismo nombre, ámbitos
+y vinculación y mantiene válido el anterior durante `--grace-hours` (24 horas por defecto; 0 lo revoca ya). Gate vuelve a
+leer su archivo de token cuando cambia, así que basta con escribir el token nuevo en el archivo, sin reiniciar. Si un nombre
+coincide con varios tokens activos, indique el id.
 
 ## tokiwa gate run
 
@@ -63,7 +79,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | Valor de la configuración | URL de destino del reenvío |
 | `--listen` | `0.0.0.0:8080` | `host:port` de escucha |
 | `--server` | Valor de la configuración | URL del servidor de TOKIWA |
-| `--token` / `--token-file` | — | Token de API (se recomienda la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` o un archivo) |
+| `--token` / `--token-file` | — | Token de API (se recomienda la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` o un archivo; el archivo se relee cuando cambia y tras un 401) |
 | `--sensor-id` | `gate-1` | ID del sensor que se registra en los eventos |
 | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo que se capturan |
 | `--trust-forwarded-for` | off | Toma el valor más a la derecha de `X-Forwarded-For` como origen (solo detrás de un balanceador de carga de confianza) |

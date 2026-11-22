@@ -179,7 +179,7 @@ async def test_token_default_scopes_and_validation(
 ) -> None:
     r = await client.post("/api/v1/tokens", json={"name": "agent"}, headers=admin_headers)
     assert r.status_code == 201
-    assert sorted(r.json()["scopes"]) == ["gate", "ingest"]
+    assert r.json()["scopes"] == ["ingest"]  # gate is opt-in (audit #33)
     empty = await client.post("/api/v1/tokens", json={"name": "x", "scopes": []}, headers=admin_headers)
     assert empty.status_code == 422
     bogus = await client.post("/api/v1/tokens", json={"name": "x", "scopes": ["root"]}, headers=admin_headers)

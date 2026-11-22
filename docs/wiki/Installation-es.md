@@ -47,7 +47,7 @@ Si el primer argumento del contenedor es uno de `serve gate agent sim eval intel
 
 ```bash
 # Token de API para sensores (se muestra una sola vez)
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate (perfil gate de compose; defina TOKIWA_GATE__INGEST_TOKEN y TOKIWA_GATE__UPSTREAM en .env)
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d

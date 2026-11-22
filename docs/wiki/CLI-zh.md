@@ -46,10 +46,24 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-默认作用域为 `ingest` 和 `gate`。令牌（`tkw_...`）**仅显示一次**。
+默认作用域 **仅为** `ingest`。Gate 用的令牌需显式指定 `--scope ingest --scope gate`（`gate` 作用域可以读取包含诱饵路径、金丝雀值和封禁列表的 Gate 策略，只应授予 Gate）。令牌（`tkw_...`）**仅显示一次**。
+`--sensor-id` / `--dataset`（可重复）把令牌绑定到传感器 ID 和 dataset（[接入传感器](Sensors-zh)）。
+`--expires-in-days N` 可设置有效期（默认永不过期）。过期的令牌返回 401。
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # 列表（不显示密钥；--all 包含已吊销）
+tokiwa token revoke <id|name>                              # 立即吊销
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 签发新令牌（只在标准输出显示一次）
+```
+
+无需管理员登录（忘记密码、事件处理中）也可以在服务器主机上停用令牌。每次操作都以 actor `cli` 记入审计日志。
+`rotate` 签发名称、作用域和绑定都相同的新令牌，并让旧令牌在 `--grace-hours`（默认 24 小时，0 表示立即吊销）内继续有效。
+Gate 会在令牌文件变化时自动重新读取，因此把新令牌写入文件即可无需重启完成切换。名称对应多个有效令牌时请指定 id。
 
 ## tokiwa gate run
 
@@ -63,7 +77,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | 配置值 | 转发目标的 URL |
 | `--listen` | `0.0.0.0:8080` | 监听 `host:port` |
 | `--server` | 配置值 | TOKIWA 服务器的 URL |
-| `--token` / `--token-file` | — | API 令牌（推荐使用环境变量 `TOKIWA_GATE__INGEST_TOKEN` 或文件） |
+| `--token` / `--token-file` | — | API 令牌（推荐使用环境变量 `TOKIWA_GATE__INGEST_TOKEN` 或文件；文件在变化时和收到 401 时重新读取） |
 | `--sensor-id` | `gate-1` | 记录到事件中的传感器 ID |
 | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节 |
 | `--trust-forwarded-for` | off | 将 `X-Forwarded-For` 的最右端作为来源（仅限可信的 LB 之后） |

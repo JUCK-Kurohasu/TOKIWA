@@ -92,7 +92,8 @@ async def test_requeue_respects_cap(fake_server: FakeServer) -> None:
     assert shipper.stats.dropped_overflow == 2
 
 
-@pytest.mark.parametrize("status", [401, 403, 422])
+# 401 is not permanent since audit #163 (token rotation): see test_gate_tokens.py
+@pytest.mark.parametrize("status", [403, 422])
 async def test_permanent_rejection_drops_batch(fake_server: FakeServer, status: int) -> None:
     shipper, client = _shipper(fake_server)
     async with client:

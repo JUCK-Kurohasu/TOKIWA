@@ -114,6 +114,7 @@ deception:
 | `gate.listen_host` / `gate.listen_port` | `0.0.0.0` / 8080 | 待ち受け |
 | `gate.server_url` | `http://127.0.0.1:8788` | TOKIWA サーバー |
 | `gate.ingest_token` | なし | API トークン（scope: ingest + gate） |
+| `gate.token_file` | なし | API トークンのファイル。変更時と 401 受信時に読み直す（ローテーション時に再起動不要）。読めれば `ingest_token` より優先 |
 | `gate.capture_body_bytes` | 4096 | 捕捉するボディの先頭バイト数 |
 | `gate.trust_forwarded_for` | false | `X-Forwarded-For` を信頼する |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA サーバー |

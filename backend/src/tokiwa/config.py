@@ -278,6 +278,9 @@ class GateSettings(BaseModel):
     upstream: str = "http://127.0.0.1:3000"
     server_url: str = "http://127.0.0.1:8788"
     ingest_token: SecretStr | None = None
+    # File holding the token (preferred). Re-read when it changes and after a 401, so a rotated token is
+    # picked up without restarting the gate. Takes precedence over ingest_token when readable.
+    token_file: Path | None = None
     sensor_id: str = "gate-1"
     capture_body_bytes: int = 4096
     batch_size: int = 100

@@ -51,7 +51,8 @@ export ANTHROPIC_API_KEY=...        # または UI の「LLM」設定から（�
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                        # API トークン（一度だけ表示）
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # Gate 用 API トークン（一度だけ表示）
+uv run tokiwa token create agent-1                      # ホストセンサー用（既定 scope ingest のみ）
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --token tkw_...   # Gate
 uv run tokiwa agent run --token tkw_...                  # ホストセンサー
 ```

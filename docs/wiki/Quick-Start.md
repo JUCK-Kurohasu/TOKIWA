@@ -85,7 +85,7 @@ cd lab/victim
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1        # tkw_... が一度だけ表示されるので控える
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # tkw_... が一度だけ表示されるので控える
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...  # コマンドライン引数より安全（ps に出ない）
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 127.0.0.1:8080 \
   --server http://127.0.0.1:8788 --trust-forwarded-for

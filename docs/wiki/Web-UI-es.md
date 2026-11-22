@@ -18,7 +18,7 @@ El periodo personalizado de la pantalla Events (eventos) también se interpreta 
 
 | Rol | Qué puede hacer |
 |---|---|
-| `viewer` | Solo lectura |
+| `viewer` | Solo lectura. El cuerpo de las peticiones, las query strings, los valores de cabeceras, las líneas de comandos y los prompts de los eventos se muestran enmascarados (`[redacted: analyst role required]`) |
 | `analyst` | Además de la lectura: ejecutar triajes, actualizar incidentes, **aprobar, rechazar y revertir acciones de respuesta**, editar los activos de engaño, etc. |
 | `admin` | Todo. Gestión de usuarios, tokens de API, canales de notificación y configuración del LLM |
 

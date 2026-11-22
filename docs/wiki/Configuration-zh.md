@@ -114,6 +114,7 @@ deception:
 | `gate.listen_host` / `gate.listen_port` | `0.0.0.0` / 8080 | 监听 |
 | `gate.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `gate.ingest_token` | 无 | API 令牌（scope: ingest + gate） |
+| `gate.token_file` | 无 | 保存 API 令牌的文件。变化时和收到 401 时重新读取（轮换时无需重启）。可读时优先于 `ingest_token` |
 | `gate.capture_body_bytes` | 4096 | 捕获请求体的前多少字节 |
 | `gate.trust_forwarded_for` | false | 信任 `X-Forwarded-For` |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |

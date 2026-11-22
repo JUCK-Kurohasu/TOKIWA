@@ -85,7 +85,7 @@ cd lab/victim
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1        # tkw_... is shown only once; note it down
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # tkw_... is shown only once; note it down
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...  # Safer than a command-line argument (does not show up in ps)
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 127.0.0.1:8080 \
   --server http://127.0.0.1:8788 --trust-forwarded-for

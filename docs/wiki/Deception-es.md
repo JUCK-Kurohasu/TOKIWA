@@ -77,6 +77,10 @@ Desactive `html_injection` si la aplicación tiene algún mecanismo que devuelva
 
 ## Precauciones de uso
 
+- **Si se filtra un token de Gate (ámbito `gate`), se filtra toda la disposición del engaño.** La política de Gate contiene
+  las rutas señuelo, los valores honeytoken y el texto de los canarios de IA, así que quien la tenga puede esquivar todas
+  las trampas. Dé el ámbito `gate` solo a tokens de Gate (`tokiwa token create` usa por defecto solo `ingest`) y, si sospecha
+  una filtración, revoque el token y rote los tokens de los activos.
 - Las trampas se colocan **solo en activos de la propia organización**. No se contraataca al origen del ataque ni se devuelven cargas útiles de tipo malware.
 - La intensidad y el idioma de la redacción de las instrucciones ocultas, así como su colocación en robots.txt / llms.txt, son decisiones operativas. Antes de implantarlo,
   consúltelo con las políticas de su organización y con el departamento legal.

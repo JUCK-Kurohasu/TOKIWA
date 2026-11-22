@@ -46,10 +46,25 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-既定のスコープは `ingest` と `gate`。トークン（`tkw_...`）は **一度だけ** 表示されます。
+既定のスコープは `ingest` **のみ**。Gate 用のトークンは `--scope ingest --scope gate` を明示します（`gate` スコープはデコイ経路・カナリア値・ブロックリストを含む Gate ポリシーを読めるため、Gate 以外に付けない）。トークン（`tkw_...`）は **一度だけ** 表示されます。
+`--sensor-id` / `--dataset`（繰り返し可）はトークンをセンサー ID・dataset に縛ります（[センサーの接続](Sensors)）。
+`--expires-in-days N` で有効期限を付けられます（既定は無期限）。期限切れのトークンは 401 になります。
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # 一覧（秘密は表示しない。--all で失効済みも）
+tokiwa token revoke <id|name>                              # 即時失効
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 新トークンを発行（標準出力に一度だけ）
+```
+
+管理者ログインが無くても（パスワード紛失・インシデント対応中でも）サーバーのホストでトークンを止められます。
+操作は監査ログに actor `cli` で記録されます。`rotate` は同じ名前・スコープ・縛りの新トークンを発行し、旧トークンを
+`--grace-hours`（既定 24 時間、0 で即時失効）だけ有効のまま残します。Gate はトークンファイルの変更を自動で読み直すので、
+新しいトークンをファイルに書けば再起動なしで切り替わります。名前が複数の有効なトークンに当たるときは id を指定します。
 
 ## tokiwa gate run
 
@@ -63,7 +78,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | 設定値 | 転送先の URL |
 | `--listen` | `0.0.0.0:8080` | 待ち受け `host:port` |
 | `--server` | 設定値 | TOKIWA サーバーの URL |
-| `--token` / `--token-file` | — | API トークン（環境変数 `TOKIWA_GATE__INGEST_TOKEN` か、ファイルを推奨） |
+| `--token` / `--token-file` | — | API トークン（環境変数 `TOKIWA_GATE__INGEST_TOKEN` か、ファイルを推奨。ファイルは変更時と 401 受信時に読み直す） |
 | `--sensor-id` | `gate-1` | イベントに記録するセンサー ID |
 | `--capture-body-bytes` | 4096 | 捕捉するボディの先頭バイト数 |
 | `--trust-forwarded-for` | off | `X-Forwarded-For` の右端を送信元とする（信頼できる LB の背後のみ） |

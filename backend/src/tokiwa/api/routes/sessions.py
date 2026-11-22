@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 
 from tokiwa.aidetect.features import BURST_GAP_S, THINK_MAX_S, THINK_MIN_S
 from tokiwa.api.deps import CurrentUser, DbSession
+from tokiwa.api.visibility import project_events
 from tokiwa.db.models.telemetry import ActorSessionRow, EventRow
 from tokiwa.enrich.sessionizer import flush_current
 from tokiwa.pipeline.store import row_to_event
@@ -123,7 +124,7 @@ async def list_sessions(
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session(session_id: str, session: DbSession, _user: CurrentUser) -> SessionDetail:
+async def get_session(session_id: str, session: DbSession, user: CurrentUser) -> SessionDetail:
     await flush_current()
     row = await session.get(ActorSessionRow, session_id)
     if row is None:
@@ -142,5 +143,7 @@ async def get_session(session_id: str, session: DbSession, _user: CurrentUser) -
     )
     events = sorted((row_to_event(r) for r in ev_rows), key=lambda e: e.timestamp)
     return SessionDetail(
-        session=ActorSession.model_validate(row), events=events, timeline=build_timeline(events)
+        session=ActorSession.model_validate(row),
+        events=project_events(events, user),  # viewers: masked bodies (audit #157)
+        timeline=build_timeline(events),
     )
