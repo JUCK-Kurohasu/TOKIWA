@@ -198,6 +198,10 @@ class DetectionSettings(BaseModel):
     session_idle_timeout_seconds: int = 1800
     # Score (0..1) above which a session is considered AI-agent driven.
     ai_agent_threshold: float = 0.7
+    # Tolerated sensor clock lead (seconds). Ingest clamps event timestamps further in the future than this to the
+    # ingest time (tag ``clock_skew``, original kept in label ``ingest.original_timestamp``), and the session
+    # tracker never lets event time move its clock further ahead of the wall clock (audit #19).
+    max_future_skew_seconds: float = Field(default=120.0, ge=0)
     web: WebDetectionSettings = Field(default_factory=WebDetectionSettings)
 
 

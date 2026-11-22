@@ -93,6 +93,7 @@ class Sessionizer(Enricher):
             threshold=det.ai_agent_threshold,
             max_sessions=self.max_sessions,
             max_obs=self.max_obs,
+            max_future_skew_s=det.max_future_skew_seconds,
         )
         self._lock = asyncio.Lock()
         self._last_flush = time.monotonic()

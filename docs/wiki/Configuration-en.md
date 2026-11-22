@@ -83,6 +83,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | HTTP paths monitored for prompt injection |
 | `session_idle_timeout_seconds` | 1800 | After this long without access, activity is treated as a new session |
 | `ai_agent_threshold` | 0.7 | AI score threshold for classifying a session as an AI agent |
+| `max_future_skew_seconds` | 120 | How far a sensor clock may run ahead. Events dated further in the future get the receive time instead, the tag `clock_skew` and the label `ingest.original_timestamp` (the original time); the audit entry `ingest.clock_skew` is written at most once per token every 10 minutes. Past timestamps (late or re-sent events) are kept |
 | `web.*` | — | Thresholds for web rate-based detections (bursts of errors, login failures, floods, and so on) |
 
 ### Triage and correlation (`triage.*`)

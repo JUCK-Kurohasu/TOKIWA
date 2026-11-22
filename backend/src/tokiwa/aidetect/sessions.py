@@ -4,6 +4,12 @@ Session key = ``source_ip`` + client fingerprint (UA + stable header names, see 
 ends after ``idle_timeout_s`` of *event time* without activity (event time, not wall clock, so replayed datasets
 sessionize the same way as live traffic).
 
+Event time is sender-controlled, so the tracker's reference "now" (``max_event_ts``, used for idle expiry) never
+runs further ahead than the wall clock plus ``max_future_skew_s`` (audit #19): without that cap, one event dated
+2099 made every live session look idle on every flush and silently disabled AI attribution until restart. Ingest
+also clamps such timestamps (``tokiwa.api.routes.ingest``); the cap here covers in-process callers as well.
+Past-dated (late / re-sent) events are not changed.
+
 Bounds (memory is O(max_sessions * max_obs) small records):
 - at most ``max_sessions`` live sessions (LRU eviction; dirty evicted sessions are kept until the next flush);
 - at most ``max_obs`` request observations per session (sliding window — features describe recent behaviour,
@@ -21,7 +27,7 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict, deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -39,6 +45,9 @@ RESCORE_MIN_INTERVAL_S = 2.0
 MAX_PATH_HASHES = 10_000
 RECENT_EVENT_IDS = 64
 LLM_APP_FINGERPRINT = "llm_app"
+# How far event time may move the tracker's reference clock past the wall clock
+# (``detection.max_future_skew_seconds``).
+DEFAULT_MAX_FUTURE_SKEW_S = 120.0
 
 
 @dataclass(slots=True)
@@ -118,19 +127,25 @@ class SessionTracker:
         max_sessions: int = 4096,
         max_obs: int = 256,
         max_endpoints: int = 128,
+        max_future_skew_s: float = DEFAULT_MAX_FUTURE_SKEW_S,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.idle_timeout_s = float(idle_timeout_s)
         self.threshold = threshold
         self.max_sessions = max_sessions
         self.max_obs = max_obs
         self.max_endpoints = max_endpoints
+        self.max_future_skew_s = max(0.0, float(max_future_skew_s))
+        self._clock = clock  # wall clock in epoch seconds (injectable for tests)
         self._by_key: OrderedDict[str, LiveSession] = OrderedDict()
         self._by_id: dict[str, LiveSession] = {}
         self._by_ip: dict[str, set[str]] = {}
         self._pending: dict[str, SessionSnapshot] = {}
-        self.max_event_ts = 0.0
+        self.max_event_ts = (
+            0.0  # reference "now" for idle expiry: max event time, capped at wall clock + skew
+        )
         self.significant_change = False
-        self.stats = {"created": 0, "evicted": 0, "expired": 0, "rescored": 0}
+        self.stats = {"created": 0, "evicted": 0, "expired": 0, "rescored": 0, "future_capped": 0}
 
     # ------------------------------------------------------------------ lookup
     def __len__(self) -> int:
@@ -181,6 +196,14 @@ class SessionTracker:
             keys.discard(s.key)
             if not keys:
                 self._by_ip.pop(s.source_ip, None)
+
+    def _advance_clock(self, ts: float, ceiling: float) -> None:
+        """Move the reference clock forward, never past ``ceiling`` (wall clock + allowed future skew)."""
+        if ts > ceiling:
+            ts = ceiling
+            self.stats["future_capped"] += 1
+        if ts > self.max_event_ts:
+            self.max_event_ts = ts
 
     def expire_idle(self) -> int:
         cutoff = self.max_event_ts - self.idle_timeout_s
@@ -313,13 +336,14 @@ class SessionTracker:
         # HTTP first (they create sessions), then other kinds that attach to the most recent session of the IP.
         http = sorted((e for e in evs if e.kind == EventKind.HTTP), key=lambda e: e.timestamp)
         other = sorted((e for e in evs if e.kind != EventKind.HTTP), key=lambda e: e.timestamp)
+        ceiling = self._clock() + self.max_future_skew_s
         for e in http:
-            self.max_event_ts = max(self.max_event_ts, e.timestamp.timestamp())
+            self._advance_clock(e.timestamp.timestamp(), ceiling)
             s = self._observe_http(e)
             if s is not None:
                 touched[s.id] = s
         for e in other:
-            self.max_event_ts = max(self.max_event_ts, e.timestamp.timestamp())
+            self._advance_clock(e.timestamp.timestamp(), ceiling)
             s = self._observe_other(e)
             if s is not None:
                 touched[s.id] = s

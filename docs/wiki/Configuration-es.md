@@ -83,6 +83,7 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | Rutas HTTP supervisadas para detectar inyección de prompts |
 | `session_idle_timeout_seconds` | 1800 | Si no hay accesos durante este tiempo, se considera una sesión distinta |
 | `ai_agent_threshold` | 0.7 | Umbral de puntuación de IA para clasificar como agente de IA |
+| `max_future_skew_seconds` | 120 | Cuánto puede adelantarse el reloj de un sensor. Los eventos con una fecha más futura reciben la hora de recepción, la etiqueta `clock_skew` y la etiqueta `ingest.original_timestamp` (la hora original); la entrada de auditoría `ingest.clock_skew` se escribe como máximo una vez por token cada 10 minutos. Las horas pasadas (eventos retrasados o reenviados) se conservan |
 | `web.*` | — | Umbrales de las detecciones por tasa en tráfico web (ráfagas de errores, fallos de inicio de sesión, inundaciones, etc.) |
 
 ### Triaje y correlación (`triage.*`)

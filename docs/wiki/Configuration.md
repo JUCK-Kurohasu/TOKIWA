@@ -83,6 +83,7 @@ deception:
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | プロンプトインジェクションの監視対象とする HTTP パス |
 | `session_idle_timeout_seconds` | 1800 | この時間アクセスがなければ別セッションとみなす |
 | `ai_agent_threshold` | 0.7 | AI エージェントと判定する AI スコアのしきい値 |
+| `max_future_skew_seconds` | 120 | センサーの時計が進んでいても許す秒数。これより未来の時刻のイベントは受信時刻に置き換え、タグ `clock_skew` とラベル `ingest.original_timestamp`（元の時刻）を付ける（監査ログ `ingest.clock_skew` はトークンごとに 10 分に 1 回）。過去の時刻（遅延・再送）はそのまま |
 | `web.*` | — | Web 系のレート検知のしきい値（エラーの連発、ログイン失敗、フラッドなど） |
 
 ### トリアージ・相関（`triage.*`）
