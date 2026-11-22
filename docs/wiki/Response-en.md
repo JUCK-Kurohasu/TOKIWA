@@ -36,6 +36,21 @@ Every operation is recorded in the audit log.
 | `webhook` | — | Sends fixed-format JSON to a configured webhook |
 
 Response actions that involve the Gate take effect the next time the Gate pulls its policy (within 5 seconds by default).
+**An approved action shown as "Active" is not enforced until a Gate pulls the policy.** It also only affects requests that pass through a Gate;
+paths that bypass the Gate (log-ingestion-only setups, direct access around the Gate) are not blocked.
+
+Each card on the Response screen shows whether a Gate has applied the action.
+
+| Display | Meaning |
+|---|---|
+| No Gate to apply it | No Gate has pulled the policy. The action is not enforced |
+| Approved (not applied yet) | There is a Gate, but it has not pulled the policy since the approval |
+| Applied by n Gate(s) (hh:mm) | The number of Gates that pulled the policy after the approval, and the latest pull time |
+| … none has polled for over N min | Applied, but those Gates have stopped pulling the policy (they may be down) |
+
+The "Active" tab also shows the overall Gate status (how many Gates are pulling, which ones stopped). A Gate counts as stopped after
+`max(120 s, gate.policy_refresh_seconds × 12)` without a pull. The same information is available from `GET /api/v1/gate/status`.
+Gates are told apart by "token + source address", so several Gates behind one reverse proxy count as one.
 
 ## Safeguards
 

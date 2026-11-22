@@ -13,6 +13,7 @@ import { Link, useSearchParams } from "react-router";
 import { api } from "@/api/client";
 import type { ActionStatus, Page, ResponseAction } from "@/api/types";
 import { KpiCard, Mono, PageHeader } from "@/components/common";
+import { GATE_ACTION_TYPES, GateStatusNotice } from "@/components/common/GateStatus";
 import { TableSkeleton } from "@/components/common/OpsKit";
 import { formatTtl, useCanOperate } from "@/components/common/opsLabels";
 import {
@@ -305,6 +306,7 @@ export function ResponsePage() {
           ) : tab === "active" ? (
             activeSorted.length ? (
               <div className="space-y-2">
+                {activeSorted.some((a) => GATE_ACTION_TYPES.has(a.action_type)) && <GateStatusNotice />}
                 <p className="text-xs text-muted">{L.activeOrder}</p>
                 <div className="grid gap-3 xl:grid-cols-2">
                   {activeSorted.map((a) => (

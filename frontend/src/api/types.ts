@@ -509,3 +509,36 @@ export interface ApiToken {
   last_used: string | null;
   revoked: boolean;
 }
+
+// ---------- gate status (schemas/gate_status.py, GET /gate/status) ----------
+export interface GateInstance {
+  token_name: string;
+  source_ip: string;
+  first_seen: string;
+  last_seen: string;
+  last_version: string;
+  last_status: number;
+  fetch_count: number;
+  /** last_version equals the current policy version */
+  current: boolean;
+  /** no poll for longer than stale_after_seconds */
+  stale: boolean;
+}
+
+export interface GateActionReflection {
+  action_id: string;
+  active_since: string;
+  /** Gates whose last poll happened after the action became active */
+  gates_applied: number;
+  /** ... of which still polling */
+  gates_applied_fresh: number;
+  last_applied_at: string | null;
+}
+
+export interface GateStatus {
+  generated_at: string;
+  current_version: string;
+  stale_after_seconds: number;
+  gates: GateInstance[];
+  actions: GateActionReflection[];
+}

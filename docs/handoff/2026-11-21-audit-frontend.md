@@ -12,7 +12,7 @@
 | #150 | 完全（フロント部分） | `components/common/invisible.ts`（判定・分割・文字列エスケープ・JSON の `\uXXXX` 化・オブジェクト走査）と `SafeText.tsx`（`<SafeText>`: Cc/Cf/Cs/Zl/Zp + ハングルフィラーを警告色の `⟨U+XXXX⟩` に置換し `unicode-bidi: plaintext` のクラスで包む、`<InvisibleCharsBadge>`: 「不可視/双方向制御文字を含む」）。適用先: EventDetail（要約行・バッジ・リクエスト行・ヘッダ・ボディ・KV・プロンプト・メッセージ）、EventInspector（概要・HTTP・ドロワー見出し・バッジ）、イベント一覧の概要列（バッジ付き）、アラート詳細（タイトル・説明・証拠=EventDetail）、アラート/インシデント一覧と詳細のタイトル（検知器がパス等をタイトルに入れるため）、ライブフィード、セッション一覧/詳細（UA・リクエスト表）、Copilot（回答本文・コード・ツール入力/要約）、`JsonView`（全画面の生 JSON を `\u202E` 形式で表示、JSON として有効なまま）。表示だけを置換し、絞り込み・検索の値は元の文字列。サーバー側の検知シグナル追加は系統 B（下記） | b5aad92 |
 | #165 | 完全 | `lib/timezone.ts`（表示 TZ = local/utc、localStorage は try/catch、`zoneName`）。`formatDateTime` は常にゾーン名付き（`timeZoneName: "short"`、`hourCycle: "h23"`）で表示 TZ に従う。`formatClock` / `formatTick`（グラフ軸。`getMonth()` 等のローカル依存を Intl に置換）も表示 TZ に従う。`<Time>`（`components/common/Time.tsx`）と `dateTimeTitle()` でツールチップに ISO UTC を併記し、`{formatDateTime(x)}` / `title={formatDateTime(x)}` の 40 か所余りを一括置換。ヘッダに TZ 切替ボタン（現在のゾーン名を表示）。TZ は言語コンテキストに載せたので `useLocal` を使う画面は切替で再描画される。イベント画面のカスタム期間入力は表示 TZ で解釈しラベルにゾーン名。報告用コピー（インシデント要約のエクスポート）は UI に存在しないため対象なし | 5b522f5 |
 | #151 | 完全 | llm_calls には既に `provider` 列があり実際のプロバイダ名（`self.provider.name`）が入っていたので DB 列追加は不要と判断。`TriageRecord` に `provider: str \| None = None`（JSON 保存なので列追加なし。旧データは None）を追加し、`_Attempt` 経由で `StructuredResult.provider` を保存。対処提案の `proposed_by` は `tier == rules` **または provider == mock** のとき `rule`（`record_is_rule_based()`）。UI: TriagePanel は provider=mock のとき見出しに「mock（LLM 未使用）」バッジ、ティア・モデル欄も同表示（設定上のモデル名は出さない）、注記。LLM 呼び出し一覧/詳細は provider=mock の行でティアを `mock`、モデルを「mock（LLM 未使用）」（設定上のモデル名はツールチップ）。AppShell に常設バナー `LlmModeBanner`（`/llm/config` の `active_provider == mock`、または `available == false`。provider=mock 設定と auto のフォールバックで文言を分ける。キャッシュ 5 分・LLM 設定保存で無効化） | e11f81e |
-| #145 | 部分（サーバー側済み・UI 作業中） | 新テーブル `gate_polls`（`db/models/gate_status.py`。Gate = トークン + 送信元アドレス、決定的 id で upsert、200/304 とも記録、記録失敗はログのみで配信は継続）。`GET /api/v1/gate/status`（`schemas/gate_status.py`、全ロール閲覧可）: Gate ごとの最終取得・版・current/stale、有効な Gate 系アクションごとに「有効化（executed_at）後に取得した Gate 数 / うち stale でない数 / 最終取得時刻」。stale 閾値は max(120 秒, gate.policy_refresh_seconds×12)。api-contract 追記 | (5) |
+| #145 | 部分（(1)(2) と説明文は完了。(3) 後半・(4) は未実装） | 新テーブル `gate_polls`（`db/models/gate_status.py`。Gate = トークン + 送信元アドレス、決定的 id で upsert、200/304 とも記録、記録失敗はログのみで配信は継続）。`GET /api/v1/gate/status`（`schemas/gate_status.py`、全ロール閲覧可）: Gate ごとの最終取得・版・current/stale、有効な Gate 系アクションごとに「有効化（executed_at）後に取得した Gate 数 / うち stale でない数 / 最終取得時刻」。stale 閾値は max(120 秒, gate.policy_refresh_seconds×12)。api-contract 追記。UI: `components/common/GateStatus.tsx`（`useGateStatus`・`reflectionOf`・`<GateReflection>`・`<GateStatusNotice>`）。対処カード（対処画面・インシデント詳細）に「反映先 Gate なし」「承認済み（未反映）」「Gate n 台に反映済み（hh:mm）」「…最終取得から N 分以上経過」を表示。実行中タブに Gate 全体の状況（0 台なら赤の警告、途絶えた Gate を列挙）。`actionTypeEffect` の説明を「ポリシーを取得した Gate を経由するリクエストのみ」に修正。wiki Response（4 言語）。**残り**: (3) 後半「送信元のイベントの dataset が gate.* 以外なら『この経路は遮断されません』と注記」（送信元ごとのデータセット集計が要る）、(4)「遮断後に当該 IP から Gate 経由の 2xx が届いたら内部アラート」（検知側・系統 B 寄り） | 216cae8 + (6) |
 | #101 | 対象外 | dependabot の PR JUCK-Kurohasu/TOKIWA#17 が vitest/tinypool を上げているため、このレーンではやらない | — |
 
 ## 要判断
@@ -52,8 +52,17 @@
   無効化（または inline code 化）する。フロントの許可リストとは独立の多層防御。
 - （系統 B / 検知）#150 の recommendation 末尾: path / UA / ヘッダに双方向制御文字・ゼロ幅文字があれば低重大度の検知シグナルを出す
   （AI 攻撃者の欺瞞行為そのものを検出）。フロントの判定（`invisible.ts` の FLAG_RE）と同じ文字集合を使うと表示と一致する。
+- （系統 B / 検知・respond）#145 (4): 承認済みの block_ip 対象 IP から Gate 経由の 2xx イベントが届いたら「遮断が効いていない」
+  内部アラート。#145 (3) 後半: 送信元のイベントの dataset が gate.* 以外（nginx.access 等）のときの注記（対処 API に
+  「この送信元を観測したデータセット」を足すのが素直）。
 
 ## 未検証事項
+
+- #145 の反映判定は「Gate の最終取得（policy.generated_at）が対処の executed_at 以降か」。承認トランザクションのコミット前の
+  数ミリ秒に Gate が取得すると、実際には含まれていない版を「反映済み」と数え得る（次の取得で正しくなる）。厳密にするなら
+  取得時に含まれた対処 ID 集合を記録する。stale 閾値の元にする `gate.policy_refresh_seconds` はサーバー側の設定値で、
+  実際の Gate の設定とずれ得る（`TODO(verify)` をコードに記載）。
+- リバースプロキシ配下の Gate は送信元アドレスが同じになり 1 台として数えられる（X-Forwarded-For は信用しない）。
 
 - 実 LLM がプロンプトの追加指示にどの程度従うか（needs-live-llm）。
 - `labelHost` の URL 形判定は「ドット区切り + 2 文字以上の英字 TLD」の簡易判定。`readme.md` のような表示名でも URL 形とみなす
