@@ -188,8 +188,15 @@ class DeceptionIndex:
 
     @classmethod
     def build(
-        cls, assets: Iterable[DeceptionAsset], *, key: bytes, settings: DeceptionSettings
+        cls,
+        assets: Iterable[DeceptionAsset],
+        *,
+        key: bytes,
+        settings: DeceptionSettings,
+        older_keys: Iterable[bytes] = (),
     ) -> DeceptionIndex:
+        """``key`` renders decoys; values derived with ``older_keys`` (key ring, #68) are matched as well."""
+        keys = list(dict.fromkeys([key, *older_keys]))
         tokens: dict[str, TokenRef] = {}
         exact: dict[str, IndexedAsset] = {}
         prefixes: list[tuple[str, IndexedAsset]] = []
@@ -204,8 +211,9 @@ class DeceptionIndex:
                 continue
             by_id[ia.id] = ia
             if ia.token:
-                for slot, value in honey_values(ia.kind, ia.token, key).items():
-                    tokens.setdefault(value, TokenRef(ia, slot, value))
+                for k in keys:
+                    for slot, value in honey_values(ia.kind, ia.token, k).items():
+                        tokens.setdefault(value, TokenRef(ia, slot, value))
             if ia.kind == DeceptionKind.AI_CANARY:
                 continue  # fetching a canary page is not a trip; only using the value is
             if ia.kind == DeceptionKind.LABYRINTH:

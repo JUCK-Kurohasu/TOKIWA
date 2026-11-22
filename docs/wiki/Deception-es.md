@@ -101,6 +101,7 @@ Desactive `html_injection` si la aplicación tiene algún mecanismo que devuelva
   las rutas señuelo, los valores honeytoken y el texto de los canarios de IA, así que quien la tenga puede esquivar todas
   las trampas. Dé el ámbito `gate` solo a tokens de Gate (`tokiwa token create` usa por defecto solo `ingest`) y, si sospecha
   una filtración, revoque el token y rote los tokens de los activos.
+- Las credenciales falsas y los valores de canario de los señuelos se derivan de `data_dir/deception.key` (un anillo de claves). Cambiar la clave de firma de inicio de sesión `secret.key` no los modifica. Incluya el archivo en las copias de seguridad; para rotar, añada una clave nueva como primera línea y conserve las antiguas (los valores antiguos se siguen detectando; véase la sección de copias de seguridad de [Instalación](Installation-es)).
 - Las trampas se colocan **solo en activos de la propia organización**. No se contraataca al origen del ataque ni se devuelven cargas útiles de tipo malware.
 - La intensidad y el idioma de la redacción de las instrucciones ocultas, así como su colocación en robots.txt / llms.txt, son decisiones operativas. Antes de implantarlo,
   consúltelo con las políticas de su organización y con el departamento legal.

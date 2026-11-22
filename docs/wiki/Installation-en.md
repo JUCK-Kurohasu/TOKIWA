@@ -128,6 +128,7 @@ are authenticated with API tokens. Either exclude these paths, or point the sens
 
 There are two things to keep: the **DB** and the **signing key `secret.key`** (both in `/data`). If you lose `secret.key`,
 logged-in sessions become invalid (API tokens are not affected, because they are stored as hashes in the DB).
+Also keep the deception key ring `deception.key` (also in `/data`). If you lose it, the fake credentials and canary values inside decoys change, and values that an attacker already took are no longer detected ([Deception](Deception-en)).
 
 SQLite runs in WAL mode, so do not copy the files directly while it is running; use the online backup API instead.
 
@@ -137,6 +138,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -146,11 +148,12 @@ To restore, replace the files while the container is stopped.
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-For PostgreSQL, use `pg_dump -Fc` / `pg_restore`, and save `secret.key` separately.
+For PostgreSQL, use `pg_dump -Fc` / `pg_restore`, and save `secret.key` and `deception.key` separately.
 
 ## Upgrading
 

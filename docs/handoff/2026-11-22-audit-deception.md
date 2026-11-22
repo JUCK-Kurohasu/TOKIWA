@@ -10,8 +10,8 @@
 | #133 | 部分（推奨 (1)(2) は完全。(3)〜(5) は未着手） | 新モジュール `deception/provenance.py` でトリップごとに「出所」を判定。`induced`（`Sec-Fetch-Site: cross-site`/`same-site`、`Sec-Fetch-Dest` が `document`/`empty` 以外、`Sec-Purpose: prefetch`、別ホスト or `null` の `Origin`、別ホストの `Referer`）は全分類 low・AI 断定なし、`passive`（AI カナリア値がパス・クエリ・本文・Referer 等リンクで届く欄だけ＝経路 GET 単独）は medium・ai_score 0.5、`direct`（カナリアヘッダ等クライアント自身にしか付けられない位置）は従来どおり critical/ai_agent/0.99。降格したアラートは相関・ルール判定が AI 断定に使う印（タグ部分一致 `ai_canary`・エンティティ値 `ai_canary`）を持たない。セッション（aidetect）が Gate の `ai_canary` デコイ応答を無条件に `canary_hits`（AI 断定）にしていた経路も `provenance.decisive_canary_hit()`（既知のカナリア値をカナリアヘッダで送り、誘発兆候なし）で絞った（それ以外は `decoy_hits`）。これでカナリアページ（`/api/internal/openapi.json`、隠し HTML からリンク）を取得しただけで AI 断定される問題も止まる。設定 `deception.downgrade_browser_induced`（既定 true）。テスト `tests/deception/test_deception_framing.py`: L03-10 の再現（Gate の `EventBuilder` で HTTP + deception イベントを生成、クロスサイト `<img>`・同一オリジンの投稿内 `<img>`・リンクプレビュー bot・カナリアページ取得・`<img src=/.env>`）を **自動承認を全 ActionType で有効** にして流し、被害者 IP に対処 0 件・Gate ポリシーに載らない・インシデントは ai_agent でなく high 未満、対照としてカナリアヘッダで追従した非ブラウザは critical/ai_agent で block_ip が自動承認されること | c218d2d |
 | #30 | 完全（推奨 (1)(2)。(3) 編集距離は不採用） | トークン照合を大文字小文字無視（正規表現 `IGNORECASE` + 格納値への逆引き。`find_tokens` は格納値を返すので呼び出し側は無変更）、`\` を除いた版も照合（markdownify の `dbg\_` 対策）、`/api/internal/<値>` の判定と Referer もデコード → `\` 除去 → 正規化で比較。カナリアヘッダが既知値以外で送られたら資産に紐付かない `canary_attempt`（medium・deception・AI 断定なし、送信元ごとに 1 件、誘発兆候があれば出さない、`ai_canaries=false` やカナリア値が無いときは出さない）。テスト `test_deception_variants.py`（repro の md_escaped_path / md_escaped_hdr / lowercase_hdr / %5C / 大文字パス / Referer / クエリ、切り詰め・1 文字違い・base64・でたらめ値の試み） | a052a36 |
 | #41 | 部分（挿入位置の設定化と既定の先頭+末尾は完全。HTML 以外への展開・eval の先頭 N KB チェックは未着手） | 設定 `deception.html_injection_positions`（`head` / `body_start` / `body_end`、既定 `[body_start, body_end]`）を `GatePolicy.html_injection_positions`（新フィールド、default None）で Gate に渡す。Gate の `gate.proxy.inject_html()` が位置ごとに挿入: `body_start` は最初の本物の `<body …>` の直後（`<script>`/`<style>`/`<title>`/`<textarea>`/`<template>`/コメント内の文字列と引用符内の `>` を飛ばす）、`body_end` は従来どおり最後の `</body>` の直前、`head` は `<head>` 直後にスニペット先頭の HTML コメントだけ（`<div>` は `<head>` を閉じてしまう）。位置の無いポリシー（古いサーバー）は `body_end` のみ、古い Gate は新フィールドを無視（pydantic の既定で余分なフィールドは無視）。位置は policy version に含むので設定変更が稼働中の Gate に届く。`</body>` が省略されたページにも `<body>` 直後に入るようになった。テスト `test_deception_injection.py`（43 KB のページで先頭 1,000 バイト以内にトークン・従来位置は 30,000 超を再現、生テキスト内の `<body>`、属性内の `>`、`<header>`、未知の位置、旧/新ポリシーの互換、サーバーが設定の位置と version を返す）と `tests/gate/test_gate_app.py` に 1 件（gzip 応答の両位置挿入） | 998950b |
-| #65 | 部分（(a)(b) 完全。(c)(d)(e) 未着手） | (a) 資産のパスを Gate と同じ `gate.policy.normalize_path`（URL デコード後も）で正規化して検証し、`/` になるもの（`/.`、`//`、`/a/..`、`/%2e`、`/%252e`、`/.*` …）は 422。保存するのは Gate で正規化した形（`/a/../.env` → `/.env`）なので重複は 409。respond の `deploy_canary` も `create_asset` を通るので同じく拒否（`respond/validate.py` は無変更）。検証前に作られた行がルートを指していても `render.shadows_site()` で Gate ポリシーに載せない（警告ログ）。(b) 前方一致は `*` の前に完全なセグメントが 1 つ以上（`/admin/*` 可、`/a*`・`/admin*` 不可。迷路の既定 `/archive/*` は通る）。テスト `test_deception_paths.py`（3 種別 × 12 のルート表現、前方一致、正規化保存と重複、迷路・更新、旧データの非配信） | （このコミット） |
-| #68 | 未着手 | | |
+| #65 | 部分（(a)(b) 完全。(c)(d)(e) 未着手） | (a) 資産のパスを Gate と同じ `gate.policy.normalize_path`（URL デコード後も）で正規化して検証し、`/` になるもの（`/.`、`//`、`/a/..`、`/%2e`、`/%252e`、`/.*` …）は 422。保存するのは Gate で正規化した形（`/a/../.env` → `/.env`）なので重複は 409。respond の `deploy_canary` も `create_asset` を通るので同じく拒否（`respond/validate.py` は無変更）。検証前に作られた行がルートを指していても `render.shadows_site()` で Gate ポリシーに載せない（警告ログ）。(b) 前方一致は `*` の前に完全なセグメントが 1 つ以上（`/admin/*` 可、`/a*`・`/admin*` 不可。迷路の既定 `/archive/*` は通る）。テスト `test_deception_paths.py`（3 種別 × 12 のルート表現、前方一致、正規化保存と重複、迷路・更新、旧データの非配信） | cbaf5e4 |
+| #68 | 完全 | 新モジュール `deception/keys.py`: デセプション派生鍵を JWT 署名鍵から分離し `data_dir/deception.key`（0600、`auth.files.create_private_file` で原子的に作成）に鍵リングとして保存。1 行 1 鍵（16 進、`#` コメント可）、先頭が現用（描画）、全行を照合（`DeceptionIndex.build(older_keys=...)`）。**初回は #68 以前の導出鍵（HMAC(JWT 鍵, 'tokiwa.deception.derive.v1')）をそのまま書き出す** ので既存デプロイの派生値は変わらず、以後 JWT 鍵を入れ替えても変わらない。ファイルが読めない・作れない（読み取り専用の data dir）・壊れている・空のときは検知を止めず JWT 由来の鍵で動きエラーログ。`docs/deploy.md` の状態・バックアップ/リストア・鍵ローテーション、`docs/deception.md` §3、wiki Installation（バックアップ手順）・Deception（4 言語）。テスト `test_deception_keys.py`（初回の値が旧導出と一致・0600、JWT 鍵ローテーション後も派生値と照合が不変、デセプション鍵の入れ替えで旧値も照合・新値で描画、壊れた/空のファイル） | （このコミット） |
 | #84 | 未着手 | | |
 
 ## 要判断
@@ -39,6 +39,11 @@
   明示的な指定や迷路の `/archive/*` まで拒否するため。`/api/*` のような 1 段の前方一致は通る（運用者の明示的な選択とみなす）。
 - **#65 保存パスを Gate 正規化形にした**: `/static/../x` で作ると `/x` として保存・表示される。大文字小文字は保存時に変えない
   （Gate の照合も区別する）。
+- **#68 初回の鍵を乱数ではなく旧導出鍵にした**: 既存利用者の配布済み値を壊さないため（新規インストールでも同じ扱い）。そのため
+  「JWT 鍵が漏えいした」場合は派生値の鍵も漏えい済みとみなし、`deception.key` の先頭に新しい乱数鍵を足す（旧行は残す）運用になる。
+  ローテーション用の CLI は作っていない（`cli.py` は共有ファイル。手順は docs/deploy.md §7）。**古い鍵を消す時期（保持期間）は運用判断**。
+- **#68 鍵ファイルを失うと現在の JWT 鍵から作り直される**: JWT 鍵が不変なら値も戻るが、JWT 鍵を入れ替えた後に失うと旧値は検知されない。
+  バックアップ対象に追加した（docs/deploy.md・wiki Installation）。`scripts/docker-smoke.sh` の永続化確認には足していない。
 - **#30 近似一致（編集距離 1〜2）は不採用**: 照合が正規表現の一括検索なので、近似一致は別の仕組みが要る。ヘッダでの写し間違いは
   `canary_attempt` で拾える。
 
@@ -58,6 +63,8 @@
 
 - （#65）ルートと同じ意味のパス・`*` の前に完全なセグメントの無い前方一致での資産作成・更新・`deploy_canary` が 422 になった。
   既存の行は変更しないが、ルートを指す行は Gate に配信しない。
+
+- （#68）`data_dir/deception.key` が初回起動時に作られる（中身は従来の導出鍵なので挙動は不変）。JWT 鍵の入れ替えでデコイの派生値が変わらなくなった。
 
 ## 失敗した試み
 

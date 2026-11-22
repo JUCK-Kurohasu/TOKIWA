@@ -15,7 +15,8 @@ what survives redaction, so every value generated here is built to never match a
 Values look like credentials but are not verifiable against any real service. Each asset stores one random
 ``token``; companion values (AWS secret, DB password, canary ...) are derived from it with a keyed HMAC so the
 rendered decoy and the detector always agree without extra storage, and an attacker cannot tell that two values
-in one decoy are related (the key is derived from the server secret and never leaves the server).
+in one decoy are related (the key lives in ``data_dir/deception.key`` and never leaves the server; older keys
+stay matched after a rotation - :mod:`tokiwa.deception.keys`).
 
 Where a token is still invisible (by design of redaction): values of sensitive headers (Authorization, Cookie,
 X-API-Key ...), values after ``token=``/``password=``/``api_key=``/``auth=`` ..., URL user:pass. See
@@ -161,10 +162,15 @@ def honey_values(kind: DeceptionKind, token: str, key: bytes) -> dict[Slot, str]
 
 
 def derive_key() -> bytes:
-    """Sub-key for :func:`derive`, bound to this deployment's server secret (domain separated)."""
-    from tokiwa.auth.security import secret_key
+    """Active key for :func:`derive` (first entry of ``data_dir/deception.key``; :mod:`tokiwa.deception.keys`)."""
+    return derive_keys()[0]
 
-    return hmac.new(secret_key().encode(), b"tokiwa.deception.derive.v1", hashlib.sha256).digest()
+
+def derive_keys() -> list[bytes]:
+    """All keys whose derived values are still matched (active first). Independent of the JWT key (#68)."""
+    from tokiwa.deception.keys import keyring
+
+    return keyring()
 
 
 def _strict_redaction(cfg: RedactionSettings | None) -> RedactionSettings:

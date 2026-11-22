@@ -39,7 +39,7 @@ from tokiwa.db.session import session_scope
 from tokiwa.deception import render
 from tokiwa.deception.labyrinth import normalize_base
 from tokiwa.deception.matcher import DeceptionIndex, Trip, match_event
-from tokiwa.deception.tokens import derive_key, flavor_for, generate_token, validate_token
+from tokiwa.deception.tokens import derive_key, derive_keys, flavor_for, generate_token, validate_token
 from tokiwa.pipeline.store import get_events
 from tokiwa.runtime import on_startup
 from tokiwa.schemas.common import Page
@@ -170,8 +170,9 @@ async def get_cache(*, force: bool = False) -> _Cache:
         except Exception:
             log.warning("deception: could not load assets (retry in %.0fs)", _RETRY_SECONDS, exc_info=True)
             ttl = _RETRY_SECONDS
-    key = derive_key() if engine is not None else b""
-    index = DeceptionIndex.build(assets, key=key, settings=settings.deception)
+    keys = derive_keys() if engine is not None else [b""]
+    key = keys[0]
+    index = DeceptionIndex.build(assets, key=key, settings=settings.deception, older_keys=keys[1:])
     _cache = _Cache(engine, settings, gen, now, ttl, assets, index, key)
     return _cache
 

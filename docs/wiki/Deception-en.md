@@ -101,6 +101,7 @@ Disable `html_injection` if the app has a mechanism that sends the page DOM back
   honeytoken values and AI-canary text, so an attacker holding it can walk around every trap. Give the `gate` scope only
   to Gate tokens (`tokiwa token create` defaults to `ingest` only), and if a leak is suspected, revoke the token and
   rotate the asset tokens.
+- Fake credentials and canary values inside decoys are derived from `data_dir/deception.key` (a key ring). Rotating the login signing key `secret.key` does not change them. Include the file in backups; to rotate, add a new key as the first line and keep the old lines (old values keep being detected; see the backup section of [Installation](Installation-en)).
 - Place traps **only on your own organization's assets**. TOKIWA does not strike back at the attack source or send back malware-like payloads.
 - How strong the wording of the hidden instructions is, which language they use, and whether to place them in robots.txt / llms.txt are operational decisions. Before deploying,
   check with your organization's policies and your legal team.
