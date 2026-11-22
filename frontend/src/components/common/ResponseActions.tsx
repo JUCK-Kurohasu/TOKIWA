@@ -29,7 +29,7 @@ import { api } from "@/api/client";
 import type { ActionStatus, ActionType, ResponseAction } from "@/api/types";
 import { ACTION_TYPES, type ActionProposal, type ActionRejectBody, IP_TARGET_ACTIONS } from "@/api/types-ops";
 import { Badge, Button, Dialog, ErrorState, Input, Label, Select, Textarea } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatDateTime, timeAgo } from "@/lib/format";
 import { useLabel, useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Notice } from "./OpsKit";
@@ -302,11 +302,11 @@ export function ActionCard({ action, showLinks = true }: { action: ResponseActio
         <span>
           {L.ttl}: {action.ttl_minutes ? formatTtl(action.ttl_minutes) : L.noTtl}
         </span>
-        <span title={formatDateTime(action.created_at)}>
+        <span title={dateTimeTitle(action.created_at)}>
           {L.created}: {timeAgo(action.created_at)}
         </span>
         {action.approved_by && (
-          <span title={formatDateTime(action.approved_at)}>
+          <span title={dateTimeTitle(action.approved_at)}>
             {L.approvedBy}: {action.approved_by}
           </span>
         )}

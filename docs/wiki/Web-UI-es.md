@@ -6,6 +6,11 @@ La interfaz de TOKIWA se abre en `http://<servidor>:8788`. La barra lateral izqu
 Con los botones de la esquina superior derecha se puede cambiar el **idioma de visualización (japonés / English)** y el **tema claro / oscuro**.
 Las alertas y los incidentes se actualizan en tiempo real (SSE).
 
+Las fechas y horas siempre llevan el nombre de la zona horaria (por ejemplo `11/11/2026, 09:43:09 GMT+9`). El botón del reloj de la esquina superior derecha
+(muestra `JST`, `UTC`…) cambia la **zona horaria de visualización (local del navegador / UTC)**; la elección se recuerda en cada navegador. Al pasar el ratón
+sobre una hora también se muestra el valor ISO 8601 en UTC (por ejemplo `2026-11-11T00:43:09.000Z`). La API, la vista de datos sin procesar (JSON), el Gate y los registros usan siempre UTC.
+El periodo personalizado de la pantalla Events (eventos) también se interpreta en la zona horaria de visualización.
+
 > La interfaz web solo está disponible en japonés e inglés. En esta wiki, las etiquetas de la interfaz se citan en inglés y en negrita,
 > con su traducción al español entre paréntesis la primera vez que aparecen en cada página.
 
@@ -58,6 +63,15 @@ Chat que permite hacer preguntas en lenguaje natural sobre los datos de TOKIWA (
 Las herramientas que puede usar el copiloto son **de solo lectura**: no puede cambiar la configuración ni ejecutar acciones de respuesta. Si no se ha configurado un LLM,
 las respuestas son simuladas (mock).
 
+Como el LLM podría seguir instrucciones que un atacante haya colocado en la telemetría, los enlaces de las respuestas se tratan así:
+
+- Los enlaces internos de TOKIWA solo se abren en la misma pestaña si apuntan a pantallas conocidas (alertas, incidentes, sesiones, eventos…).
+- Los enlaces externos solo se pueden pulsar si son páginas https de sitios permitidos (NVD, MITRE, CISA, JVN, OSV, FIRST), y junto a la etiqueta se muestra el nombre de host real.
+  El resto se muestra como texto no pulsable, junto con su nombre de host y "link disabled" (enlace desactivado).
+- Si una etiqueta tiene forma de URL pero no coincide con el destino real, se muestra la advertencia "label and destination differ" (la etiqueta y el destino no coinciden).
+
+Los sitios permitidos se configuran en `EXTERNAL_LINK_ALLOWLIST` de `frontend/src/components/common/linkPolicy.ts` (requiere volver a compilar).
+
 ### Incidents (Incidentes)
 
 Agrupaciones de alertas relacionadas por origen, sesión y entidad.
@@ -71,6 +85,13 @@ El servidor verifica que las evidencias citadas en el triaje del LLM (ID de evid
 ### Events (Eventos)
 
 Búsqueda de los eventos sin procesar ingeridos. Puede filtrarse por tipo, dataset, IP de origen, host, periodo y palabra clave (ruta / User-Agent).
+
+Si una ruta, un User-Agent, una cabecera o un cuerpo contiene **caracteres invisibles o que alteran el orden de visualización**
+(el control bidireccional U+202E, el de ancho cero U+200B…), cada uno se muestra como `⟨U+202E⟩` en color de advertencia y la fila o el evento
+recibe la insignia "Contains invisible / bidi control characters" (contiene caracteres invisibles o de control bidireccional). Así se evitan trucos
+como mostrar `invoice⟨U+202E⟩fdp.exe` como `invoiceexe.pdf`. La vista de datos sin procesar (JSON) los muestra como `\u202E`.
+Solo cambia la visualización; las búsquedas y los filtros usan la cadena original. Se aplica a la lista de eventos, el detalle de eventos,
+la evidencia de alertas, el detalle de sesiones y las respuestas y resultados de herramientas del copiloto.
 
 ## Intelligence (Inteligencia)
 

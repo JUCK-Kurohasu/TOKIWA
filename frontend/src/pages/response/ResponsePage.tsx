@@ -38,7 +38,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -379,11 +379,11 @@ export function ResponsePage() {
                         <TD className="text-xs">{a.approved_by ?? <span className="text-muted">-</span>}</TD>
                         <TD
                           className="whitespace-nowrap text-xs text-muted"
-                          title={formatDateTime(a.created_at)}
+                          title={dateTimeTitle(a.created_at)}
                         >
                           {timeAgo(a.created_at)}
                         </TD>
-                        <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(ended)}>
+                        <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(ended)}>
                           {timeAgo(ended)}
                         </TD>
                         <TD className="max-w-[220px] text-xs">

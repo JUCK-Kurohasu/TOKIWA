@@ -7,9 +7,10 @@ import { MATCH_STATUSES, type MatchStatus, type VulnMatchWithAsset } from "@/api
 import { OffsetPager } from "@/components/common/OffsetPager";
 import { ApiErrorState, QueryView } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
+import { Time } from "@/components/common/Time";
 import { useUrlParams } from "@/components/common/urlState";
 import { Badge, Card, EmptyState, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { formatDateTime, pct } from "@/lib/format";
+import { pct } from "@/lib/format";
 import { useLocal, useT } from "@/lib/i18n";
 import { softwareLabel, useMatchStatusLabel } from "./labels";
 
@@ -156,7 +157,9 @@ export function MatchesTab({ onOpenVuln }: { onOpenVuln: (id: string) => void })
                           <Badge tone={m.status === "open" ? "danger" : "neutral"}>{label(m.status)}</Badge>
                         )}
                       </TD>
-                      <TD className="whitespace-nowrap text-xs text-muted">{formatDateTime(m.created_at)}</TD>
+                      <TD className="whitespace-nowrap text-xs text-muted">
+                        <Time iso={m.created_at} />
+                      </TD>
                     </TR>
                   ))}
                 </TBody>

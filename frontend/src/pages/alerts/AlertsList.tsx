@@ -21,6 +21,7 @@ import {
   TableSkeleton,
 } from "@/components/common/OpsKit";
 import { alertCategoryLabel, alertStatusLabel, fmt, useCanOperate } from "@/components/common/opsLabels";
+import { SafeText } from "@/components/common/SafeText";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
   Badge,
@@ -36,7 +37,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -458,7 +459,7 @@ export function AlertsListPage() {
                       </TD>
                       <TD className="max-w-[420px]">
                         <Link to={`/alerts/${a.id}`} className="line-clamp-2 font-medium hover:text-accent">
-                          {a.title}
+                          <SafeText text={a.title} />
                         </Link>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                           <Mono className="text-[11px] text-muted">{a.rule_id}</Mono>
@@ -496,10 +497,7 @@ export function AlertsListPage() {
                       <TD>
                         <AlertStatusBadge status={a.status} />
                       </TD>
-                      <TD
-                        className="whitespace-nowrap text-xs text-muted"
-                        title={formatDateTime(a.last_seen)}
-                      >
+                      <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(a.last_seen)}>
                         {timeAgo(a.last_seen)}
                       </TD>
                     </TR>

@@ -7,8 +7,9 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { Advisory, ProposedRule } from "@/api/types";
 import { AiGeneratedBadge, PriorityBadge, SafeLink } from "@/components/common/IntelBadges";
+import { Time } from "@/components/common/Time";
 import { Button } from "@/components/ui";
-import { formatDateTime, pct } from "@/lib/format";
+import { pct } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 
 const strings = {
@@ -155,7 +156,9 @@ export function AdvisoryView({
           <div className="flex flex-wrap items-center gap-2">
             <PriorityBadge priority={advisory.priority} showHint />
             <AiGeneratedBadge />
-            <span className="text-xs text-muted">{formatDateTime(advisory.created_at)}</span>
+            <span className="text-xs text-muted">
+              <Time iso={advisory.created_at} />
+            </span>
           </div>
           <h3 className="text-base font-semibold leading-snug">{advisory.title}</h3>
         </div>

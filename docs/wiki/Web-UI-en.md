@@ -6,6 +6,11 @@ Open the TOKIWA UI at `http://<server>:8788`. The sidebar on the left is divided
 Use the buttons at the top right to switch the **display language (Japanese / English)** and the **light / dark theme**.
 Alerts and incidents update in real time (SSE).
 
+Dates and times always carry a time zone name (for example `11/11/2026, 09:43:09 GMT+9`). The clock button at the top right (showing `JST`, `UTC`, …)
+switches the **display time zone (browser local / UTC)**; the choice is remembered per browser. Hovering over a time also shows
+the ISO 8601 value in UTC (for example `2026-11-11T00:43:09.000Z`). The API, raw (JSON) views, the Gate and logs always use UTC.
+A custom time range on the Events screen is read in the display time zone as well.
+
 ## Roles (permissions)
 
 | Role | What it can do |
@@ -55,6 +60,15 @@ A chat where you can ask questions about TOKIWA's data in natural language (for 
 The tools the Copilot can use are **read-only**; it cannot change settings or execute response actions. If no LLM is configured,
 it gives mock responses.
 
+Because the LLM might follow instructions an attacker planted in telemetry, links in answers are handled as follows:
+
+- Links inside TOKIWA open in the same tab only for known screens (alerts, incidents, sessions, events, …).
+- External links are clickable only for https pages on allowed sites (NVD, MITRE, CISA, JVN, OSV, FIRST), and the real host name is shown next to the label.
+  Anything else is shown as non-clickable text, together with its host name and "link disabled".
+- When a label looks like a URL but differs from the real destination, a "label and destination differ" warning is shown.
+
+The allowed sites are set in `EXTERNAL_LINK_ALLOWLIST` in `frontend/src/components/common/linkPolicy.ts` (requires a rebuild).
+
 ### Incidents
 
 Related alerts grouped by source, session, and entity.
@@ -68,6 +82,12 @@ The server verifies that the evidence (event IDs) included in the LLM triage ref
 ### Events
 
 Search the raw ingested events. You can filter by type, dataset, source IP, host, time range, and keyword (path / User-Agent).
+
+When a path, User-Agent, header or body contains **invisible characters or characters that reorder the display**
+(the bidirectional control U+202E, the zero-width U+200B, …), each one is shown as `⟨U+202E⟩` in a warning colour and the row or event
+gets a "Contains invisible / bidi control characters" badge (this defeats tricks such as showing `invoice⟨U+202E⟩fdp.exe` as `invoiceexe.pdf`).
+The raw (JSON) view shows them as `\u202E`. Only the display changes; searches and filters use the original string. This applies to the event list,
+event details, alert evidence, session details, and Copilot answers and tool results.
 
 ## Intelligence
 

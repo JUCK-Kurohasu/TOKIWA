@@ -12,14 +12,18 @@ import { Mono, PageHeader } from "@/components/common";
 import { DataState, RowsSkeleton } from "@/components/common/DataState";
 import { EventDrawer, endpointText, isAiTag, KindBadge } from "@/components/common/EventInspector";
 import { HttpStatusBadge } from "@/components/common/HttpStatusBadge";
+import { escapeInvisible } from "@/components/common/invisible";
 import { LiveDot } from "@/components/common/LiveDot";
 import { PagerBar } from "@/components/common/PagerBar";
+import { InvisibleCharsBadge, SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import { Badge, Button, Card, Input, Label, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { retryUnlessClientError } from "@/hooks/useApi";
 import { useLiveStream } from "@/hooks/useLiveStream";
 import { useSearchState } from "@/hooks/useSearchState";
-import { formatDateTime, formatNumber } from "@/lib/format";
-import { useLocal } from "@/lib/i18n";
+import { formatNumber } from "@/lib/format";
+import { useLang, useLocal } from "@/lib/i18n";
+import { type DisplayTz, zoneName } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
 import type { AppRoute } from "@/routes";
 import { VolumeStrip } from "./VolumeStrip";
@@ -184,14 +188,17 @@ function summarize(ev: TkEvent): { text: string; status?: number | null; method?
   return { text: text ?? "" };
 }
 
-function toIso(local: string): string | undefined {
+/** datetime-local input value ("YYYY-MM-DDTHH:MM") read in the display zone (#165) -> ISO UTC. */
+function toIso(local: string, tz: DisplayTz): string | undefined {
   if (!local) return undefined;
-  const t = Date.parse(local);
+  const t = Date.parse(tz === "utc" ? `${local}Z` : local);
   return Number.isNaN(t) ? undefined : new Date(t).toISOString();
 }
 
-function toLocalInput(ms: number): string {
+/** Epoch ms -> datetime-local input value in the display zone. */
+function toLocalInput(ms: number, tz: DisplayTz): string {
   const d = new Date(ms);
+  if (tz === "utc") return d.toISOString().slice(0, 16);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -199,6 +206,8 @@ function toLocalInput(ms: number): string {
 function EventsPage() {
   const L = useLocal(strings);
   const RL = useLocal(rangeLabels);
+  const { lang, tz } = useLang();
+  const zone = zoneName(lang === "ja" ? "ja-JP" : "en-US", tz);
   const [f, setF] = useSearchState(KEYS);
   const range = (RANGES as readonly string[]).includes(f.range) ? (f.range as Range) : "24h";
   const limit = Number(f.limit) || 50;
@@ -362,7 +371,9 @@ function EventsPage() {
           {range === "custom" && (
             <>
               <div>
-                <Label htmlFor="ev-since">{L.since}</Label>
+                <Label htmlFor="ev-since">
+                  {L.since} ({zone})
+                </Label>
                 <Input
                   id="ev-since"
                   type="datetime-local"
@@ -372,7 +383,9 @@ function EventsPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="ev-until">{L.until}</Label>
+                <Label htmlFor="ev-until">
+                  {L.until} ({zone})
+                </Label>
                 <Input
                   id="ev-until"
                   type="datetime-local"
@@ -405,7 +418,7 @@ function EventsPage() {
         hours={stripHours}
         bucketMinutes={stripBucket}
         onPick={(from, to) =>
-          setF({ range: "custom", since: toLocalInput(from), until: toLocalInput(to), offset: null })
+          setF({ range: "custom", since: toLocalInput(from, tz), until: toLocalInput(to, tz), offset: null })
         }
       />
 
@@ -475,7 +488,7 @@ function EventsPage() {
                           }}
                           title={`${L.open}: ${ev.id}`}
                         >
-                          {formatDateTime(ev.timestamp)}
+                          <Time iso={ev.timestamp} />
                         </button>
                       </TD>
                       <TD>
@@ -503,10 +516,11 @@ function EventsPage() {
                           {s.method && (
                             <span className="shrink-0 font-mono text-xs font-semibold">{s.method}</span>
                           )}
-                          <span className="truncate font-mono text-xs" title={s.text}>
-                            {s.text || <span className="text-muted">-</span>}
+                          <span className="truncate font-mono text-xs" title={escapeInvisible(s.text)}>
+                            {s.text ? <SafeText text={s.text} /> : <span className="text-muted">-</span>}
                           </span>
                           {ev.http && <HttpStatusBadge status={s.status} className="shrink-0" />}
+                          <InvisibleCharsBadge value={ev} compact />
                           {aiTags.slice(0, 2).map((t) => (
                             <Badge key={t} tone="ai" className="shrink-0 font-mono">
                               {t}
@@ -576,17 +590,18 @@ function useEventsQuery(
   },
   onFetched: () => void,
 ) {
+  const { tz } = useLang();
   // Params are computed at fetch time so relative ranges ("last 1h") are re-evaluated on every refresh.
   return useQuery<Page<TkEvent>, Error>({
-    queryKey: ["events", "list", k],
+    queryKey: ["events", "list", k, k.range === "custom" ? tz : null],
     placeholderData: keepPreviousData,
     retry: retryUnlessClientError,
     queryFn: async () => {
       let since: string | undefined;
       let until: string | undefined;
       if (k.range === "custom") {
-        since = toIso(k.since);
-        until = toIso(k.until);
+        since = toIso(k.since, tz);
+        until = toIso(k.until, tz);
       } else if (k.range !== "all") {
         since = new Date(Date.now() - RANGE_MS[k.range]).toISOString();
       }

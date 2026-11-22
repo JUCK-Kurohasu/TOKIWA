@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { ActorType, Severity } from "@/api/types";
 import { useLang, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { escapeJsonInvisible } from "./invisible";
 
 const sevClasses: Record<Severity, string> = {
   info: "bg-sev-info/15 text-sev-info border-sev-info/30",
@@ -88,7 +89,8 @@ export function JsonView({ value, className }: { value: unknown; className?: str
         className,
       )}
     >
-      {JSON.stringify(value, null, 2)}
+      {/* Invisible / bidi characters as \uXXXX: still exact JSON, nothing hidden (#150). */}
+      {escapeJsonInvisible(JSON.stringify(value, null, 2) ?? "")}
     </pre>
   );
 }

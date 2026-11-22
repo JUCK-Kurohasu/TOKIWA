@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import type { HostPort, HostSummary, PortBaseline } from "@/api/types-core";
 import { Mono } from "@/components/common";
 import { DataState, RowsSkeleton } from "@/components/common/DataState";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -21,7 +22,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
+import { formatNumber, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { BaselineDraft } from "./BaselineDialog";
@@ -325,7 +326,7 @@ export function PortsPanel({
                           {p.pid != null && <span className="ml-1 text-muted">({p.pid})</span>}
                         </TD>
                         <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
-                          {formatDateTime(p.first_seen)}
+                          <Time iso={p.first_seen} />
                         </TD>
                         <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
                           {timeAgo(p.last_seen)}

@@ -8,7 +8,10 @@ import { ActorBadge, Mono, PageHeader } from "@/components/common";
 import { DataState } from "@/components/common/DataState";
 import { EventDrawer } from "@/components/common/EventInspector";
 import { HttpStatusBadge } from "@/components/common/HttpStatusBadge";
+import { escapeInvisible } from "@/components/common/invisible";
 import { formatMs, toEpochMs } from "@/components/common/numfmt";
+import { InvisibleCharsBadge, SafeText } from "@/components/common/SafeText";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Card,
@@ -24,7 +27,7 @@ import {
   TR,
 } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, formatNumber, pct } from "@/lib/format";
+import { formatNumber, pct } from "@/lib/format";
 import { useLang, useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { GapHistogram, RhythmScatter } from "./RhythmCharts";
@@ -320,7 +323,10 @@ export function SessionDetailPage() {
             <dl className="grid grid-cols-1 gap-x-4 gap-y-2 border-t border-line pt-3 text-xs sm:grid-cols-2">
               <div className="min-w-0">
                 <dt className="text-[11px] text-muted">{L.ua}</dt>
-                <dd className="break-all font-mono">{session.user_agent ?? "-"}</dd>
+                <dd className="break-all font-mono">
+                  {session.user_agent ? <SafeText text={session.user_agent} /> : "-"}
+                  <InvisibleCharsBadge value={session.user_agent} className="ml-1.5" />
+                </dd>
               </div>
               <div className="min-w-0">
                 <dt className="text-[11px] text-muted">{L.fingerprint}</dt>
@@ -328,11 +334,15 @@ export function SessionDetailPage() {
               </div>
               <div>
                 <dt className="text-[11px] text-muted">{L.first}</dt>
-                <dd>{formatDateTime(session.first_seen)}</dd>
+                <dd>
+                  <Time iso={session.first_seen} />
+                </dd>
               </div>
               <div>
                 <dt className="text-[11px] text-muted">{L.last}</dt>
-                <dd>{formatDateTime(session.last_seen)}</dd>
+                <dd>
+                  <Time iso={session.last_seen} />
+                </dd>
               </div>
             </dl>
           </CardBody>
@@ -461,7 +471,7 @@ export function SessionDetailPage() {
                             setOpenEvent(ev);
                           }}
                         >
-                          {formatDateTime(ev.timestamp)}
+                          <Time iso={ev.timestamp} />
                         </button>
                       </TD>
                       <TD className="text-right text-xs tabular-nums">
@@ -472,10 +482,18 @@ export function SessionDetailPage() {
                         </span>
                       </TD>
                       <TD className="font-mono text-xs font-semibold">{ev.http?.method ?? ev.kind}</TD>
-                      <TD className="truncate font-mono text-xs" title={ev.http?.path ?? undefined}>
-                        {ev.http
-                          ? `${ev.http.path ?? ""}${ev.http.query ? `?${ev.http.query}` : ""}`
-                          : (ev.message ?? "-")}
+                      <TD
+                        className="truncate font-mono text-xs"
+                        title={ev.http?.path ? escapeInvisible(ev.http.path) : undefined}
+                      >
+                        <InvisibleCharsBadge value={ev} compact className="mr-1.5" />
+                        <SafeText
+                          text={
+                            ev.http
+                              ? `${ev.http.path ?? ""}${ev.http.query ? `?${ev.http.query}` : ""}`
+                              : (ev.message ?? "-")
+                          }
+                        />
                       </TD>
                       <TD>
                         <HttpStatusBadge status={ev.http?.status} />

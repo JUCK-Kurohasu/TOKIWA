@@ -8,6 +8,7 @@
  *   L.title
  */
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { type DisplayTz, getDisplayTz, storeDisplayTz } from "./timezone";
 
 export type Lang = "ja" | "en";
 
@@ -99,11 +100,22 @@ export function getLang(): Lang {
   return currentLang;
 }
 
-type Ctx = { lang: Lang; setLang: (l: Lang) => void };
-const LangContext = createContext<Ctx>({ lang: currentLang, setLang: () => {} });
+/**
+ * `tz` (display time zone, lib/timezone.ts) rides on the language context on purpose: date formatting is a
+ * plain function, and nearly every page subscribes to this context through `useLocal`, so switching the zone
+ * re-renders the formatted times without touching each call site.
+ */
+type Ctx = { lang: Lang; setLang: (l: Lang) => void; tz: DisplayTz; setTz: (tz: DisplayTz) => void };
+const LangContext = createContext<Ctx>({
+  lang: currentLang,
+  setLang: () => {},
+  tz: getDisplayTz(),
+  setTz: () => {},
+});
 
 export function LangProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(currentLang);
+  const [tz, setTzState] = useState<DisplayTz>(getDisplayTz());
   const setLang = useCallback((l: Lang) => {
     currentLang = l;
     try {
@@ -114,7 +126,11 @@ export function LangProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = l;
     setLangState(l);
   }, []);
-  const value = useMemo(() => ({ lang, setLang }), [lang, setLang]);
+  const setTz = useCallback((next: DisplayTz) => {
+    storeDisplayTz(next);
+    setTzState(next);
+  }, []);
+  const value = useMemo(() => ({ lang, setLang, tz, setTz }), [lang, setLang, tz, setTz]);
   return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
 }
 

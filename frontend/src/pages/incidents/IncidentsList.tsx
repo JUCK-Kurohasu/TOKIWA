@@ -18,6 +18,7 @@ import {
   TableSkeleton,
 } from "@/components/common/OpsKit";
 import { fmt, incidentStatusLabel } from "@/components/common/opsLabels";
+import { SafeText } from "@/components/common/SafeText";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
   Button,
@@ -32,7 +33,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -268,7 +269,7 @@ export function IncidentsListPage() {
                           to={`/incidents/${inc.id}`}
                           className="line-clamp-1 font-medium hover:text-accent"
                         >
-                          {inc.title}
+                          <SafeText text={inc.title} />
                         </Link>
                         {inc.summary && <p className="line-clamp-1 text-xs text-muted">{inc.summary}</p>}
                       </TD>
@@ -296,7 +297,7 @@ export function IncidentsListPage() {
                       <TD className="text-xs">{inc.assignee ?? <span className="text-muted">-</span>}</TD>
                       <TD
                         className="whitespace-nowrap text-xs text-muted"
-                        title={formatDateTime(inc.last_seen)}
+                        title={dateTimeTitle(inc.last_seen)}
                       >
                         {timeAgo(inc.last_seen)}
                       </TD>

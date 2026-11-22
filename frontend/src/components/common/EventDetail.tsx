@@ -9,12 +9,15 @@ import { Braces, ChevronDown, ChevronRight, Sparkles } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
 import type { HttpInfo, TkEvent } from "@/api/types";
+import { Time } from "@/components/common/Time";
 import { Badge } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { JsonView } from "./index";
+import { escapeInvisible } from "./invisible";
 import { fmt } from "./opsLabels";
+import { InvisibleCharsBadge, SafeText } from "./SafeText";
 
 const BODY_PREVIEW_CHARS = 4000;
 
@@ -95,25 +98,28 @@ export function HttpView({ http }: { http: HttpInfo }) {
       <div>
         <div className="mb-1 text-[11px] font-medium text-muted">{L.request}</div>
         <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg p-3 font-mono text-xs leading-relaxed">
-          <span className="font-semibold text-accent">{http.method ?? "?"}</span> <span>{target}</span>{" "}
+          <span className="font-semibold text-accent">{http.method ?? "?"}</span> <SafeText text={target} />{" "}
           <span className="text-muted">{proto}</span>
           {"\n"}
           {!hasHost && http.host && (
             <>
-              <span className="text-sev-low">Host</span>: {http.host}
+              <span className="text-sev-low">Host</span>: <SafeText text={http.host} />
               {"\n"}
             </>
           )}
           {headers.map(([k, v]) => (
             <span key={k}>
-              <span className="text-sev-low">{k}</span>: {v}
+              <span className="text-sev-low">
+                <SafeText text={k} />
+              </span>
+              : <SafeText text={v} />
               {"\n"}
             </span>
           ))}
           {body ? (
             <>
               {"\n"}
-              {truncated ? body.slice(0, BODY_PREVIEW_CHARS) : body}
+              <SafeText text={truncated ? body.slice(0, BODY_PREVIEW_CHARS) : body} multiline />
               {truncated && <span className="text-muted">{"\n…"}</span>}
             </>
           ) : http.request_body_size ? (
@@ -153,7 +159,9 @@ function KV({ rows }: { rows: [string, unknown][] }) {
         <div key={k} className="contents">
           <dt className="text-muted">{k}</dt>
           <dd className="min-w-0 break-all font-mono">
-            {Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)}
+            <SafeText
+              text={Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)}
+            />
           </dd>
         </div>
       ))}
@@ -235,9 +243,14 @@ export function EventDetail({
           <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden />
         )}
         <Badge>{event.kind}</Badge>
-        <span className="shrink-0 font-mono text-[11px] text-muted">{formatDateTime(event.timestamp)}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted">
+          <Time iso={event.timestamp} />
+        </span>
         {src && <span className="shrink-0 font-mono text-xs">{src}</span>}
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{summaryLine(event)}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">
+          <SafeText text={summaryLine(event)} />
+        </span>
+        <InvisibleCharsBadge value={event} compact />
         {cited && (
           <Badge tone="ai" className="shrink-0">
             <Sparkles className="h-3 w-3" aria-hidden />
@@ -296,7 +309,7 @@ export function EventDetail({
               />
               {typeof event.llm_app.prompt === "string" && event.llm_app.prompt && (
                 <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg p-3 font-mono text-xs">
-                  {event.llm_app.prompt}
+                  <SafeText text={event.llm_app.prompt} multiline />
                 </pre>
               )}
             </Section>
@@ -322,13 +335,16 @@ export function EventDetail({
               )}
               {event.port.listeners && event.port.listeners.length > 0 && (
                 <div className="mt-1 font-mono text-xs text-muted">
-                  {event.port.listeners
-                    .slice(0, 30)
-                    .map(
-                      (s) =>
-                        `${s.protocol} ${s.bind_ip}:${s.port}${s.process?.name ? ` (${s.process.name})` : ""}`,
-                    )
-                    .join("\n")}
+                  {escapeInvisible(
+                    event.port.listeners
+                      .slice(0, 30)
+                      .map(
+                        (s) =>
+                          `${s.protocol} ${s.bind_ip}:${s.port}${s.process?.name ? ` (${s.process.name})` : ""}`,
+                      )
+                      .join("\n"),
+                    true,
+                  )}
                 </div>
               )}
             </Section>
@@ -349,7 +365,9 @@ export function EventDetail({
 
           {event.message && !event.http && (
             <Section title={L.message}>
-              <p className="whitespace-pre-wrap break-all font-mono text-xs">{event.message}</p>
+              <p className="whitespace-pre-wrap break-all font-mono text-xs">
+                <SafeText text={event.message} multiline />
+              </p>
             </Section>
           )}
 

@@ -7,9 +7,10 @@ import type { PortBaseline } from "@/api/types-core";
 import { Mono } from "@/components/common";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
+import { Time } from "@/components/common/Time";
 import { Badge, Button, Card, CardHeader, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime } from "@/lib/format";
+
 import { useLocal } from "@/lib/i18n";
 
 export function BaselinesPanel({
@@ -177,7 +178,7 @@ export function BaselinesPanel({
                   {b.note ?? "-"}
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted lg:table-cell">
-                  {formatDateTime(b.created_at)}
+                  <Time iso={b.created_at} />
                 </TD>
                 {canWrite && (
                   <TD className="text-right">
