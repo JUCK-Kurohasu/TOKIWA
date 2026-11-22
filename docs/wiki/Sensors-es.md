@@ -84,7 +84,7 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,
   valores de parámetros como `password=`, tokens, claves, direcciones de correo electrónico, etc.).
 - **fail-open**: aunque el servidor de TOKIWA se detenga, el proxy de Gate sigue funcionando (los eventos se acumulan temporalmente y se reenvían).
-- **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos").
+- **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos"). Aun así, el Gate respeta el vencimiento (TTL) de cada bloqueo: las entradas vencidas se levantan.
 - Comprobación de estado: `GET /__tokiwa/health` → `{"status":"ok"}`. Desde IP locales/privadas devuelve también estadísticas de envío, entre otros datos.
 - No soportado: WebSocket (devuelve 501), upstream HTTP/2, gRPC. Gate está pensado para funcionar como un único proceso.
 

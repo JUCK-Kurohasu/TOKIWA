@@ -64,6 +64,7 @@ Gates are told apart by "token + source address", so several Gates behind one re
    - Anything that overlaps the **protected ranges** (`response.protected_cidrs`; default `127.0.0.0/8`, `::1/128`)
    - The server's own IP addresses (`response.protect_server_addresses`, on by default)
 4. Right before execution, the action is **validated again** against the current settings (for example, if you added a protected range after the proposal, it becomes `failed`).
+5. **Active actions are re-checked against the current settings too.** An action that falls in a range you later added to `response.protected_cidrs` (or similar) is dropped from the policy on the Gate's next pull and becomes `reverted` within 30 seconds (or at restart), with `response.auto_revert` in the audit log.
 
 > 💡 We strongly recommend adding the IPs of admin workstations, monitoring systems, and upstream load balancers to `response.protected_cidrs`.
 

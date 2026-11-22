@@ -39,9 +39,10 @@ from tokiwa.db.models.response_suppression import ResponseSuppressionRow
 from tokiwa.db.session import session_scope
 from tokiwa.respond import suppress
 from tokiwa.respond.executors import ExecutionRequest, ExecutorError, get_executor
-from tokiwa.respond.policy import auto_approve_allowed
+from tokiwa.respond.policy import auto_approve_allowed, refused_by_settings
 from tokiwa.respond.suppress import ActionSuppressed
 from tokiwa.respond.validate import (
+    NETWORK_ACTIONS,
     ONE_SHOT_ACTIONS,
     ActionValidationError,
     ValidatedAction,
@@ -58,6 +59,7 @@ log = logging.getLogger(__name__)
 
 POLICY_ACTOR = "policy"
 EXPIRY_ACTOR = "system:expiry"
+SETTINGS_ACTOR = "system:settings"
 OPEN_STATUSES = (ActionStatus.PROPOSED.value, ActionStatus.APPROVED.value, ActionStatus.ACTIVE.value)
 MAX_REASON_CHARS = 8000
 
@@ -75,6 +77,7 @@ __all__ = [
     "propose_action",
     "reject_action",
     "revert_action",
+    "revoke_disallowed_actions",
 ]
 
 
@@ -567,6 +570,67 @@ async def expire_due_actions(now: datetime | None = None) -> int:
     return expired
 
 
+async def revoke_disallowed_actions(now: datetime | None = None) -> int:
+    """Revert active network actions that the *current* settings refuse (audit #64).
+
+    E.g. a CIDR added to ``response.protected_cidrs`` after the block was approved: ``build_gate_policy`` already
+    stops serving such rows; this records the transition (``reverted``, audit ``response.auto_revert`` by
+    ``system:settings``, ``result.auto_reverted``) and runs the executor's revert, which matters for
+    ``nftables_block`` (the element lives in the kernel set). Run by the expiry job and at startup.
+    """
+    now = now or utcnow()
+    settings = get_settings().response
+    async with session_scope() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(ResponseActionRow).where(
+                        ResponseActionRow.status == ActionStatus.ACTIVE.value,
+                        ResponseActionRow.action_type.in_([t.value for t in NETWORK_ACTIONS]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        refused = [(row.id, error) for row, error in refused_by_settings(rows, settings)[1]]
+    revoked = 0
+    for action_id, error in refused:
+        async with session_scope() as session:
+            res = await session.execute(
+                update(ResponseActionRow)
+                .where(
+                    ResponseActionRow.id == action_id, ResponseActionRow.status == ActionStatus.ACTIVE.value
+                )
+                .values(status=ActionStatus.REVERTED.value, reverted_at=now, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            if res.rowcount != 1:  # type: ignore[attr-defined]
+                continue  # reverted / expired concurrently
+            await record_audit(
+                SETTINGS_ACTOR,
+                "response.auto_revert",
+                target=action_id,
+                details={"error": error},
+                session=session,
+            )
+            row = await session.get(ResponseActionRow, action_id, populate_existing=True)
+            assert row is not None
+            row.result = {**(row.result or {}), "auto_reverted": {"reason": error, "at": now.isoformat()}}
+            req = _request(_Snapshot.of(row))
+        log.warning("reverted active action %s: refused by current settings (%s)", action_id, error)
+        try:
+            outcome = await get_executor(req.action_type).revert(req)
+            final = await _set_result(action_id, revert=outcome)
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, ExecutorError) else type(exc).__name__
+            log.warning("revert of action %s (refused by settings) failed: %s", action_id, message)
+            final = await _set_result(action_id, revert_error=message)
+        revoked += 1
+        await bus.publish("action.updated", final)
+    return revoked
+
+
 # ---------------------------------------------------------------- queries
 
 
@@ -647,3 +711,12 @@ async def _fail_interrupted_actions() -> None:
             )
     if rows:
         log.warning("marked %d interrupted response actions as failed", len(rows))
+
+
+@on_startup
+async def _revoke_on_startup() -> None:
+    """Safety settings usually change with a restart: apply them to active actions right away (audit #64)."""
+    try:
+        await revoke_disallowed_actions()
+    except Exception:
+        log.exception("could not re-check active actions against the current settings")

@@ -87,6 +87,10 @@ class GatePolicy(BaseModel):
     # HTML snippet (e.g. hidden AI-canary instruction) the gate appends before </body> of upstream HTML
     # responses. None = disabled.
     html_injection: str | None = None
+    # Audit #64: {"blocked" | "rate_limited" | "tarpit" | "deceive": {entry: expires_at}}. Entries without an
+    # expiry are absent. The Gate lifts an entry at (its receive time + expires_at - generated_at) even while it
+    # cannot reach the server (fail-static keeps the last policy, but never past these expiries).
+    entry_expires_at: dict[str, dict[str, datetime]] = Field(default_factory=dict)
 
 
 class DeceptionKind(StrEnum):

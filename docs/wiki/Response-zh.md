@@ -64,6 +64,7 @@ Gate 按“令牌 + 来源地址”区分，因此位于同一反向代理之后
    - 与 **受保护对象**（`response.protected_cidrs`。默认 `127.0.0.0/8`、`::1/128`）重叠的对象
    - 服务器自身的 IP 地址（`response.protect_server_addresses`，默认 ON）
 4. 在执行之前，会按当前设置 **再次校验**（例如在提议之后新增了受保护对象时，状态会变为 `failed`）。
+5. **生效中的处置也会按当前设置重新校验**。落在之后新增到 `response.protected_cidrs` 等范围内的处置，会在 Gate 下次获取策略时从下发内容中移除，并在 30 秒内（或重启时）变为 `reverted`（审计日志记录 `response.auto_revert`）。
 
 > 💡 强烈建议事先将管理终端、监控系统、上游负载均衡器的 IP 添加到 `response.protected_cidrs` 中。
 

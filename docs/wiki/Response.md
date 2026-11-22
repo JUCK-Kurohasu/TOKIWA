@@ -64,6 +64,7 @@ Gate は「トークン + 送信元アドレス」で区別するため、リバ
    - **保護対象**（`response.protected_cidrs`。既定 `127.0.0.0/8`、`::1/128`）と重なるもの
    - サーバー自身の IP アドレス（`response.protect_server_addresses`、既定 ON）
 4. 実行の直前に、現在の設定で **もう一度検証** します（提案後に保護対象を追加した場合などは `failed` になります）。
+5. **実行中の対処も、現在の設定で検証し直します**。後から `response.protected_cidrs` などに追加した範囲に当たる対処は、次に Gate がポリシーを取得した時点で配信から外れ、30 秒以内（または再起動時）に `reverted`（取り消し済み）になります（監査ログに `response.auto_revert`）。
 
 > 💡 管理端末・監視システム・上流のロードバランサの IP は `response.protected_cidrs` に追加しておくことを強く勧めます。
 

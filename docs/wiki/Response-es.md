@@ -64,6 +64,7 @@ Los Gates se distinguen por «token + dirección de origen», así que varios Ga
    - Los que se solapan con los **objetivos protegidos** (`response.protected_cidrs`; por defecto `127.0.0.0/8`, `::1/128`)
    - Las direcciones IP del propio servidor (`response.protect_server_addresses`, activado por defecto)
 4. Justo antes de la ejecución se **vuelve a validar** con la configuración vigente (por ejemplo, si se añade un objetivo protegido después de la propuesta, la acción pasa a `failed`).
+5. **Las acciones activas también se vuelven a comprobar con la configuración vigente.** Una acción que cae en un rango añadido después a `response.protected_cidrs` (u opciones similares) se retira de la política en la siguiente consulta del Gate y pasa a `reverted` en 30 segundos (o al reiniciar), con `response.auto_revert` en el registro de auditoría.
 
 > 💡 Se recomienda encarecidamente añadir a `response.protected_cidrs` las IP de los equipos de administración, de los sistemas de monitorización y de los balanceadores de carga ascendentes.
 

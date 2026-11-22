@@ -6,6 +6,9 @@ Fail-open / fail-static semantics (deliberate):
 - When the server is unreachable or returns garbage, the *last known* policy stays in force. Blocks are TTL'd
   server-side, so a stale policy can only be as old as the outage; dropping it would silently unblock an
   active attacker the moment they DoS the TOKIWA server.
+- ...but never past each entry's own expiry (``GatePolicy.entry_expires_at``, audit #64): an entry is lifted
+  locally at ``receive time + (expires_at - generated_at)`` on the monotonic clock, so neither an outage nor a
+  skewed Gate clock keeps a block alive longer than the server would.
 - A policy is swapped only when ``version`` changes, so an unchanged policy keeps its compiled tables (and the
   rate-limiter state keyed by client IP is never reset by a refresh).
 """
@@ -15,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -167,6 +172,20 @@ class CompiledPolicy:
         }
 
 
+def _without(policy: GatePolicy, expired: dict[str, set[str]]) -> GatePolicy:
+    """``policy`` minus the expired entries (same version: it is still the server's policy, trimmed)."""
+    return policy.model_copy(
+        update={
+            "blocked": [x for x in policy.blocked if x not in expired.get("blocked", set())],
+            "deceive": [x for x in policy.deceive if x not in expired.get("deceive", set())],
+            "rate_limited": {
+                k: v for k, v in policy.rate_limited.items() if k not in expired.get("rate_limited", set())
+            },
+            "tarpit": {k: v for k, v in policy.tarpit.items() if k not in expired.get("tarpit", set())},
+        }
+    )
+
+
 class PolicyManager:
     """Pulls ``GET /api/v1/gate/policy`` every ``refresh_seconds`` and swaps the compiled policy on change."""
 
@@ -178,6 +197,7 @@ class PolicyManager:
         *,
         refresh_seconds: float = 5.0,
         timeout: float = 5.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client
         self._url = server_url.rstrip("/") + POLICY_PATH
@@ -185,6 +205,12 @@ class PolicyManager:
         self.refresh_seconds = max(0.5, refresh_seconds)
         self._timeout = timeout
         self._current = CompiledPolicy.empty()
+        self._clock = clock
+        # The installed policy (already trimmed of expired entries) and the pending local deadlines, soonest
+        # first: (monotonic deadline, section, entry).
+        self._source: GatePolicy | None = None
+        self._deadlines: list[tuple[float, str, str]] = []
+        self.expired_locally = 0
         self.fetches = 0
         self.errors = 0
         self.swaps = 0
@@ -194,17 +220,45 @@ class PolicyManager:
 
     @property
     def current(self) -> CompiledPolicy:
+        if self._deadlines and self._clock() >= self._deadlines[0][0]:
+            self._expire_entries()
         return self._current
 
     def apply(self, policy: GatePolicy) -> bool:
         """Install ``policy`` if its version differs from the current one. Returns True when swapped."""
         if policy.version == self._current.version:
             return False
+        received = self._clock()
+        deadlines: list[tuple[float, str, str]] = []
+        for section, entries in policy.entry_expires_at.items():
+            for key, expires_at in entries.items():
+                remaining = (expires_at - policy.generated_at).total_seconds()
+                deadlines.append((received + remaining, section, key))
+        deadlines.sort()
+        self._source = policy
+        self._deadlines = deadlines
         compiled = CompiledPolicy.compile(policy)
         self._current = compiled  # single reference assignment: requests see either old or new, never a mix
         self.swaps += 1
         log.info("gate policy updated: %s", compiled.summary())
+        if deadlines and received >= deadlines[0][0]:
+            self._expire_entries()  # already past (a policy generated long ago)
         return True
+
+    def _expire_entries(self) -> None:
+        """Drop entries whose deadline passed and recompile (normally the server's next policy does this)."""
+        now = self._clock()
+        expired: dict[str, set[str]] = {}
+        while self._deadlines and self._deadlines[0][0] <= now:
+            _, section, key = self._deadlines.pop(0)
+            expired.setdefault(section, set()).add(key)
+        if self._source is None or not expired:
+            return
+        self._source = _without(self._source, expired)
+        self._current = CompiledPolicy.compile(self._source)
+        count = sum(len(v) for v in expired.values())
+        self.expired_locally += count
+        log.info("gate policy %s: %d entries reached their expiry locally", self._source.version, count)
 
     async def refresh(self) -> bool:
         """Fetch once. Never raises (fail-open); returns True when a new policy was installed."""
@@ -265,6 +319,7 @@ class PolicyManager:
             "fetches": self.fetches,
             "errors": self.errors,
             "swaps": self.swaps,
+            "expired_locally": self.expired_locally,
             "last_error": self.last_error,
             "last_success": self.last_success.isoformat() if self.last_success else None,
         }
