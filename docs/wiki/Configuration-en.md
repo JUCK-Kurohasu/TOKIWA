@@ -84,6 +84,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | `session_idle_timeout_seconds` | 1800 | After this long without access, activity is treated as a new session |
 | `ai_agent_threshold` | 0.7 | AI score threshold for classifying a session as an AI agent |
 | `max_future_skew_seconds` | 120 | How far a sensor clock may run ahead. Events dated further in the future get the receive time instead, the tag `clock_skew` and the label `ingest.original_timestamp` (the original time); the audit entry `ingest.clock_skew` is written at most once per token every 10 minutes. Past timestamps (late or re-sent events) are kept |
+| `max_live_sessions` | 4096 | Maximum number of sessions kept in memory. When full, one-request low-score sessions are evicted first and sessions with AI, canary or decoy evidence last. Heavy eviction logs a WARNING (a flood of one-request clients can reset session features); raise the limit if it appears under normal load |
 | `web.*` | — | Thresholds for web rate-based detections (bursts of errors, login failures, floods, and so on) |
 
 ### Triage and correlation (`triage.*`)
