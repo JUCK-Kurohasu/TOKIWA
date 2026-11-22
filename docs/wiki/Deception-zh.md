@@ -82,7 +82,8 @@
 | `enabled` | true | 整个欺骗防御功能 |
 | `ai_canaries` | true | AI 金丝雀 |
 | `decoy_paths` | 上述 5 个路径 | 默认创建的诱饵 |
-| `html_injection` | true | 在要保护的应用的 HTML 响应中插入隐藏指令（`</body>` 之前） |
+| `html_injection` | true | 在要保护的应用的 HTML 响应中插入隐藏指令 |
+| `html_injection_positions` | `[body_start, body_end]` | 插入位置：`body_start`（`<body>` 之后）、`body_end`（`</body>` 之前）、`head`（`<head>` 之后，仅 HTML 注释）。AI 工具往往只读取页面开头，因此默认也会插入到靠前的位置 |
 | `canary_header` | `X-Debug-Auth` | 隐藏指令要求发送的请求头名称。如果将其加入 `llm.redaction.sensitive_headers`，将无法检测 |
 | `canary_language` | `both` | 隐藏指令的语言（`ja` / `en` / `both`） |
 | `downgrade_browser_induced` | true | 将浏览器从其他网站或作为页面部件发送的触发视为“诱发”（low，不断定为 AI） |

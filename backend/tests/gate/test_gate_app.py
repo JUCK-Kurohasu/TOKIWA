@@ -346,6 +346,16 @@ async def test_html_injection_plain(
     assert event["http"]["headers"]["accept-encoding"] == "gzip, deflate, br, zstd"  # original captured
 
 
+async def test_html_injection_positions_from_policy(make_gate: GateFactory, fake_server: FakeServer) -> None:
+    """deception #41: the server says where; the snippet also lands right after <body> (read by size-capped tools)."""
+    fake_server.set_policy("v1", html_injection=CANARY, html_injection_positions=["body_start", "body_end"])
+    app, _ = await make_gate()
+    async with client_for(app) as c:
+        r = await c.get("/gzip-html")
+    assert r.text == HTML.replace("<body>", "<body>" + CANARY).replace("</body>", CANARY + "</body>")
+    assert r.headers["content-length"] == str(len(r.content))
+
+
 @pytest.mark.parametrize("path", ["/gzip-html", "/deflate-html"])
 async def test_html_injection_into_compressed(
     make_gate: GateFactory, fake_server: FakeServer, path: str

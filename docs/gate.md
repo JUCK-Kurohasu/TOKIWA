@@ -53,7 +53,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
    `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る
 7. `deceive` に一致する IP → 全リクエストをデコイで応答。ルール不一致なら汎用 404 デコイ（`gate:decoy_generic`。
    DECEPTION イベントは出さない＝ノイズ回避）
-8. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の最後の `</body>` 直前に挿入
+8. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
 
 ゲート生成の応答（403/429/デコイ）には直近のアップストリームの `Server` ヘッダを付け、デコイが浮かないようにする。
 

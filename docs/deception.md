@@ -144,8 +144,15 @@ DB が初期化されていない文脈（他モジュールの単体テスト�
 - `GatePolicy.decoys`: 完全一致ルートを優先し、次に最長の前方一致（`*` 終端）。デコイ応答は上流へ転送しない。
 - デコイ応答は **1 リクエストにつき 1 イベント**（`kind=deception`, `deception.asset_id` 付き, `http` も埋める）。
   HTTP イベントと二重に送るとトリップ数が 2 回加算される。
-- `html_injection` は `text/html` 応答の `</body>` 直前に挿入（ON/OFF は `deception.ai_canaries` と
-  `deception.html_injection`）。
+- `html_injection` は `text/html` 応答に挿入（ON/OFF は `deception.ai_canaries` と `deception.html_injection`）。
+  位置は `GatePolicy.html_injection_positions`（`deception.html_injection_positions`、監査 #41）: `body_start`
+  （最初の本物の `<body …>` の直後。`<script>`/`<style>`/`<title>`/`<textarea>`/`<template>`/コメント内の文字列と、
+  引用符内の `>` は飛ばす）、`body_end`（最後の `</body>` の直前。#41 以前はこれだけ）、`head`（`<head …>` の直後に
+  スニペット先頭の HTML コメントだけ。`<div>` を入れると `<head>` がそこで閉じるため）。既定は `body_start` + `body_end`。
+  理由: AI エージェントのツールはページの先頭 N 文字だけを LLM に渡すことが多く（ARTEX は 30,000 文字）、大きいページの
+  末尾だけでは読まれない。`<head>` が巨大（インライン CSS/JS で数十 KB）なページでは `body_start` も範囲外になり得るので
+  `head` を足す。位置フィールドが無いポリシー（古いサーバー）は `body_end` のみ、古い Gate は新フィールドを無視する
+  （`body_end` のみ）。
 - `deceive` 対象 IP は全リクエストをデコイへ（Mirage の迷路・偽エンドポイントが受け皿になる）。
 
 ## 7. API（`/api/v1/deception`）
@@ -171,6 +178,7 @@ ai_canary_followed, timestamp}`。他モジュール向け関数: `service.creat
 | `deception.enabled` | true | 全体スイッチ（OFF で配信・検知とも停止） |
 | `deception.ai_canaries` | true | AI カナリア（ページ・挿入・デコイ内注記・着地ルート） |
 | `deception.html_injection` | true | 上流 HTML への隠し指示挿入だけを止める |
+| `deception.html_injection_positions` | `[body_start, body_end]` | 挿入位置（`head` / `body_start` / `body_end`、§6） |
 | `deception.canary_header` | `X-Debug-Auth` | 指示で送らせるヘッダ。秘匿ヘッダ一覧に入れないこと |
 | `deception.canary_language` | `both` | `ja` / `en` / `both`（指示文・迷路） |
 | `deception.downgrade_browser_induced` | true | ブラウザのクロスサイト/サブリソース要求を `induced`（low・AI 断定なし）にする。false で従来どおり（経路だけの `passive` は常に有効） |

@@ -62,8 +62,8 @@ DEFAULT_CANARIES: list[tuple[str, str | None, bool, str]] = [
         "AI canary: hidden HTML instruction",
         None,
         True,
-        "Injected before </body> of upstream HTML responses (GatePolicy.html_injection). "
-        "上流 HTML の </body> 直前に挿入される隠し指示。",
+        "Injected into upstream HTML responses (GatePolicy.html_injection; positions: "
+        "deception.html_injection_positions). 上流 HTML に挿入される隠し指示（既定 <body> 直後と </body> 直前）。",
     ),
     (
         "AI canary: internal OpenAPI",
@@ -184,7 +184,10 @@ def cached_index() -> DeceptionIndex | None:
 
     For synchronous callers such as the sessionizer (:func:`tokiwa.deception.provenance.decisive_canary_hit`).
     """
-    return _cache.index if _cache is not None else None
+    c = _cache
+    if c is None or c.engine is not _db_engine() or c.settings is not get_settings():
+        return None  # built for another database / settings object (tests, reconfiguration)
+    return c.index
 
 
 async def gate_decoys() -> tuple[list[DecoyRoute], str | None]:

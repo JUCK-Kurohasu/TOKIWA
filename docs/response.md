@@ -109,7 +109,7 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
   期限切れジョブ実行前でも期限を過ぎたものは含めない。
 - `blocked` / `deceive`: アドレスファミリごとに `ipaddress.collapse_addresses`（重複・内包・隣接を統合）、v4 → v6 の昇順。
 - `rate_limited`: 同一キーは最小 rpm（厳しい方）。`tarpit`: 同一キーは最大 ms（上限 30000）。
-- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。例外時はデコイ無しで配信（遮断は止めない）。
+- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。`html_injection_positions`: `deception.policy.html_injection_positions()`（挿入があるときだけ。version に含む）。例外時はデコイ無しで配信（遮断は止めない）。
 - `version`: 上記内容（`generated_at` を除く）の正規化 JSON の SHA-256。内容が同じなら同じ値。
 - `ETag: "<version>"` を返す。`If-None-Match` が一致すれば 304（本文なし）。Gate は使わなくてもよい。
 

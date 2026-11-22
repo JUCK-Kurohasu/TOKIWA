@@ -83,7 +83,8 @@ También se pueden añadir trampas según el incidente mediante la acción de re
 | `enabled` | true | Toda la función de engaño |
 | `ai_canaries` | true | Canarios de IA |
 | `decoy_paths` | Las 5 rutas anteriores | Señuelos creados por defecto |
-| `html_injection` | true | Inserta instrucciones ocultas en las respuestas HTML de la aplicación protegida (justo antes de `</body>`) |
+| `html_injection` | true | Inserta instrucciones ocultas en las respuestas HTML de la aplicación protegida |
+| `html_injection_positions` | `[body_start, body_end]` | Dónde insertar: `body_start` (justo después de `<body>`), `body_end` (justo antes de `</body>`), `head` (solo un comentario HTML, justo después de `<head>`). Las herramientas de IA suelen leer solo el principio de la página, así que por defecto también se inserta cerca del inicio |
 | `canary_header` | `X-Debug-Auth` | Nombre del encabezado que las instrucciones ocultas piden enviar. Si se incluye en `llm.redaction.sensitive_headers`, deja de poder detectarse |
 | `canary_language` | `both` | Idioma de las instrucciones ocultas (`ja` / `en` / `both`) |
 | `downgrade_browser_induced` | true | Tratar como «inducidos» (low, sin tomarse como prueba de una IA) los disparos que el navegador envió desde otro sitio o como parte de una página |

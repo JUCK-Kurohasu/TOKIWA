@@ -94,6 +94,7 @@ def policy_version(
     deceive: list[str],
     decoys: list[DecoyRoute],
     html_injection: str | None,
+    html_injection_positions: list[str] | None = None,
 ) -> str:
     doc = {
         "blocked": blocked,
@@ -103,6 +104,8 @@ def policy_version(
         "decoys": [d.model_dump(mode="json") for d in decoys],
         "html_injection": html_injection,
     }
+    if html_injection_positions is not None:  # deception #41: a position change must reach running gates
+        doc["html_injection_positions"] = html_injection_positions
     return sha256_hex(json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 
 
@@ -132,8 +135,9 @@ async def build_gate_policy(now: datetime | None = None) -> GatePolicy:
         # A deception bug must not take enforcement down: serve actions without decoys.
         log.exception("build_gate_decoys failed; serving policy without decoys")
         decoys, html_injection = [], None
+    positions = deception_policy.html_injection_positions() if html_injection else None
     return GatePolicy(
-        version=policy_version(blocked, rate_limited, tarpit, deceive, decoys, html_injection),
+        version=policy_version(blocked, rate_limited, tarpit, deceive, decoys, html_injection, positions),
         generated_at=now,
         blocked=blocked,
         rate_limited=rate_limited,
@@ -141,4 +145,5 @@ async def build_gate_policy(now: datetime | None = None) -> GatePolicy:
         deceive=deceive,
         decoys=decoys,
         html_injection=html_injection,
+        html_injection_positions=positions,
     )

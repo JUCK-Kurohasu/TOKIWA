@@ -83,7 +83,8 @@ Mirage の中心となる仕組みです。デコイの中に「**AI エージ�
 | `enabled` | true | デセプション全体 |
 | `ai_canaries` | true | AI カナリア |
 | `decoy_paths` | 上記 5 パス | 既定で作るデコイ |
-| `html_injection` | true | 守りたいアプリの HTML 応答に隠し指示を挿入する（`</body>` の直前） |
+| `html_injection` | true | 守りたいアプリの HTML 応答に隠し指示を挿入する |
+| `html_injection_positions` | `[body_start, body_end]` | 挿入する位置。`body_start`（`<body>` の直後）、`body_end`（`</body>` の直前）、`head`（`<head>` の直後に HTML コメントだけ）。AI のツールはページの先頭だけを読むことが多いため、既定で先頭付近にも入れる |
 | `canary_header` | `X-Debug-Auth` | 隠し指示が送らせるヘッダ名。`llm.redaction.sensitive_headers` に入れると検知できなくなる |
 | `canary_language` | `both` | 隠し指示の言語（`ja` / `en` / `both`） |
 | `downgrade_browser_induced` | true | ブラウザが別サイトから・部品として送ったトリップを「誘発」（low、AI と断定しない）として扱う |

@@ -84,9 +84,13 @@ class GatePolicy(BaseModel):
     tarpit: dict[str, int] = Field(default_factory=dict)  # ip/cidr -> added latency in ms
     deceive: list[str] = Field(default_factory=list)  # ip/cidr -> every request served from Mirage decoys
     decoys: list[DecoyRoute] = Field(default_factory=list)
-    # HTML snippet (e.g. hidden AI-canary instruction) the gate appends before </body> of upstream HTML
-    # responses. None = disabled.
+    # HTML snippet (e.g. hidden AI-canary instruction) the gate inserts into upstream HTML responses.
+    # None = disabled.
     html_injection: str | None = None
+    # Where: "head" (the snippet's leading HTML comment, after <head>), "body_start" (after <body>), "body_end"
+    # (before the last </body>). None = ["body_end"] (servers before audit #41). Plain strings so a gate ignores
+    # positions it does not know instead of rejecting the whole policy.
+    html_injection_positions: list[str] | None = None
 
 
 class DeceptionKind(StrEnum):

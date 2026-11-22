@@ -182,14 +182,24 @@ def _deception_event(ip: str, headers: dict[str, str], path: str) -> Event:
     )
 
 
-def test_sessionizer_counts_only_deliberate_canary_hits(settings) -> None:  # type: ignore[no-untyped-def]
+def test_sessionizer_counts_only_deliberate_canary_hits(
+    make_asset: MakeAsset, monkeypatch: pytest.MonkeyPatch, settings
+) -> None:  # type: ignore[no-untyped-def]
+    from tokiwa.deception import service
+
+    canary = make_asset(DeceptionKind.AI_CANARY)
+    v = canary.token
+    assert v is not None
+    monkeypatch.setattr(service, "cached_index", lambda: _index([canary]))
     tr = SessionTracker()
-    img = _deception_event("198.51.100.7", IMG_CROSS_SITE, "/api/internal/dbg_x/")
+    img = _deception_event("198.51.100.7", IMG_CROSS_SITE, f"/api/internal/{v}/")
     page = _deception_event("198.51.100.8", {"user-agent": "crawler/1"}, "/api/internal/openapi.json")
     follow = _deception_event(
-        "203.0.113.50", {"user-agent": "python-httpx/0.28", "x-debug-auth": "dbg_x"}, "/api/internal/dbg_x/"
+        "203.0.113.50", {"user-agent": "python-httpx/0.28", "x-debug-auth": v}, f"/api/internal/{v}/"
     )
+    wrong = _deception_event("203.0.113.51", {"user-agent": "curl/8", "x-debug-auth": "dbg_nope"}, "/x")
     assert not decisive_canary_hit(img) and not decisive_canary_hit(page) and decisive_canary_hit(follow)
+    assert not decisive_canary_hit(wrong)  # a value that is not a canary decides nothing
     http = [
         Event(
             kind=EventKind.HTTP,

@@ -83,7 +83,8 @@ You can also add traps in response to an incident with the `deploy_canary` respo
 | `enabled` | true | Deception as a whole |
 | `ai_canaries` | true | AI canaries |
 | `decoy_paths` | The 5 paths above | Decoys created by default |
-| `html_injection` | true | Inject hidden instructions into the HTML responses of the app you want to protect (right before `</body>`) |
+| `html_injection` | true | Inject hidden instructions into the HTML responses of the app you want to protect |
+| `html_injection_positions` | `[body_start, body_end]` | Where to insert: `body_start` (right after `<body>`), `body_end` (right before `</body>`), `head` (only an HTML comment, right after `<head>`). AI tools often read only the beginning of a page, so by default it also goes near the top |
 | `canary_header` | `X-Debug-Auth` | Header name the hidden instructions ask the client to send. If you add it to `llm.redaction.sensitive_headers`, it can no longer be detected |
 | `canary_language` | `both` | Language of the hidden instructions (`ja` / `en` / `both`) |
 | `downgrade_browser_induced` | true | Treat trips that the browser sent from another site or as a page part as "induced" (low, not taken as proof of an AI) |
