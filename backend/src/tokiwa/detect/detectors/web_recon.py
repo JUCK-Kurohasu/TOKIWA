@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from tokiwa.aidetect.ua_catalog import scanner_alert_rules
 from tokiwa.detect.base import Detector, register_detector
 from tokiwa.detect.context import DetectionContext
 from tokiwa.detect.web_common import (
@@ -192,48 +193,24 @@ class SensitiveFileProbeDetector(WebSignatureDetector):
 # web.scanner_ua
 # ---------------------------------------------------------------------------------------------------------
 
-# (group name, UA regex, severity). Exploitation tools are HIGH, scanners MEDIUM, research crawlers LOW.
-_TOOLS: tuple[tuple[str, str, Severity], ...] = (
-    ("sqlmap", r"\bsqlmap\b", _H),
-    ("commix", r"\bcommix\b", _H),
-    ("havij", r"\bhavij\b", _H),
-    ("xsstrike", r"\bxsstrike\b", _H),
-    ("hydra", r"\bhydra\b", _H),
-    ("nikto", r"\bnikto\b", _M),
-    ("nuclei", r"\bnuclei\b|projectdiscovery", _M),
-    ("ffuf", r"\bffuf\b|fuzz faster u fool", _M),
-    ("gobuster", r"\bgobuster\b", _M),
-    ("dirbuster", r"\bdirbuster\b", _M),
-    ("dirsearch", r"\bdirsearch\b", _M),
-    ("feroxbuster", r"\bferoxbuster\b", _M),
-    ("wfuzz", r"\bwfuzz\b", _M),
-    ("wpscan", r"\bwpscan\b", _M),
-    ("joomscan", r"\bjoomscan\b", _M),
-    ("masscan", r"\bmasscan\b", _M),
-    ("zgrab", r"\bzgrab", _M),
-    ("nmap", r"nmap scripting engine|\bnmap\b", _M),
-    ("acunetix", r"\bacunetix\b", _M),
-    ("netsparker", r"\bnetsparker\b|\binvicti\b", _M),
-    ("w3af", r"\bw3af\b", _M),
-    ("arachni", r"\barachni\b", _M),
-    ("skipfish", r"\bskipfish\b", _M),
-    ("openvas", r"\bopenvas\b", _M),
-    ("nessus", r"\bnessus\b", _M),
-    ("qualys", r"\bqualys", _M),
-    ("whatweb", r"\bwhatweb\b", _M),
-    ("owasp_zap", r"\bzaproxy\b|\bowasp[ _-]?zap\b", _M),
-    ("appscan", r"\bappscan\b", _M),
-    ("webinspect", r"\bwebinspect\b", _M),
-    ("paros", r"\bparos\b", _M),
-    ("jaeles", r"\bjaeles\b", _M),
-    ("fimap", r"\bfimap\b", _M),
-    ("morfeus", r"\bmorfeus\b", _M),
-    ("zmeu", r"\bzmeu\b", _M),
-    ("jorgee", r"\bjorgee\b", _M),
-    ("censys", r"\bcensysinspect\b", _L),
+# (alert tool name, UA regex, severity), generated from the UA catalog shared with the AI attribution
+# (tokiwa.aidetect.ua_catalog, audit #124): edit the catalog, not this file. Exploitation tools are HIGH, scanners
+# MEDIUM, research crawlers LOW. One case-insensitive alternation; group ``t<i>`` is entry i (names may contain "-").
+_TOOLS: tuple[tuple[str, str, Severity], ...] = tuple(
+    (r.alert_tool, r.pattern, r.alert) for r in scanner_alert_rules() if r.alert is not None
 )
-_TOOL_RE = rx("|".join(f"(?P<{name}>{pat})" for name, pat, _ in _TOOLS), "scanner.tools")
+_TOOL_RE = rx("(?i)" + "|".join(f"(?P<t{i}>{pat})" for i, (_, pat, _) in enumerate(_TOOLS)), "scanner.tools")
+_TOOL_NAMES = tuple(name for name, _, _ in _TOOLS)
 _TOOL_SEVERITY = {name: sev for name, _, sev in _TOOLS}
+
+
+def match_scanner_ua(user_agent: str) -> tuple[str, int, int] | None:
+    """(alert tool name, match start, match end) of the leftmost offensive-tool token in ``user_agent``."""
+    m = _TOOL_RE.search(user_agent)
+    if m is None or not m.lastgroup:
+        return None
+    return _TOOL_NAMES[int(m.lastgroup[1:])], m.start(), m.end()
+
 
 # TODO(verify): scanner marker header names below are from vendor docs/community lists, not re-checked.
 _MARKER_HEADERS = {
@@ -292,12 +269,10 @@ class ScannerUaDetector(Detector):
             return []
         found: list[tuple[Severity, str, str, str]] = []  # (severity, tool, evidence kind, fragment)
         ua = view.headers.get("user-agent", "")
-        if ua:
-            m = _TOOL_RE.search(ua.lower())
-            if m and m.lastgroup:
-                found.append(
-                    (_TOOL_SEVERITY[m.lastgroup], m.lastgroup, "user_agent", snippet(ua, m.start(), m.end()))
-                )
+        hit = match_scanner_ua(ua) if ua else None
+        if hit is not None:
+            tool_name, start, end = hit
+            found.append((_TOOL_SEVERITY[tool_name], tool_name, "user_agent", snippet(ua, start, end)))
         for header, tool in _MARKER_HEADERS.items():
             if header in view.headers:
                 found.append((_M, tool, f"header:{header}", clean_label(view.headers[header], 200)))

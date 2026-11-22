@@ -18,7 +18,11 @@ claim any ``sensor_id``; the wall-clock cap is what bounds a forger). Sessions o
 until that sensor sends again, LRU eviction, or a sensor clock slot is recycled (then the global mark applies).
 
 Bounds (memory is O(max_sessions * max_obs) small records):
-- at most ``max_sessions`` live sessions (LRU eviction; dirty evicted sessions are kept until the next flush);
+- at most ``max_sessions`` live sessions (``detection.max_live_sessions``; dirty evicted sessions are kept until the
+  next flush). Eviction is *not* plain LRU (audit #88): a flood of one-request clients from fresh IPs / UAs could
+  otherwise push a quiet AI agent's session out and reset its features. Among the least recently used sessions,
+  one-request low-score sessions go first; sessions with AI / canary / decoy evidence get a second chance (moved to
+  the back) and are evicted only when a bounded scan finds nothing cheaper. See :meth:`SessionTracker._pick_victim`;
 - at most ``max_obs`` request observations per session (sliding window — features describe recent behaviour,
   counters such as ``request_count`` are whole-session);
 - at most ``max_endpoints`` endpoints remembered for mutation analysis, 10k path hashes for ``unique_paths``.
@@ -41,7 +45,7 @@ from typing import Any
 
 from tokiwa.aidetect.features import RequestObs, SessionExtras, annotate, compute_features, observe_http
 from tokiwa.aidetect.fingerprints import ClientFamily, FingerprintInfo, fingerprint_info
-from tokiwa.aidetect.scoring import DEFAULT_AI_THRESHOLD, score_features
+from tokiwa.aidetect.scoring import DEFAULT_AI_THRESHOLD, MIN_REQUESTS_FOR_VERDICT, score_features
 from tokiwa.schemas.common import ActorType
 from tokiwa.schemas.events import Event, EventKind
 from tokiwa.util import new_id
@@ -55,9 +59,12 @@ LLM_APP_FINGERPRINT = "llm_app"
 # How far event time may move the tracker's reference clock past the wall clock
 # (``detection.max_future_skew_seconds``).
 DEFAULT_MAX_FUTURE_SKEW_S = 120.0
-MAX_SENSOR_CLOCKS = (
-    256  # per-sensor high-water marks kept (LRU); sessions of a recycled sensor use the global mark
-)
+# Per-sensor high-water marks kept (LRU); sessions of a recycled sensor use the global mark.
+MAX_SENSOR_CLOCKS = 256
+# Eviction (audit #88): candidates examined per eviction (bounded work per new session under a flood) and the
+# score below which a one-request session is evicted without looking further.
+EVICT_SCAN = 128
+EVICT_CHEAP_MAX_SCORE = 0.35
 
 
 @dataclass(slots=True)
@@ -156,7 +163,15 @@ class SessionTracker:
         self.max_event_ts = 0.0
         self._sensor_ts: OrderedDict[str, float] = OrderedDict()
         self.significant_change = False
-        self.stats = {"created": 0, "evicted": 0, "expired": 0, "rescored": 0, "future_capped": 0}
+        self.stats = {
+            "created": 0,
+            "evicted": 0,
+            # evictions that had to drop a session with >= MIN_REQUESTS_FOR_VERDICT requests or AI/decoy evidence
+            "evicted_valuable": 0,
+            "expired": 0,
+            "rescored": 0,
+            "future_capped": 0,
+        }
 
     # ------------------------------------------------------------------ lookup
     def __len__(self) -> int:
@@ -190,10 +205,62 @@ class SessionTracker:
         self._by_ip.setdefault(ip, set()).add(key)
         self.stats["created"] += 1
         while len(self._by_key) > self.max_sessions:
-            _, old = next(iter(self._by_key.items()))
-            self._finalize(old)
+            # ``s`` has no requests counted yet (the caller observes the event after creation): never pick it.
+            victim = self._pick_victim(exclude=s)
+            if victim is None:
+                break
+            if self._protected(victim) or victim.request_count >= MIN_REQUESTS_FOR_VERDICT:
+                self.stats["evicted_valuable"] += 1
+            self._finalize(victim)
             self.stats["evicted"] += 1
         return s
+
+    def _protected(self, s: LiveSession) -> bool:
+        """Sessions carrying evidence that is expensive to rebuild: AI verdict / score, canary or decoy contact."""
+        return (
+            s.classification == ActorType.AI_AGENT
+            or s.ai_score >= self.threshold
+            or s.extras.canary_hits > 0
+            or s.extras.decoy_hits > 0
+        )
+
+    def _pick_victim(self, exclude: LiveSession) -> LiveSession | None:
+        """Choose a session to evict, oldest first but cheapest first (audit #88).
+
+        Walks the LRU order from the oldest entry, examining at most ``EVICT_SCAN`` sessions:
+        - the first one-request session with a low score is evicted at once (plain LRU while the oldest is cheap);
+        - protected sessions (:meth:`_protected`) get a second chance: they are moved to the back of the LRU, so a
+          flood of fresh one-request clients cannot push a quiet AI agent out (it still ends by idle expiry);
+        - otherwise the least valuable examined session goes: fewest requests (capped at the verdict minimum),
+          then lowest score, then oldest. Only when every examined session is protected is one of them evicted.
+        """
+        best: LiveSession | None = None
+        best_rank: tuple[int, float] | None = None
+        fallback: LiveSession | None = None
+        second_chance: list[LiveSession] = []
+        examined = 0
+        for cand in self._by_key.values():
+            if examined >= EVICT_SCAN:
+                break
+            if cand is exclude:
+                continue
+            examined += 1
+            if self._protected(cand):
+                if fallback is None or cand.ai_score < fallback.ai_score:
+                    fallback = cand
+                second_chance.append(cand)
+                continue
+            if cand.request_count <= 1 and cand.ai_score < EVICT_CHEAP_MAX_SCORE:
+                best = cand
+                break
+            rank = (min(cand.request_count, MIN_REQUESTS_FOR_VERDICT), cand.ai_score)
+            if best_rank is None or rank < best_rank:
+                best, best_rank = cand, rank
+        victim = best or fallback
+        for cand in second_chance:
+            if cand is not victim:
+                self._by_key.move_to_end(cand.key)
+        return victim
 
     def _finalize(self, s: LiveSession) -> None:
         if s.dirty or s.stale:

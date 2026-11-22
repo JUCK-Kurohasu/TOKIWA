@@ -202,6 +202,9 @@ class DetectionSettings(BaseModel):
     # ingest time (tag ``clock_skew``, original kept in label ``ingest.original_timestamp``), and the session
     # tracker never lets event time move its clock further ahead of the wall clock (audit #19).
     max_future_skew_seconds: float = Field(default=120.0, ge=0)
+    # Live actor sessions kept in memory (the audit measured ~44 MB peak for 4096 one-request sessions). When full,
+    # one-request low-score sessions are evicted first and sessions with AI / canary / decoy evidence last (#88).
+    max_live_sessions: int = Field(default=4096, ge=16)
     web: WebDetectionSettings = Field(default_factory=WebDetectionSettings)
 
 

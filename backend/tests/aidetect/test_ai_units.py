@@ -37,7 +37,8 @@ from . import synth
             ClientFamily.HEADLESS_BROWSER,
         ),
         ("", ClientFamily.EMPTY),
-        ("Mozilla/5.0 (spa-api-recon)", ClientFamily.UNKNOWN),
+        ("Mozilla/5.0 (custom-recon)", ClientFamily.UNKNOWN),
+        ("Mozilla/5.0 (spa-api-recon)", ClientFamily.AI_AGENT),  # ARTEX api-recon skill (audit #85)
     ],
 )
 def test_classify_user_agent(ua: str, family: ClientFamily) -> None:

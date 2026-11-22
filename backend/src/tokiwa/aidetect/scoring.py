@@ -86,6 +86,18 @@ HOSTILE_WEIGHTS: dict[str, float] = {
     "browser_consistent": -0.8,
 }
 
+# Signal strength of ``ai_declared_client`` per declared tool (``client_tool``; default 1.0 for the AI_AGENT family,
+# 0.5 for AI_CRAWLER). Declared UAs are spoofable and serve attribution first; these values temper the signal for
+# tools whose UA says little about autonomy. Hand-set priors, not measured (audit #115 / #85).
+DECLARED_CLIENT_STRENGTH: dict[str, float] = {
+    "mcp-fetch-autonomous": 1.0,  # model-initiated fetch through the MCP reference fetch server
+    "mcp-fetch": 0.8,  # same server, mode not recognised
+    "mcp-fetch-user-specified": 0.6,  # a human named the URL; the model fetched it on their behalf
+    "artex-enrich": 0.6,  # ARTEX self-declared tooling: near-certain attribution, but trivially renamed
+    "artex-api-recon": 0.6,
+    "artex": 0.6,
+}
+
 SCANNER_THRESHOLD = 0.6
 HOSTILE_THRESHOLD = 0.5
 BENIGN_MAX_HOSTILE = 0.35
@@ -181,9 +193,10 @@ def signals(feats: Mapping[str, Any]) -> dict[str, float]:
     s["spec_discovery"] = _clamp(_f(feats, "spec_fetches") / 2.0)
     s["ai_ecosystem_probe"] = 1.0 if _f(feats, "ai_ecosystem_probes") >= 1 else 0.0
     s["natural_language_payload"] = _clamp(_f(feats, "nl_attack_payloads") / 2.0)
-    s["ai_declared_client"] = (
-        1.0 if family == ClientFamily.AI_AGENT else 0.5 if family == ClientFamily.AI_CRAWLER else 0.0
-    )
+    if family == ClientFamily.AI_AGENT:
+        s["ai_declared_client"] = DECLARED_CLIENT_STRENGTH.get(str(feats.get("client_tool") or ""), 1.0)
+    else:
+        s["ai_declared_client"] = 0.5 if family == ClientFamily.AI_CRAWLER else 0.0
     s["llm_sdk_headers"] = 1.0 if feats.get("llm_sdk_headers") else 0.0
     s["automation_client"] = 1.0 if automation else 0.0
     s["browser_claim_mismatch"] = 1.0 if mismatch else 0.0
