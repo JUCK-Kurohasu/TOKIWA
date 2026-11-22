@@ -10,8 +10,8 @@
 | #92 + #170 | 完全 | `tokiwa.auth.accounts.lock_accounts()` で降格・削除・セットアップを 1 トランザクション内で直列化（SQLite は no-op UPDATE で書き込みロック＝BEGIN IMMEDIATE 相当、PostgreSQL は admin 行を `FOR UPDATE`）。ロック後に対象と操作者を読み直し、操作者がもう admin でなければ 403。セットアップ済みフラグ（新テーブル `auth_state`）を導入し、ユーザーが 0 人になっても `/auth/setup` を再開しない。旧 DB は起動時にフラグを補完し、admin が 0 人なら起動ログに復旧手順を警告。並行テスト（`asyncio.gather` + 認証直後のバリア）は修正前のコードで赤になることを確認済み | 24fafb1 |
 | #95 | 完全 | 初回セットアップに 1 回限りのセットアップコード（80 bit、`ABCD-EFGH-JKLM-NPQR` 形式）を必須化（`auth.setup_code_required`、既定 true）。サーバー起動時に `data_dir/setup-code`（0600、原子的に作成）とログ（WARNING、`<base_url>/setup#code=...`。フラグメントなのでサーバー/プロキシのログには載らない）に出し、成功後に削除。フロントのセットアップ画面に入力欄を追加（URL の `#code=` から自動入力し、読んだらアドレスバーから消す）。count→INSERT は #92 のロック + `auth_state` 主キーで直列化。`scripts/docker-smoke.sh`・conftest・wiki（Quick-Start / Installation / Lab / Troubleshooting / Configuration × 4 言語）・README・lab/README・.env.example・api-contract を更新 | d8ce2c1 |
 | #56 | 完全 | (1) ユーザー名+送信元 IP（既定 5 回）と送信元 IP（既定 30 回、スプレー対策）の失敗をスライディング窓（既定 15 分）で数え、超えたら 429 + `Retry-After`（`auth.login_*` で設定可、0 で無効）。状態は DB の新テーブル `auth_login_failures`（キーは SHA-256。入力されたユーザー名は残さない）なので複数ワーカー・再起動でも共有。試行を **パスワード検証前に失敗として記録・コミット** し、数えてから検証、成功・拒否時に取り消す方式で、並列 12 本でも検証は上限回数まで（テスト済み）。(2) 存在しないユーザーでも定数のダミーハッシュで scrypt を 1 回実行。(3) `auth.login.success` / `auth.login.failure`（client_ip, known_user, locked。パスワードは記録しない）、`auth.setup` / `auth.setup.failure` を監査記録。セットアップコードの誤りも送信元 IP 単位で同じ制限。(4) scrypt を `asyncio.to_thread` + イベントループごとのセマフォ（`auth.password_hash_concurrency`、既定 4）で実行（ハッシュ中も /health が応答することをテスト）。`LoginRequest` に長さ上限 | bf91418 |
-| #34 | 完全 | `users.token_version`（`server_default="0"`、起動時に既存 DB へ追加）を JWT のクレーム `ver` に入れ、`deps.user_from_token` で照合（不一致は 401 `token revoked`。`ver` の無い旧 JWT は 0 扱いで互換）。パスワード変更・ロール変更（PATCH /users）、`POST /auth/logout`（自分の全セッション）、`POST /users/{id}/revoke-sessions`（管理者が他ユーザーを全端末からログアウト）で版数を原子的に +1。監査 `auth.logout` / `user.sessions_revoked`、`user.update` に `sessions_revoked`。フロント: ログアウトボタンが `/auth/logout` を呼ぶ（失敗してもローカルは消す。`authStore.logout()` 自体は API を呼ばない＝401 ループ回避）、ユーザー一覧に「セッション失効」ボタン。TTL 既定 12 時間は不変 | (このコミット) |
-| #163 (c)(d) | 未着手 | | |
+| #34 | 完全 | `users.token_version`（`server_default="0"`、起動時に既存 DB へ追加）を JWT のクレーム `ver` に入れ、`deps.user_from_token` で照合（不一致は 401 `token revoked`。`ver` の無い旧 JWT は 0 扱いで互換）。パスワード変更・ロール変更（PATCH /users）、`POST /auth/logout`（自分の全セッション）、`POST /users/{id}/revoke-sessions`（管理者が他ユーザーを全端末からログアウト）で版数を原子的に +1。監査 `auth.logout` / `user.sessions_revoked`、`user.update` に `sessions_revoked`。フロント: ログアウトボタンが `/auth/logout` を呼ぶ（失敗してもローカルは消す。`authStore.logout()` 自体は API を呼ばない＝401 ループ回避）、ユーザー一覧に「セッション失効」ボタン。TTL 既定 12 時間は不変 | 839da56 |
+| #163 (c)(d) | 完全（(c)(d) のみ。(a)(b) は tokens レーン） | (c) `tokiwa user reset-password <name>`（対話入力 2 回・API と同じパスワード規則・`token_version` を上げて既存ログインを失効・監査 `user.password_reset`、操作者 `cli`）。(d) `user create` は既存名なら 1 行のエラーで終了コード 1（事前チェック + DB 例外はドライバのメッセージだけを表示）、ロール・ユーザー名・パスワードを `UserCreate` で検証（従来は任意文字列のロールを受理していた）、作成を監査 `user.create`（`cli`）、セットアップ済みフラグを立てる。`create_async_engine(..., hide_parameters=True)` を db/session.py に 1 行追加。CLI はエンジンを最後に dispose | (このコミット) |
 | #102 | 未着手 | | |
 
 ## 要判断
@@ -48,6 +48,8 @@
 
 ## 担当外の変更
 
+- `backend/src/tokiwa/db/session.py`（http-hardening レーンの所有）: `init_engine` に `kwargs["hide_parameters"] = True` の 1 行を追加（#163 (d)）。影響: SQLAlchemy の例外メッセージから SQL のバインド値が消える（デバッグ時は `[SQL parameters hidden ...]` と出る）。`database.echo=true` の SQL ログも値が隠れる。
+
 - `backend/src/tokiwa/api/deps.py`: `user_from_token` に版数照合を追加（JWT 検証部分のみ。所有範囲）。
 - `backend/tests/api/test_users_tokens.py::test_demote_and_promote_take_effect_immediately`: ロール変更で旧 JWT が 401 になるため、再ログインしてから 403 / 200 を確認するよう変更。
 - `frontend/src/components/layout/AppShell.tsx`（ログアウトボタン）と `frontend/src/pages/settings/UsersTab.tsx`（セッション失効ボタン）: 最小差分。
@@ -64,6 +66,8 @@
   一覧の期待値を 3 → 4 件に更新（最小差分）。
 
 ## 他レーンへの依頼
+
+- **tokens（#163 (a)(b)）**: `tokiwa token list|revoke|rotate`、API トークンの期限・所有者、Gate の token_file 再読込は未着手（auth レーンでは触っていない）。CLI のユーザー系コマンドで使った `_UserError` / `_run_user_command`（1 行エラー・終了コード 1）は token 系にも流用できる。
 
 - **stream（SSE）**: JWT の失効は接続時にしか見ないので、失効前に開いた `/api/v1/stream` はつながったまま（#34 の残り）。定期的に `token_version` を再確認して切断するか、失効時に bus で通知して該当ユーザーのストリームを閉じる対応が必要。
 

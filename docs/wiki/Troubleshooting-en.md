@@ -36,8 +36,8 @@ After 5 failures for the same user name and source IP (`auth.login_max_failures`
 Wait, or log in from another machine (source IP). Failures and successes are kept in the audit log (**Settings → System**) as `auth.login.failure` / `auth.login.success` (with the source IP; passwords are never recorded).
 
 **I forgot the admin password**
-With the same configuration as the server, run `uv run tokiwa user create <new name> --role admin` to create another admin,
-then change the original account's password with "Reset password" under **Settings → Users**.
+With the same configuration as the server, run `uv run tokiwa user reset-password <username>` and set a new password (in Docker: `docker compose ... exec tokiwa tokiwa user reset-password <username>`).
+Existing logins of that user end. If logins are being refused (429) after failed attempts, that lifts after about 15 minutes.
 
 **I was logged out after a restart**
 The signing key (`data/secret.key`) may have been lost. Check that the data directory is persisted.

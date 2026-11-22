@@ -36,8 +36,8 @@ curl -s http://localhost:8788/api/v1/auth/status
 待つか、別の端末（送信元 IP）からログインしてください。失敗と成功は **設定 → システム** の監査ログに `auth.login.failure` / `auth.login.success`（送信元 IP 付き。パスワードは記録しません）として残ります。
 
 **管理者のパスワードを忘れた**
-サーバーと同じ設定で `uv run tokiwa user create <新しい名前> --role admin` を実行して別の管理者を作り、
-**設定 → ユーザー** の「パスワード再設定」で元のアカウントのパスワードを変更します。
+サーバーと同じ設定で `uv run tokiwa user reset-password <ユーザー名>` を実行し、新しいパスワードを設定します（Docker では `docker compose ... exec tokiwa tokiwa user reset-password <ユーザー名>`）。
+そのユーザーの既存のログインは無効になります。ログイン失敗で一時的に拒否（429）されている場合は、15 分ほどで解除されます。
 
 **再起動したらログアウトされた**
 署名鍵（`data/secret.key`）が失われた可能性があります。データディレクトリが永続化されているか確認してください。

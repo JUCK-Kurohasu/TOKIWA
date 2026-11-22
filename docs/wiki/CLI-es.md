@@ -42,6 +42,16 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 La contraseña se solicita de forma interactiva (dos veces, con la entrada oculta). El rol por defecto es `analyst`.
+Si ya existe un usuario con ese nombre, el comando muestra un error y termina con código 1. La creación queda en el registro de auditoría como `user.create` (actor `cli`).
+También sirve para recuperar el acceso cuando no queda ningún administrador (`--role admin`).
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+Pide una contraseña nueva (dos veces, con la entrada oculta) y la establece. Se cierran todas las sesiones existentes de ese usuario y el registro de auditoría guarda `user.password_reset` (actor `cli`; nunca se registra la contraseña). Úselo si se pierde la contraseña del administrador.
 
 ## tokiwa token create
 

@@ -34,6 +34,7 @@ def init_engine(url: str | None = None, echo: bool | None = None) -> AsyncEngine
     url = url or settings.database.url
     _ensure_sqlite_dir(url)
     kwargs: dict[str, object] = {"echo": settings.database.echo if echo is None else echo}
+    kwargs["hide_parameters"] = True  # DB errors must not print bound values (password hashes, tokens): #163
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"timeout": 30}
     _engine = create_async_engine(url, **kwargs)  # type: ignore[arg-type]

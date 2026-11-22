@@ -42,6 +42,16 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 会以交互方式询问密码（隐藏输入，需输入 2 次）。角色默认为 `analyst`。
+如果已存在同名用户，会显示错误信息并退出（退出码 1）。创建操作会以 `user.create`（操作者 `cli`）记录在审计日志中。
+也可用于一个管理员都没有时的恢复（`--role admin`）。
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+以交互方式询问新密码（隐藏输入，需输入 2 次）并进行设置。该用户已有的登录全部失效，审计日志中会记录 `user.password_reset`（操作者 `cli`，不记录密码）。忘记管理员密码时使用。
 
 ## tokiwa token create
 

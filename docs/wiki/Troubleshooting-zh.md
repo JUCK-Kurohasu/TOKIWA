@@ -36,8 +36,8 @@ curl -s http://localhost:8788/api/v1/auth/status
 请等待，或从其他终端（来源 IP）登录。失败和成功会以 `auth.login.failure` / `auth.login.success` 记录在审计日志（**Settings → System**）中（附带来源 IP，不记录密码）。
 
 **忘记了管理员密码**
-在与服务器相同的设置下执行 `uv run tokiwa user create <新名称> --role admin` 创建另一个管理员，
-然后在 **Settings → Users**（设置 → 用户）中通过 **Reset password**（重置密码）修改原账户的密码。
+在与服务器相同的设置下执行 `uv run tokiwa user reset-password <用户名>` 并设置新密码（Docker 中为 `docker compose ... exec tokiwa tokiwa user reset-password <用户名>`）。
+该用户已有的登录会失效。如果因登录失败而被暂时拒绝（429），约 15 分钟后会解除。
 
 **重启后被登出**
 签名密钥（`data/secret.key`）可能已丢失。请检查数据目录是否已持久化。
