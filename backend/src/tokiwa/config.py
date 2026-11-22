@@ -43,6 +43,15 @@ class AuthSettings(BaseModel):
     # server writes to data_dir/setup-code and to its log while setup is pending. Disable only on a host that no
     # one else can reach before setup (or create the first admin with `tokiwa user create --role admin`).
     setup_code_required: bool = True
+    # Login throttling (state in the database, shared by all workers). Within a sliding window of
+    # login_lockout_minutes, a user name + source IP pair is refused (429) after login_max_failures failures, and a
+    # source IP after login_max_failures_per_ip failures over any user names (password spraying). 0 disables a limit.
+    login_max_failures: int = Field(default=5, ge=0)
+    login_max_failures_per_ip: int = Field(default=30, ge=0)
+    login_lockout_minutes: float = Field(default=15.0, gt=0)
+    # Password hashing (scrypt, ~16 MiB and tens of ms each) runs in worker threads; at most this many at a time,
+    # so a burst of logins cannot starve ingest / SSE on the event loop or exhaust memory.
+    password_hash_concurrency: int = Field(default=4, ge=1)
 
 
 class DatabaseSettings(BaseModel):

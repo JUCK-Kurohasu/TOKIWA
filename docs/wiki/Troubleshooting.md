@@ -31,6 +31,10 @@ curl -s http://localhost:8788/api/v1/auth/status
 **管理者が 1 人もいなくなった（起動ログに「no user has the admin role」）**
 サーバーと同じ設定で `uv run tokiwa user create <名前> --role admin` を実行して管理者を作ります（Docker では `docker compose ... exec tokiwa tokiwa user create ...`）。
 
+**ログインすると「too many failed attempts」（429）になる**
+同じユーザー名と送信元 IP で 5 回（`auth.login_max_failures`）、または同じ送信元 IP から 30 回（`auth.login_max_failures_per_ip`）失敗すると、15 分（`auth.login_lockout_minutes`）の窓で古い失敗が外れるまで拒否されます。正しいパスワードでも拒否されます。
+待つか、別の端末（送信元 IP）からログインしてください。失敗と成功は **設定 → システム** の監査ログに `auth.login.failure` / `auth.login.success`（送信元 IP 付き。パスワードは記録しません）として残ります。
+
 **管理者のパスワードを忘れた**
 サーバーと同じ設定で `uv run tokiwa user create <新しい名前> --role admin` を実行して別の管理者を作り、
 **設定 → ユーザー** の「パスワード再設定」で元のアカウントのパスワードを変更します。

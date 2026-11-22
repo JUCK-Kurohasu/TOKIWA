@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import os
 import secrets
+import weakref
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -39,6 +41,37 @@ def verify_password(password: str, encoded: str) -> bool:
         return hmac.compare_digest(dk, expected)
     except (ValueError, TypeError):
         return False
+
+
+_hash_slots: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    weakref.WeakKeyDictionary()
+)
+# Hash of a random, discarded password with the current parameters: verifying against it costs the same as
+# verifying a real user's password, and nothing matches it.
+_DUMMY_HASH = "scrypt$16384$8$1$XN7DDZh7K2OvW8bQXo2/iA==$Mbt4a1zxgfLbQDTknAEN4pgWsD49UtI/lzl6PyDyJ1g="
+
+
+def _slots() -> asyncio.Semaphore:
+    """Per-event-loop semaphore (an asyncio.Semaphore must not be shared across loops, e.g. between tests)."""
+    loop = asyncio.get_running_loop()
+    sem = _hash_slots.get(loop)
+    if sem is None:
+        sem = _hash_slots[loop] = asyncio.Semaphore(get_settings().auth.password_hash_concurrency)
+    return sem
+
+
+async def hash_password_async(password: str) -> str:
+    """:func:`hash_password` off the event loop (scrypt blocks for tens of ms), bounded by a semaphore."""
+    async with _slots():
+        return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, encoded: str | None) -> bool:
+    """:func:`verify_password` off the event loop. ``encoded=None`` (unknown user) still runs one scrypt against
+    a dummy hash, so the response time does not reveal whether the user name exists (#56)."""
+    async with _slots():
+        ok = await asyncio.to_thread(verify_password, password, encoded or _DUMMY_HASH)
+    return ok and encoded is not None
 
 
 def secret_key() -> str:

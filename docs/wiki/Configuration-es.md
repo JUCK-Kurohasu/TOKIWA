@@ -58,6 +58,10 @@ deception:
 | `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
 | `auth.setup_code_required` | `true` | La configuración inicial (crear el primer administrador) exige el código de un solo uso que aparece en el log de arranque y en `data_dir/setup-code` |
+| `auth.login_max_failures` | 5 | Tras este número de fallos de inicio de sesión para el mismo usuario + IP de origen, se rechazan los intentos durante un tiempo (429). 0 lo desactiva |
+| `auth.login_max_failures_per_ip` | 30 | Límite de fallos desde una IP de origen con cualquier usuario (password spraying). 0 lo desactiva |
+| `auth.login_lockout_minutes` | 15 | Ventana (minutos) de ambos límites; el bloqueo se levanta cuando los fallos antiguos salen de la ventana |
+| `auth.password_hash_concurrency` | 4 | Hashes de contraseña (scrypt) calculados a la vez |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | Para PostgreSQL, `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tokiwa.api.deps import AdminUser, DbSession
 from tokiwa.audit import record_audit
 from tokiwa.auth.accounts import lock_accounts
-from tokiwa.auth.security import hash_password
+from tokiwa.auth.security import hash_password_async
 from tokiwa.db.models.core import UserRow
 from tokiwa.schemas.system import Role, User, UserCreate
 from tokiwa.schemas.users import UserUpdate
@@ -58,7 +58,7 @@ async def create_user(body: UserCreate, session: DbSession, admin: AdminUser) ->
     row = UserRow(
         id=new_id(),
         username=body.username,
-        password_hash=hash_password(body.password),
+        password_hash=await hash_password_async(body.password),
         role=body.role,
         created_at=utcnow(),
     )
@@ -77,7 +77,7 @@ async def create_user(body: UserCreate, session: DbSession, admin: AdminUser) ->
 @router.patch("/{user_id}", response_model=User)
 async def update_user(user_id: str, body: UserUpdate, session: DbSession, admin: AdminUser) -> User:
     # Hash before taking the lock: scrypt is slow and the lock blocks every other account change.
-    new_hash = hash_password(body.password) if body.password is not None else None
+    new_hash = await hash_password_async(body.password) if body.password is not None else None
     admins = await _lock_and_recheck(session, admin)
     row = await _get_or_404(session, user_id)
     details: dict[str, object] = {"username": row.username}

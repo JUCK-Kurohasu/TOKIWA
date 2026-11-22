@@ -16,7 +16,7 @@
 |---|---|---|---|
 | GET | /auth/status | public | → `AuthStatus {setup_required, version, setup_code_required}` |
 | POST | /auth/setup | public(初回のみ) | `SetupRequest`（`UserCreate` + `setup_code`。`schemas/auth.py`）→ `TokenResponse`。`auth.setup_code_required`（既定 true）のとき、起動ログと `data_dir/setup-code` に出る 1 回限りのコードが無い・違うと 403。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
-| POST | /auth/login | public | `LoginRequest` → `TokenResponse` |
+| POST | /auth/login | public | `LoginRequest`（username ≤128 / password ≤1024 文字）→ `TokenResponse`。失敗は 401 `invalid credentials`（存在しないユーザーでも同じ時間）。同じユーザー名 × 送信元 IP で `auth.login_max_failures` 回、送信元 IP で `auth.login_max_failures_per_ip` 回失敗すると `auth.login_lockout_minutes` の窓の間 429 + `Retry-After`。成功・失敗を `auth.login.success` / `auth.login.failure` として監査に記録 |
 | GET | /auth/me | user | → `User` |
 | GET | /users | admin | → `User[]` |
 | POST | /users | admin | `UserCreate` → `User`（201。重複 username は 409） |
@@ -26,7 +26,7 @@
 | POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
-users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
+users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。認証イベント: `auth.setup` / `auth.setup.failure`（セットアップコード誤り。送信元 IP 単位で `/auth/login` と同じ 429 制限）/ `auth.login.success` / `auth.login.failure`（details: `client_ip`, `known_user`, `locked`）。
 
 ## 取り込み（`routes/ingest.py` 実装済）
 | POST | /ingest/events | token:ingest | `IngestBatch` → `IngestResult` |

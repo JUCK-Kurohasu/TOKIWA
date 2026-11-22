@@ -8,8 +8,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | #92 + #170 | 完全 | `tokiwa.auth.accounts.lock_accounts()` で降格・削除・セットアップを 1 トランザクション内で直列化（SQLite は no-op UPDATE で書き込みロック＝BEGIN IMMEDIATE 相当、PostgreSQL は admin 行を `FOR UPDATE`）。ロック後に対象と操作者を読み直し、操作者がもう admin でなければ 403。セットアップ済みフラグ（新テーブル `auth_state`）を導入し、ユーザーが 0 人になっても `/auth/setup` を再開しない。旧 DB は起動時にフラグを補完し、admin が 0 人なら起動ログに復旧手順を警告。並行テスト（`asyncio.gather` + 認証直後のバリア）は修正前のコードで赤になることを確認済み | 24fafb1 |
-| #95 | 完全 | 初回セットアップに 1 回限りのセットアップコード（80 bit、`ABCD-EFGH-JKLM-NPQR` 形式）を必須化（`auth.setup_code_required`、既定 true）。サーバー起動時に `data_dir/setup-code`（0600、原子的に作成）とログ（WARNING、`<base_url>/setup#code=...`。フラグメントなのでサーバー/プロキシのログには載らない）に出し、成功後に削除。フロントのセットアップ画面に入力欄を追加（URL の `#code=` から自動入力し、読んだらアドレスバーから消す）。count→INSERT は #92 のロック + `auth_state` 主キーで直列化。`scripts/docker-smoke.sh`・conftest・wiki（Quick-Start / Installation / Lab / Troubleshooting / Configuration × 4 言語）・README・lab/README・.env.example・api-contract を更新 | (このコミット) |
-| #56 | 未着手 | | |
+| #95 | 完全 | 初回セットアップに 1 回限りのセットアップコード（80 bit、`ABCD-EFGH-JKLM-NPQR` 形式）を必須化（`auth.setup_code_required`、既定 true）。サーバー起動時に `data_dir/setup-code`（0600、原子的に作成）とログ（WARNING、`<base_url>/setup#code=...`。フラグメントなのでサーバー/プロキシのログには載らない）に出し、成功後に削除。フロントのセットアップ画面に入力欄を追加（URL の `#code=` から自動入力し、読んだらアドレスバーから消す）。count→INSERT は #92 のロック + `auth_state` 主キーで直列化。`scripts/docker-smoke.sh`・conftest・wiki（Quick-Start / Installation / Lab / Troubleshooting / Configuration × 4 言語）・README・lab/README・.env.example・api-contract を更新 | d8ce2c1 |
+| #56 | 完全 | (1) ユーザー名+送信元 IP（既定 5 回）と送信元 IP（既定 30 回、スプレー対策）の失敗をスライディング窓（既定 15 分）で数え、超えたら 429 + `Retry-After`（`auth.login_*` で設定可、0 で無効）。状態は DB の新テーブル `auth_login_failures`（キーは SHA-256。入力されたユーザー名は残さない）なので複数ワーカー・再起動でも共有。試行を **パスワード検証前に失敗として記録・コミット** し、数えてから検証、成功・拒否時に取り消す方式で、並列 12 本でも検証は上限回数まで（テスト済み）。(2) 存在しないユーザーでも定数のダミーハッシュで scrypt を 1 回実行。(3) `auth.login.success` / `auth.login.failure`（client_ip, known_user, locked。パスワードは記録しない）、`auth.setup` / `auth.setup.failure` を監査記録。セットアップコードの誤りも送信元 IP 単位で同じ制限。(4) scrypt を `asyncio.to_thread` + イベントループごとのセマフォ（`auth.password_hash_concurrency`、既定 4）で実行（ハッシュ中も /health が応答することをテスト）。`LoginRequest` に長さ上限 | (このコミット) |
 | #34 | 未着手 | | |
 | #163 (c)(d) | 未着手 | | |
 | #102 | 未着手 | | |
@@ -26,7 +26,19 @@
 - 「setup_required 中は 127.0.0.1 からのみ受け付ける」案は採らなかった（Docker のポート公開では接続元がブリッジの IP になり、同一ホストの
   リバースプロキシ配下では全員が 127.0.0.1 に見えるため、どちらでも誤動作する）。
 
+- **#56 ログイン失敗の状態は DB に置いた**（プロセス内ではなく）。理由: 複数ワーカーで上限が N 倍になる・再起動でリセットされる・テスト間で
+  状態が漏れる。代償は失敗 1 回ごとに 1 行の INSERT と、ログインごとに 2〜3 回のコミット（成功時は記録した行を削除）。行は窓（15 分）より古いものを
+  失敗記録のたびに削除する。
+- **リバースプロキシの背後では送信元 IP が全員プロキシの IP になる**（uvicorn の `--forwarded-allow-ips` / `FORWARDED_ALLOW_IPS` を設定していない場合）。
+  そのとき (a) 攻撃者が admin を 5 回失敗させると、全員が admin でログインできなくなる（ロックアウトによる DoS）、(b) 送信元 IP 単位の上限 30 回が
+  全利用者の合算になる。`.env.example` には `FORWARDED_ALLOW_IPS` の記載がある。既定値（5 / 30 / 15 分）を緩めるか、ユーザー名単位の
+  ロックをやめて遅延（指数バックオフ）にするかは運用判断。現状はユーザー名+IP 単位なので、正しく IP が見えていれば他の端末からはログインできる。
+- 429 の応答はロック中であることを明かすが、存在しないユーザー名でも同じ条件でロックされるので、ユーザー名の存在は判別できない。
+
 ## 失敗した試み
+
+- #56: 最初は「ロック確認 → 検証 → 失敗なら記録」の順にしたが、`asyncio.gather` で 12 本並列に投げると 12 本とも検証まで進んだ
+  （全員が記録前の 0 件を見る）。「先に記録してコミット → 自分の行を含めて数える」に変えて上限内に収まった。
 
 - 並行テストを `asyncio.gather` だけで書くと、修正前のコードでも 2 本目が 409 になり競合が再現しなかった（1 本目が先にコミットまで
   進む）。`deps.user_from_token` を包んで「2 本とも認証を通過するまで待つ」バリアを入れると修正前は 200/200（管理者 0 人）で赤になる。
@@ -46,7 +58,11 @@
 
 ## 他レーンへの依頼
 
-- （随時追記）
+- **http-hardening（#91）**: `/auth/login` と `/auth/setup` の失敗経路はハンドラ内で `await session.commit()` してから 401/403/429 を
+  raise する（拒否時もロールバックされずに失敗記録・監査を残すため）。get_session を変えるときに、ハンドラ内コミット後もセッションが
+  使い続けられること（`expire_on_commit=False`）を保ってほしい。
+- **detect（自己監視）**: #56 の推奨 (3) の「TOKIWA 自身への連続ログイン失敗を検知ルールにする」は未実装。監査ログの `auth.login.failure`
+  （details.client_ip / known_user / locked）を入力にできる。
 
 ## 未検証事項
 

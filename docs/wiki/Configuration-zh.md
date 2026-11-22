@@ -58,6 +58,10 @@ deception:
 | `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥。未设置时生成并保存到 `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | 登录的有效时间 |
 | `auth.setup_code_required` | `true` | 初始设置（创建第一个管理员）时要求输入启动日志和 `data_dir/setup-code` 中的一次性设置码 |
+| `auth.login_max_failures` | 5 | 同一用户名 × 来源 IP 的登录失败达到此次数后，暂时拒绝（429）。0 表示禁用 |
+| `auth.login_max_failures_per_ip` | 30 | 单个来源 IP 的失败次数上限（不区分用户名，防密码喷洒）。0 表示禁用 |
+| `auth.login_lockout_minutes` | 15 | 上面两项的统计时间窗（分钟）。旧的失败移出时间窗后解除 |
+| `auth.password_hash_concurrency` | 4 | 同时计算的密码哈希（scrypt）数量 |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL 为 `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

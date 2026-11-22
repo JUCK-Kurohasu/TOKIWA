@@ -58,6 +58,10 @@ deception:
 | `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
 | `auth.setup_code_required` | `true` | First-run setup (creating the first admin) requires the single-use code printed in the startup log and saved to `data_dir/setup-code` |
+| `auth.login_max_failures` | 5 | After this many failed logins for the same user name + source IP, further attempts are refused for a while (429). 0 disables |
+| `auth.login_max_failures_per_ip` | 30 | Limit on failures from one source IP across all user names (password spraying). 0 disables |
+| `auth.login_lockout_minutes` | 15 | Window (minutes) for both limits above; the lock lifts when old failures leave the window |
+| `auth.password_hash_concurrency` | 4 | Password hashes (scrypt) computed at the same time |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | For PostgreSQL: `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

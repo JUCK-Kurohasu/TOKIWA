@@ -31,6 +31,10 @@ On a host nobody else can reach, you can turn it off with `TOKIWA_AUTH__SETUP_CO
 **No admin is left (startup log says "no user has the admin role")**
 With the same configuration as the server, run `uv run tokiwa user create <name> --role admin` (in Docker: `docker compose ... exec tokiwa tokiwa user create ...`).
 
+**Login says "too many failed attempts" (429)**
+After 5 failures for the same user name and source IP (`auth.login_max_failures`), or 30 from the same source IP (`auth.login_max_failures_per_ip`), logins are refused until old failures leave the 15-minute window (`auth.login_lockout_minutes`), even with the right password.
+Wait, or log in from another machine (source IP). Failures and successes are kept in the audit log (**Settings → System**) as `auth.login.failure` / `auth.login.success` (with the source IP; passwords are never recorded).
+
 **I forgot the admin password**
 With the same configuration as the server, run `uv run tokiwa user create <new name> --role admin` to create another admin,
 then change the original account's password with "Reset password" under **Settings → Users**.

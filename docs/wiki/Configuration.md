@@ -58,6 +58,10 @@ deception:
 | `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵。未設定なら `data_dir/secret.key` に生成・保存 |
 | `server.token_ttl_minutes` | 720 | ログインの有効時間 |
 | `auth.setup_code_required` | `true` | 初回セットアップ（最初の管理者作成）に、起動ログと `data_dir/setup-code` に出る 1 回限りのコードを要求する |
+| `auth.login_max_failures` | 5 | 同じユーザー名 × 送信元 IP のログイン失敗がこの回数に達すると、一時的に拒否（429）。0 で無効 |
+| `auth.login_max_failures_per_ip` | 30 | 1 つの送信元 IP からの失敗（ユーザー名を問わない。パスワードスプレー対策）の上限。0 で無効 |
+| `auth.login_lockout_minutes` | 15 | 上の 2 つを数える時間窓（分）。古い失敗が窓から外れると解除 |
+| `auth.password_hash_concurrency` | 4 | 同時に計算するパスワードハッシュ（scrypt）の数 |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL は `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

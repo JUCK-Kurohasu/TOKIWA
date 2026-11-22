@@ -31,6 +31,10 @@ curl -s http://localhost:8788/api/v1/auth/status
 **一个管理员都没有了（启动日志中出现“no user has the admin role”）**
 在与服务器相同的设置下执行 `uv run tokiwa user create <名称> --role admin` 创建管理员（Docker 中为 `docker compose ... exec tokiwa tokiwa user create ...`）。
 
+**登录时提示“too many failed attempts”（429）**
+同一用户名和来源 IP 失败 5 次（`auth.login_max_failures`），或同一来源 IP 失败 30 次（`auth.login_max_failures_per_ip`）后，在旧的失败移出 15 分钟时间窗（`auth.login_lockout_minutes`）之前，即使密码正确也会被拒绝。
+请等待，或从其他终端（来源 IP）登录。失败和成功会以 `auth.login.failure` / `auth.login.success` 记录在审计日志（**Settings → System**）中（附带来源 IP，不记录密码）。
+
 **忘记了管理员密码**
 在与服务器相同的设置下执行 `uv run tokiwa user create <新名称> --role admin` 创建另一个管理员，
 然后在 **Settings → Users**（设置 → 用户）中通过 **Reset password**（重置密码）修改原账户的密码。
