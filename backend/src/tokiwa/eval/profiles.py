@@ -689,7 +689,7 @@ def parse_mix(spec: str | None, *, default_count: int | None = None) -> dict[str
         names = PROFILES if keyword == "all" else TUNED_PROFILES
         return dict.fromkeys(names, default_count)
     mix: dict[str, int] = {}
-    for part in spec.split(","):
+    for part in keyword.split(","):
         part = part.strip()
         if not part:
             continue
