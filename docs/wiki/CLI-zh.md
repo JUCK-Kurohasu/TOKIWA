@@ -17,6 +17,7 @@
 | `tokiwa intel` | 漏洞情报源 |
 | `tokiwa sim` | 实验环境用流量模拟器 |
 | `tokiwa eval` | 评估框架 |
+| `tokiwa data` | 删除 / 导出指定 IP 或会话的数据 |
 
 > ⚠️ 直接访问数据库的命令（`user`、`token`、`intel` 等）必须在与服务器 **相同的设置**（相同的当前目录，
 > 或相同的 `TOKIWA_DATABASE__URL`）下执行。默认数据库路径 `./data/tokiwa.db` 是相对路径。
@@ -66,6 +67,19 @@ tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 签�
 无需管理员登录（忘记密码、事件处理中）也可以在服务器主机上停用令牌。每次操作都以 actor `cli` 记入审计日志。
 `rotate` 签发名称、作用域和绑定都相同的新令牌，并让旧令牌在 `--grace-hours`（默认 24 小时，0 表示立即吊销）内继续有效。
 Gate 会在令牌文件变化时自动重新读取，因此把新令牌写入文件即可无需重启完成切换。名称对应多个有效令牌时请指定 id。
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # 默认只显示数量（dry run）
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+按来源 IP、行为者会话或时间范围，批量删除或导出已保存的数据（个人的查阅 / 删除请求、误导入的客户数据等）。条件以 AND 组合。
+范围：`events`、`actor_sessions`、`deception_trips` 删除行；`alerts` 清空 `details`（为保留与安全事件的关联，行本身保留）；
+`llm_calls` 只清空提示词和响应正文（费用记录保留）。LLM 记录按带词边界的 IP / 会话 ID 匹配（`10.0.0.1` 不会匹配 `10.0.0.15`）。
+`export` 输出 JSONL（每行一条 `{"table": ..., "row": {...}}`），`--out` 文件权限为 600。两者都会以 actor `cli` 记入审计日志。
+安全事件摘要、Copilot 会话和备份不在范围内。
 
 ## tokiwa gate run
 

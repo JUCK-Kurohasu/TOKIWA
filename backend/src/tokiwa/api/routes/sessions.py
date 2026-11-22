@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from tokiwa.access_log import record_access
 from tokiwa.aidetect.features import BURST_GAP_S, THINK_MAX_S, THINK_MIN_S
 from tokiwa.api.deps import CurrentUser, DbSession
 from tokiwa.api.visibility import project_events
@@ -91,7 +92,7 @@ def build_timeline(events: list[Event]) -> list[TimelinePoint]:
 @router.get("", response_model=Page[ActorSession])
 async def list_sessions(
     session: DbSession,
-    _user: CurrentUser,
+    user: CurrentUser,
     min_ai_score: float | None = Query(None, ge=0.0, le=1.0),
     classification: ActorType | None = None,
     source_ip: str | None = Query(None, max_length=64),
@@ -118,6 +119,11 @@ async def list_sessions(
         .scalars()
         .all()
     )
+    filters = {
+        "min_ai_score": min_ai_score, "classification": classification, "source_ip": source_ip,
+        "offset": offset or None,
+    }  # fmt: skip
+    await record_access(session, user, "sessions.list", filters=filters, count=len(rows))
     return Page[ActorSession](
         items=[ActorSession.model_validate(r) for r in rows], total=int(total), limit=limit, offset=offset
     )
@@ -142,6 +148,7 @@ async def get_session(session_id: str, session: DbSession, user: CurrentUser) ->
         .all()
     )
     events = sorted((row_to_event(r) for r in ev_rows), key=lambda e: e.timestamp)
+    await record_access(session, user, "sessions.get", target=session_id, count=len(events))
     return SessionDetail(
         session=ActorSession.model_validate(row),
         events=project_events(events, user),  # viewers: masked bodies (audit #157)

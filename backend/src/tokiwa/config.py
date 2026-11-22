@@ -363,6 +363,11 @@ class CopilotSettings(BaseModel):
     tier: Literal["fast", "deep"] = "deep"
     # Upper bound (chars of JSON) for one tool result handed to the LLM. Lists are trimmed to fit.
     max_tool_result_chars: int = 12_000
+    # Audit #164: each message can drive up to max_tool_iterations deep-tier calls against the shared daily
+    # budget. Minimum role to start conversations / send messages (viewers can still read their old ones).
+    min_role: Literal["viewer", "analyst", "admin"] = "analyst"
+    # Per-user messages per minute (0 = unlimited).
+    messages_per_minute: int = 6
 
 
 class Settings(BaseSettings):

@@ -140,5 +140,7 @@ deception:
 | `copilot.enabled` | true | Copilot（AI 助手） |
 | `copilot.tier` | `deep` | 使用的模型层级 |
 | `copilot.max_tool_iterations` | 8 | 单次提问中使用工具的最大次数 |
+| `copilot.min_role` | `analyst` | 创建会话和发送消息所需的最低角色（`viewer` / `analyst` / `admin`）。一次提问最多调用 8 次 deep 层级，且日预算全局共用，因此默认不允许 viewer |
+| `copilot.messages_per_minute` | 6 | 每个用户每分钟可发送的消息上限（0 表示不限）。超出时返回 429 |
 
 所有配置项都在 `backend/src/tokiwa/config.py` 中。Docker 用的示例请参阅仓库根目录下的 `.env.example`。

@@ -34,6 +34,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tokiwa.access_log import record_access_detached
 from tokiwa.config import Settings, get_settings
 from tokiwa.copilot.prompts import (
     COPILOT_PROMPT,
@@ -576,6 +577,8 @@ async def _run_turn(conversation_id: str, user: User, content: str) -> AsyncIter
             ]
         else:
             executions = await _execute_calls(calls)
+            for ex in executions:  # who searched what through the copilot (audit #167)
+                await record_access_detached(user, f"copilot.tool.{ex.name}", filters=ex.input)
         for ex in executions:
             yield {
                 "type": "tool_result",

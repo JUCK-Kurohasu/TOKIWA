@@ -19,6 +19,7 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tokiwa.access_log import record_access
 from tokiwa.api.deps import CurrentUser, DbSession
 from tokiwa.api.pagination import PageParams, paginate
 from tokiwa.api.visibility import project_event
@@ -125,7 +126,13 @@ async def list_events(
     if until is not None:
         stmt = stmt.where(EventRow.timestamp <= ensure_utc(until))
     stmt = stmt.order_by(EventRow.timestamp.desc(), EventRow.id.desc())
-    return await paginate(session, stmt, page, lambda r: project_event(row_to_event(r), user))
+    result = await paginate(session, stmt, page, lambda r: project_event(row_to_event(r), user))
+    filters = {
+        "kind": kind, "dataset": dataset, "source_ip": source_ip, "session_id": session_id,
+        "host": host, "q": q, "since": since, "until": until, "offset": page.offset or None,
+    }  # fmt: skip
+    await record_access(session, user, "events.list", filters=filters, count=len(result.items))
+    return result
 
 
 @router.get("/stats/timeline", response_model=EventTimeline)
@@ -161,4 +168,5 @@ async def get_event(event_id: str, session: DbSession, user: CurrentUser) -> Eve
     row = await session.get(EventRow, event_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    await record_access(session, user, "events.get", target=event_id, count=1)
     return project_event(row_to_event(row), user)
