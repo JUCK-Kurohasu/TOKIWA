@@ -89,7 +89,8 @@ def test_honeytoken_case_variant(make_asset: MakeAsset, make_http_event: MakeEve
     "mangle",
     [
         lambda v: v[:12],  # cut
-        lambda v: v[:-1] + ("A" if v[-1] != "A" else "B"),  # one character mis-copied
+        # one character mis-copied (compared case-insensitively since #30, so change the letter, not its case)
+        lambda v: v[:-1] + ("Z" if v[-1].lower() != "z" else "Y"),
         lambda v: base64.b64encode(v.encode()).decode(),  # b64_hdr
         lambda v: "dbg_" + "x" * 24,
     ],
