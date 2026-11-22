@@ -93,6 +93,15 @@ event.ingested ──▶ service.record_trips ──▶ deception_trips 行 + tr
 `process.cmdline`・`raw`（先頭 16KB）を走査（URL デコード版も）。デコイパスは正規化（`%2e`/二重エンコード、`//`、
 `..`、大文字小文字）して照合。1 イベント × 1 資産につき最も強い分類を 1 件。
 
+**転記揺れ（監査 #30）**: トークン照合は **大文字小文字を区別しない**。さらに `\` を除いた版も照合する（エージェントの
+Web 取得で広く使われる markdownify は `_` を `\_` にエスケープするので、`dbg\_…` がそのまま送られる）。`/api/internal/<値>`
+の判定もデコード → `\` 除去 → 正規化してから行う。生成トークンの字母は変えていない（既存の設置済み値を壊さないため）。
+**カナリアヘッダの試み**: `canary_header` が既知のカナリア値 **以外** の値で送られた（写し間違い・切り詰め・base64 等）
+ときは、資産に紐付かないアラート `canary_attempt`（**medium**, `deception`, AI 断定なし、タグ `deception:canary_attempt`、
+送信元ごとに 1 件）を出す。ヘッダ名は隠し指示にしか出てこないが、本プロジェクトの公開文書にも載るので AI 断定はしない。
+`induced` の兆候があれば出さない。経路 `/api/internal/dbg*` で値が一致しないものは、実アプリの `/api/internal/` と
+紛れやすく、リンクで誘発もできるので対象外。
+
 **出所（`details.provenance`、`deception/provenance.py`。監査 #133）** — そのトリップを第三者が誘発できたか:
 
 | provenance | 条件 | 扱い |
@@ -113,6 +122,7 @@ event.ingested ──▶ service.record_trips ──▶ deception_trips 行 + tr
 | honeytoken | critical | deception | — | T1552.001, T1078 |
 | decoy_path | critical | deception | — | T1595.003 |
 | labyrinth | high（深さ≥3 で critical） | deception | — | T1594 |
+| canary_attempt（資産なし） | medium | deception | — | — |
 
 重複排除キー: `deception.trip|<asset>|<分類>|<source_ip>`（AI 追従は別アラートとして立つ。`passive` は
 `canary_passive`、`induced` は `induced` という別の分類なので、後から来た `direct` の追従は別アラートになる）。

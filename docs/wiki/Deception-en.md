@@ -54,6 +54,9 @@ If you enable them, check that they do not conflict with the app's own content.
 | `honeytoken` | critical | Fake credentials were used |
 | `decoy_path` | critical | A decoy path was accessed |
 | `labyrinth` | high (critical at depth 3 or more) | Wandered into the labyrinth |
+| `canary_attempt` | medium | The canary header was sent with a value other than a known one (a mis-copied or truncated value: an attempt to follow; not taken as proof of an AI) |
+
+Canary values are matched case-insensitively and after removing backslash escapes such as `\_` (AI web-fetching tools sometimes rewrite the value before passing it on).
 
 Trips that a third party can induce are weighted down: they are not taken as proof of an AI and never serve as the basis for a block proposal.
 

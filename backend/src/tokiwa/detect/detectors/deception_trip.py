@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tokiwa.deception.matcher import CANARY_TRIP_TYPES, Trip, TripType, match_event
-from tokiwa.deception.provenance import Provenance
+from tokiwa.deception.matcher import CANARY_TRIP_TYPES, Trip, TripType, canary_header_attempt, match_event
+from tokiwa.deception.provenance import Provenance, induced_by
 from tokiwa.deception.service import get_index
 from tokiwa.detect.base import Detector, register_detector
 from tokiwa.detect.context import DetectionContext
@@ -36,6 +36,7 @@ from tokiwa.schemas.events import Event
 
 LABYRINTH_CRITICAL_DEPTH = 3  # going this deep into generated pages = automated crawling
 PASSIVE_CANARY_AI_SCORE = 0.5  # weak AI hint for a link-reachable canary hit; never reaches the AI threshold
+CANARY_ATTEMPT_SEVERITY = Severity.MEDIUM  # canary header with an unknown value (#30)
 
 
 @dataclass(frozen=True)
@@ -197,7 +198,41 @@ class DeceptionTripDetector(Detector):
         if index.empty:
             return []
         threshold = ctx.settings.detection.ai_agent_threshold
-        return [self._draft(event, trip, threshold) for trip in match_event(event, index)]
+        trips = match_event(event, index)
+        drafts = [self._draft(event, trip, threshold) for trip in trips]
+        if not any(t.trip_type in CANARY_TRIP_TYPES for t in trips):
+            value = canary_header_attempt(event, index)
+            if value is not None and not (index.downgrade_induced and induced_by(event)):
+                drafts.append(self._attempt(event, index.canary_header, value))
+        return drafts
+
+    def _attempt(self, event: Event, header: str, value: str) -> AlertDraft:
+        """Canary header with an unknown value (#30): tried to follow, value mangled (escaping, typo, cut)."""
+        return self.draft(
+            event,
+            title=f"AI canary header sent with an unknown value ({header})",
+            description=(
+                "隠し指示にだけ出てくるカナリアヘッダが、既知のカナリア値以外の値で送られた（写し間違い・Markdown "
+                "エスケープ・切り詰め等で値が崩れた追従の試み）。ヘッダ名は公開文書にも載るため AI とは断定しない。 "
+                "The canary header, which only the hidden instruction names, was sent with a value that is not a "
+                "known canary (mangled while copying). Not an AI verdict on its own: the header name is public."
+            ),
+            severity=CANARY_ATTEMPT_SEVERITY,
+            confidence=0.6,
+            category=AlertCategory.DECEPTION,
+            ai_score=None,
+            mitre=[],
+            tags=["deception", "deception:canary_attempt"],
+            entities={"canary_header": header},
+            fingerprint=f"{self.id}|canary_attempt|{event.source_ip or '-'}",
+            details={
+                "trip_type": "canary_attempt",
+                "header": header,
+                "value": value[:128],
+                "provenance": Provenance.DIRECT.value,
+                "path": event.http.path if event.http else None,
+            },
+        )
 
     def _draft(self, event: Event, trip: Trip, ai_threshold: float) -> AlertDraft:
         kind = trip.asset.kind.value

@@ -54,6 +54,9 @@ Si los habilita, compruebe que no entren en conflicto con el contenido de la apl
 | `honeytoken` | critical | Se usaron credenciales falsas |
 | `decoy_path` | critical | Se accedió a una ruta señuelo |
 | `labyrinth` | high (critical a partir de profundidad 3) | Se entró en el laberinto |
+| `canary_attempt` | medium | La cabecera del canario se envió con un valor distinto de los conocidos (copiado con errores o truncado: un intento de seguir las instrucciones; no se toma como prueba de una IA) |
+
+Los valores del canario se comparan sin distinguir mayúsculas y minúsculas y tras quitar los escapes con barra invertida como `\_` (las herramientas de IA que obtienen páginas web a veces reescriben el valor antes de pasarlo).
 
 Los disparos que un tercero puede inducir pesan menos: no se toman como prueba de una IA ni sirven de base para proponer un bloqueo.
 

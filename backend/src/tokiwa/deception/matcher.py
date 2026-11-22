@@ -160,6 +160,7 @@ class DeceptionIndex:
         canary_header: str,
         *,
         downgrade_induced: bool = True,
+        canaries_served: bool = True,
     ) -> None:
         self.tokens = tokens
         self.exact_paths = exact_paths
@@ -167,8 +168,15 @@ class DeceptionIndex:
         self.assets = assets
         self.canary_header = canary_header.lower()
         self.downgrade_induced = downgrade_induced
+        # canary-header attempts only mean something while the canary text (naming the header) is served
+        self.canary_attempts = canaries_served and any(r.slot == Slot.CANARY for r in tokens.values())
         values = sorted((v for v in tokens if len(v) >= MIN_TOKEN_LEN), key=len, reverse=True)
-        self._pattern = re.compile("|".join(re.escape(v) for v in values)) if values else None
+        # Case-insensitive (#30): an LLM re-typing a 24-char random value, or a pipeline lower-casing a header,
+        # must not lose the trip. ``_canonical`` maps the case-folded match back to the stored value.
+        self._canonical: dict[str, str] = {}
+        for v in values:
+            self._canonical.setdefault(v.casefold(), v)
+        self._pattern = re.compile("|".join(re.escape(v) for v in values), re.IGNORECASE) if values else None
 
     @property
     def empty(self) -> bool:
@@ -216,12 +224,19 @@ class DeceptionIndex:
             by_id,
             settings.canary_header,
             downgrade_induced=settings.downgrade_browser_induced,
+            canaries_served=settings.ai_canaries,
         )
 
     def find_tokens(self, text: str) -> list[str]:
+        """Known values in ``text`` (case-insensitive), returned as stored (keys of ``tokens``)."""
         if self._pattern is None or not text:
             return []
-        return [m.group(0) for m in self._pattern.finditer(text)]
+        out = []
+        for m in self._pattern.finditer(text):
+            value = self._canonical.get(m.group(0).casefold())
+            if value is not None:
+                out.append(value)
+        return out
 
     def match_path(self, path: str) -> tuple[IndexedAsset | None, int | None]:
         norm = normalize_path(path)
@@ -273,13 +288,32 @@ def iter_fields(event: Event) -> Iterator[tuple[str, str]]:
             yield "raw", raw
 
 
+def _unescape(text: str) -> str:
+    """Drop backslashes (#30): markdownify, the most common HTML->Markdown step of agent web tools, escapes
+    ``_`` so the agent sees and sends ``dbg\\_...``. Generated values never contain a backslash."""
+    return text.replace("\\", "")
+
+
 def _variants(text: str) -> list[str]:
     out = [text]
     if "%" in text or "+" in text:
         decoded = unquote_plus(text)
         if decoded != text:
             out.append(decoded)
+    for v in list(out):
+        if "\\" in v:
+            out.append(_unescape(v))
     return out
+
+
+def _canary_path(path: str | None) -> str:
+    """Request path as compared with ``/api/internal/<value>``: decoded, unescaped, normalized, lower-cased."""
+    p = path or "/"
+    for _ in range(2):
+        if "%" not in p:
+            break
+        p = unquote(p)
+    return normalize_path(_unescape(p))
 
 
 @dataclass
@@ -297,13 +331,32 @@ def _followed(m: TokenMatch, event: Event, index: DeceptionIndex) -> bool:
         return True
     composed = f"{CANARY_PATH_PREFIX}{m.value}".lower()
     if m.field == "http.path" and event.http is not None:
-        return normalize_path(event.http.path).startswith(composed)
+        return _canary_path(event.http.path).startswith(composed)
     if m.field in ("http.referrer", "http.headers.referer"):
         text: str | None = None
         if event.http is not None:
             text = event.http.referrer if m.field == "http.referrer" else event.http.headers.get("referer")
-        return composed in unquote(text or "").lower()
+        return composed in _unescape(unquote(text or "")).lower()
     return False
+
+
+def canary_header_attempt(event: Event, index: DeceptionIndex) -> str | None:
+    """Value of the canary header when it carries no known canary value (#30), else None.
+
+    The header name only appears in the canary text (and this project's docs); legitimate clients do not send
+    it. A client sending it with a mangled value (typo, escaping, truncation) tried to follow the instruction.
+    """
+    h = event.http
+    if h is None or not index.canary_attempts:
+        return None
+    value = next((v for k, v in h.headers.items() if k.lower() == index.canary_header), "").strip()
+    if not value or value.startswith("[REDACTED"):
+        return None
+    for v in index.find_tokens(_unescape(value)):
+        ref = index.tokens.get(v)
+        if ref is not None and ref.slot == Slot.CANARY:
+            return None
+    return value
 
 
 def _provenance(trip_type: TripType, matches: list[TokenMatch], induced: list[str]) -> Provenance:
