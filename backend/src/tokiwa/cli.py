@@ -100,7 +100,7 @@ def _validated_user(username: str, password: str, role: str) -> Any:
     from tokiwa.schemas.system import UserCreate
 
     try:
-        return UserCreate(username=username, password=password, role=role)  # type: ignore[arg-type]
+        return UserCreate(username=username, password=password, role=role)
     except ValidationError as exc:
         fields = ", ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise _UserError(f"invalid input ({fields})") from None

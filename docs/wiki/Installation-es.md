@@ -26,8 +26,8 @@ make up                  # = docker compose -f deploy/compose.yaml --env-file .e
 3. Por defecto solo se publica en `127.0.0.1:8788`. Para exponerlo en la LAN se usa `TOKIWA_BIND=0.0.0.0` en `.env`, pero
    **no lo publique sin TLS**: coloque delante el proxy inverso que se describe más adelante.
 
-> ⚠️ **No habilite ajustes con un valor vacío**. Por ejemplo, `TOKIWA_SERVER__SECRET_KEY=` (vacío) se usaría como "clave de firma de cadena vacía".
-> Deje comentadas las opciones que no use. Si no se define, la clave de firma se genera automáticamente en el primer arranque.
+> ⚠️ **No habilite ajustes con un valor vacío** (lo que significa una cadena vacía depende del ajuste). Deje comentadas las opciones que no use.
+> La clave de firma `TOKIWA_SERVER__SECRET_KEY` se genera automáticamente en el primer arranque si no se define (o está vacía); una clave definida necesita al menos 32 caracteres.
 
 ### Ejecutar solo con docker
 

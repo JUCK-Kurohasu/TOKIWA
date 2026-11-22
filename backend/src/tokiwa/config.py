@@ -19,8 +19,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+MIN_SECRET_KEY_LENGTH = 32
 
 
 class ServerSettings(BaseModel):
@@ -31,9 +33,24 @@ class ServerSettings(BaseModel):
     # Built frontend (vite build output). Served at "/" when the directory exists.
     static_dir: Path | None = None
     data_dir: Path = Path("./data")
-    # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset.
+    # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset. An empty value
+    # counts as unset; a set value must have at least MIN_SECRET_KEY_LENGTH characters (HS256 keys can be guessed
+    # offline from any issued JWT, and a forged JWT is an admin login).
     secret_key: SecretStr | None = None
     token_ttl_minutes: int = 60 * 12
+
+    @field_validator("secret_key", mode="before")
+    @classmethod
+    def _empty_secret_is_unset(cls, value: Any) -> Any:
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return None
+        if isinstance(raw, str) and len(raw.strip()) < MIN_SECRET_KEY_LENGTH:
+            raise ValueError(
+                f"server.secret_key must have at least {MIN_SECRET_KEY_LENGTH} characters "
+                "(e.g. `openssl rand -base64 48`), or leave it unset to use the generated data_dir/secret.key"
+            )
+        return value  # used verbatim (stripping would change existing keys and log everyone out)
 
 
 class AuthSettings(BaseModel):

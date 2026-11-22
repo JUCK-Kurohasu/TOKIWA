@@ -21,7 +21,7 @@ Con Docker Compose, `.env` se pasa al contenedor como variables de entorno. Si e
 ### Precauciones de escritura
 
 - **Las listas y los diccionarios se escriben en JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **No defina valores vacíos**. `TOKIWA_SERVER__SECRET_KEY=` se trata como "clave de firma de cadena vacía" (no es lo mismo que no definirla).
+- **No defina valores vacíos** (lo que significa una cadena vacía depende del ajuste). Un `TOKIWA_SERVER__SECRET_KEY=` vacío se trata como no definido y se usa la clave generada en `data_dir/secret.key`. Una clave definida debe tener al menos 32 caracteres; si es más corta, el servidor no arranca.
 - Se recomienda pasar los secretos (claves de API, contraseñas) mediante variables de entorno y no en el YAML.
 
 ### Ejemplo de YAML
@@ -55,7 +55,7 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | Solo si la interfaz se sirve desde otro origen |
 | `server.static_dir` | Ninguno | Interfaz compilada (`frontend/dist`). Si se indica, se sirve en `/` |
 | `server.data_dir` | `./data` | Ubicación de los datos (clave de firma, etc.) |
-| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
+| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT), de al menos 32 caracteres. Si no se define o está vacía, se genera y se guarda en `data_dir/secret.key` (permisos 0600) |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
 | `auth.setup_code_required` | `true` | La configuración inicial (crear el primer administrador) exige el código de un solo uso que aparece en el log de arranque y en `data_dir/setup-code` |
 | `auth.login_max_failures` | 5 | Tras este número de fallos de inicio de sesión para el mismo usuario + IP de origen, se rechazan los intentos durante un tiempo (429). 0 lo desactiva |

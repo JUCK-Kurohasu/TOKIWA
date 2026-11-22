@@ -21,7 +21,7 @@ With Docker Compose, `.env` is passed to the container as environment variables.
 ### Things to watch when writing settings
 
 - **Write lists and dictionaries as JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **Do not set a value to empty**. `TOKIWA_SERVER__SECRET_KEY=` is treated as "a signing key that is an empty string" (which is not the same as leaving it unset).
+- **Do not set a value to empty** (what an empty string means differs per setting). An empty `TOKIWA_SERVER__SECRET_KEY=` is treated as unset, so the generated key in `data_dir/secret.key` is used. A key you set must have at least 32 characters; a shorter one stops the server from starting.
 - We recommend passing secrets (API keys, passwords) in environment variables rather than in YAML.
 
 ### YAML example
@@ -55,7 +55,7 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | Only when the UI is served from a different origin |
 | `server.static_dir` | None | Built UI (`frontend/dist`). When set, it is served at `/` |
 | `server.data_dir` | `./data` | Where data is stored (signing key, and so on) |
-| `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
+| `server.secret_key` | Auto-generated | Signing key for logins (JWT), at least 32 characters. If unset or empty, it is generated and saved to `data_dir/secret.key` (mode 0600) |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
 | `auth.setup_code_required` | `true` | First-run setup (creating the first admin) requires the single-use code printed in the startup log and saved to `data_dir/setup-code` |
 | `auth.login_max_failures` | 5 | After this many failed logins for the same user name + source IP, further attempts are refused for a while (429). 0 disables |

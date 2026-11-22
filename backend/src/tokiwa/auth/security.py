@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import weakref
@@ -15,11 +17,14 @@ from typing import Any
 
 import jwt
 
-from tokiwa.config import get_settings
+from tokiwa.auth.files import create_private_file, read_private_file
+from tokiwa.config import MIN_SECRET_KEY_LENGTH, get_settings
 from tokiwa.util import sha256_hex, utcnow
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
 API_TOKEN_PREFIX = "tkw_"
+
+log = logging.getLogger(__name__)
 
 _secret_cache: str | None = None
 
@@ -75,7 +80,11 @@ async def verify_password_async(password: str, encoded: str | None) -> bool:
 
 
 def secret_key() -> str:
-    """JWT secret: config value, else persisted random key in data_dir/secret.key."""
+    """JWT secret: config value, else persisted random key in data_dir/secret.key.
+
+    The file is created with mode 0600 from the start (no umask window, #102) and atomically, so several workers
+    starting at once agree on one key. An empty ``server.secret_key`` counts as unset (see config.py).
+    """
     global _secret_cache
     settings = get_settings()
     if settings.server.secret_key is not None:
@@ -83,13 +92,22 @@ def secret_key() -> str:
     if _secret_cache:
         return _secret_cache
     path = Path(settings.server.data_dir) / "secret.key"
-    if path.is_file():
-        _secret_cache = path.read_text().strip()
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _secret_cache = secrets.token_urlsafe(48)
-        path.write_text(_secret_cache)
-        path.chmod(0o600)
+    key = read_private_file(path)
+    if key is None and not path.exists():
+        create_private_file(path, secrets.token_urlsafe(48) + "\n")
+        key = read_private_file(path)  # ours, or the one a concurrent process created first
+    if key is None:
+        raise RuntimeError(
+            f"{path} is empty; delete it to generate a new JWT signing key (logs everyone out)"
+        )
+    if len(key) < MIN_SECRET_KEY_LENGTH:
+        raise RuntimeError(
+            f"{path} holds a key shorter than {MIN_SECRET_KEY_LENGTH} characters; replace or delete it"
+        )
+    with contextlib.suppress(OSError):
+        if path.stat().st_mode & 0o077:
+            log.warning("%s is readable by other users; restrict it with: chmod 600 %s", path, path)
+    _secret_cache = key
     return _secret_cache
 
 

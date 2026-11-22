@@ -6,6 +6,8 @@ Usage in services / jobs: ``async with session_scope() as session: ...`` (commit
 
 from __future__ import annotations
 
+import contextlib
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,7 +27,10 @@ def _ensure_sqlite_dir(url: str) -> None:
     if url.startswith(prefix):
         path = url[len(prefix) :]
         if path and path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).parent.mkdir(mode=0o700, parents=True, exist_ok=True)  # new dirs only (#102)
+            if "?" not in path and not path.startswith("file:"):  # SQLite gives -wal/-shm the DB file's mode
+                with contextlib.suppress(FileExistsError):
+                    os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
 
 
 def init_engine(url: str | None = None, echo: bool | None = None) -> AsyncEngine:

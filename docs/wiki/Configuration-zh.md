@@ -21,7 +21,7 @@
 ### 书写注意事项
 
 - **列表和字典用 JSON 书写**：`TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **不要设置空值**。`TOKIWA_SERVER__SECRET_KEY=` 会被视为“空字符串签名密钥”（与未设置不同）。
+- **不要设置空值**（空字符串的含义因设置项而异）。空的 `TOKIWA_SERVER__SECRET_KEY=` 会被视为未设置，使用 `data_dir/secret.key` 中自动生成的密钥。自行设置时需要至少 32 个字符，过短时服务器无法启动。
 - 建议机密信息（API 密钥、密码）通过环境变量而不是 YAML 传递。
 
 ### YAML 示例
@@ -55,7 +55,7 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | 仅在从其他源提供 UI 时需要 |
 | `server.static_dir` | 无 | 已构建的 UI（`frontend/dist`）。指定后在 `/` 下提供 |
 | `server.data_dir` | `./data` | 数据的保存位置（签名密钥等） |
-| `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥。未设置时生成并保存到 `data_dir/secret.key` |
+| `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥（至少 32 个字符）。未设置或为空时生成并保存到 `data_dir/secret.key`（权限 0600） |
 | `server.token_ttl_minutes` | 720 | 登录的有效时间 |
 | `auth.setup_code_required` | `true` | 初始设置（创建第一个管理员）时要求输入启动日志和 `data_dir/setup-code` 中的一次性设置码 |
 | `auth.login_max_failures` | 5 | 同一用户名 × 来源 IP 的登录失败达到此次数后，暂时拒绝（429）。0 表示禁用 |

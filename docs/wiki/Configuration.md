@@ -21,7 +21,7 @@ Docker Compose では `.env` が環境変数としてコンテナに渡されま
 ### 書き方の注意
 
 - **リストや辞書は JSON で** 書きます: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **空の値で設定しないでください**。`TOKIWA_SERVER__SECRET_KEY=` は「空文字の署名鍵」として扱われます（未設定とは別物です）。
+- **空の値で設定しないでください**（空文字は項目によって意味が変わります）。`TOKIWA_SERVER__SECRET_KEY=`（空）は未設定として扱われ、`data_dir/secret.key` の自動生成の鍵が使われます。設定する場合は 32 文字以上が必要で、短いとサーバーが起動しません。
 - 秘密（API キー・パスワード）は YAML ではなく環境変数で渡すことを勧めます。
 
 ### YAML の例
@@ -55,7 +55,7 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | UI を別オリジンから配信する場合のみ |
 | `server.static_dir` | なし | ビルド済み UI（`frontend/dist`）。指定すると `/` で配信 |
 | `server.data_dir` | `./data` | データの保存先（署名鍵など） |
-| `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵。未設定なら `data_dir/secret.key` に生成・保存 |
+| `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵（32 文字以上）。未設定・空なら `data_dir/secret.key`（権限 0600）に生成・保存 |
 | `server.token_ttl_minutes` | 720 | ログインの有効時間 |
 | `auth.setup_code_required` | `true` | 初回セットアップ（最初の管理者作成）に、起動ログと `data_dir/setup-code` に出る 1 回限りのコードを要求する |
 | `auth.login_max_failures` | 5 | 同じユーザー名 × 送信元 IP のログイン失敗がこの回数に達すると、一時的に拒否（429）。0 で無効 |
