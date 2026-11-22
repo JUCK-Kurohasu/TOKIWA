@@ -309,7 +309,7 @@ export function TokensTab({ flash }: { flash: Flash }) {
                 <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(t.last_used)}>
                   {t.last_used ? timeAgo(t.last_used) : L.never}
                 </TD>
-                <TD title={t.expires_at ? formatDateTime(t.expires_at) : undefined}>
+                <TD title={dateTimeTitle(t.expires_at)}>
                   {t.revoked ? (
                     <Badge>{L.revoked}</Badge>
                   ) : t.expires_at && Date.parse(t.expires_at) <= Date.now() ? (
