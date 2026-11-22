@@ -11,8 +11,8 @@
 | #30 | 完全（推奨 (1)(2)。(3) 編集距離は不採用） | トークン照合を大文字小文字無視（正規表現 `IGNORECASE` + 格納値への逆引き。`find_tokens` は格納値を返すので呼び出し側は無変更）、`\` を除いた版も照合（markdownify の `dbg\_` 対策）、`/api/internal/<値>` の判定と Referer もデコード → `\` 除去 → 正規化で比較。カナリアヘッダが既知値以外で送られたら資産に紐付かない `canary_attempt`（medium・deception・AI 断定なし、送信元ごとに 1 件、誘発兆候があれば出さない、`ai_canaries=false` やカナリア値が無いときは出さない）。テスト `test_deception_variants.py`（repro の md_escaped_path / md_escaped_hdr / lowercase_hdr / %5C / 大文字パス / Referer / クエリ、切り詰め・1 文字違い・base64・でたらめ値の試み） | a052a36 |
 | #41 | 部分（挿入位置の設定化と既定の先頭+末尾は完全。HTML 以外への展開・eval の先頭 N KB チェックは未着手） | 設定 `deception.html_injection_positions`（`head` / `body_start` / `body_end`、既定 `[body_start, body_end]`）を `GatePolicy.html_injection_positions`（新フィールド、default None）で Gate に渡す。Gate の `gate.proxy.inject_html()` が位置ごとに挿入: `body_start` は最初の本物の `<body …>` の直後（`<script>`/`<style>`/`<title>`/`<textarea>`/`<template>`/コメント内の文字列と引用符内の `>` を飛ばす）、`body_end` は従来どおり最後の `</body>` の直前、`head` は `<head>` 直後にスニペット先頭の HTML コメントだけ（`<div>` は `<head>` を閉じてしまう）。位置の無いポリシー（古いサーバー）は `body_end` のみ、古い Gate は新フィールドを無視（pydantic の既定で余分なフィールドは無視）。位置は policy version に含むので設定変更が稼働中の Gate に届く。`</body>` が省略されたページにも `<body>` 直後に入るようになった。テスト `test_deception_injection.py`（43 KB のページで先頭 1,000 バイト以内にトークン・従来位置は 30,000 超を再現、生テキスト内の `<body>`、属性内の `>`、`<header>`、未知の位置、旧/新ポリシーの互換、サーバーが設定の位置と version を返す）と `tests/gate/test_gate_app.py` に 1 件（gzip 応答の両位置挿入） | 998950b |
 | #65 | 部分（(a)(b) 完全。(c)(d)(e) 未着手） | (a) 資産のパスを Gate と同じ `gate.policy.normalize_path`（URL デコード後も）で正規化して検証し、`/` になるもの（`/.`、`//`、`/a/..`、`/%2e`、`/%252e`、`/.*` …）は 422。保存するのは Gate で正規化した形（`/a/../.env` → `/.env`）なので重複は 409。respond の `deploy_canary` も `create_asset` を通るので同じく拒否（`respond/validate.py` は無変更）。検証前に作られた行がルートを指していても `render.shadows_site()` で Gate ポリシーに載せない（警告ログ）。(b) 前方一致は `*` の前に完全なセグメントが 1 つ以上（`/admin/*` 可、`/a*`・`/admin*` 不可。迷路の既定 `/archive/*` は通る）。テスト `test_deception_paths.py`（3 種別 × 12 のルート表現、前方一致、正規化保存と重複、迷路・更新、旧データの非配信） | cbaf5e4 |
-| #68 | 完全 | 新モジュール `deception/keys.py`: デセプション派生鍵を JWT 署名鍵から分離し `data_dir/deception.key`（0600、`auth.files.create_private_file` で原子的に作成）に鍵リングとして保存。1 行 1 鍵（16 進、`#` コメント可）、先頭が現用（描画）、全行を照合（`DeceptionIndex.build(older_keys=...)`）。**初回は #68 以前の導出鍵（HMAC(JWT 鍵, 'tokiwa.deception.derive.v1')）をそのまま書き出す** ので既存デプロイの派生値は変わらず、以後 JWT 鍵を入れ替えても変わらない。ファイルが読めない・作れない（読み取り専用の data dir）・壊れている・空のときは検知を止めず JWT 由来の鍵で動きエラーログ。`docs/deploy.md` の状態・バックアップ/リストア・鍵ローテーション、`docs/deception.md` §3、wiki Installation（バックアップ手順）・Deception（4 言語）。テスト `test_deception_keys.py`（初回の値が旧導出と一致・0600、JWT 鍵ローテーション後も派生値と照合が不変、デセプション鍵の入れ替えで旧値も照合・新値で描画、壊れた/空のファイル） | （このコミット） |
-| #84 | 未着手 | | |
+| #68 | 完全 | 新モジュール `deception/keys.py`: デセプション派生鍵を JWT 署名鍵から分離し `data_dir/deception.key`（0600、`auth.files.create_private_file` で原子的に作成）に鍵リングとして保存。1 行 1 鍵（16 進、`#` コメント可）、先頭が現用（描画）、全行を照合（`DeceptionIndex.build(older_keys=...)`）。**初回は #68 以前の導出鍵（HMAC(JWT 鍵, 'tokiwa.deception.derive.v1')）をそのまま書き出す** ので既存デプロイの派生値は変わらず、以後 JWT 鍵を入れ替えても変わらない。ファイルが読めない・作れない（読み取り専用の data dir）・壊れている・空のときは検知を止めず JWT 由来の鍵で動きエラーログ。`docs/deploy.md` の状態・バックアップ/リストア・鍵ローテーション、`docs/deception.md` §3、wiki Installation（バックアップ手順）・Deception（4 言語）。テスト `test_deception_keys.py`（初回の値が旧導出と一致・0600、JWT 鍵ローテーション後も派生値と照合が不変、デセプション鍵の入れ替えで旧値も照合・新値で描画、壊れた/空のファイル） | c425ad3 |
+| #84 | 部分（(1) 文書化は完全。(2) `canary_style`・(3) 実機計測手順の実施は未着手） | `docs/purple-team.md` §3 の「ARTEX が従えば決定的に判定できる」を改め、追従はモデル依存・確率的で未発火は非 AI の根拠にならないこと、演習の合否は振る舞いで見ること、追従率の測り方（モデル別・複数回、`details.provenance` と ARTEX の LLM 記録の突き合わせ）を明記。`docs/deception.md` §1 に「十分条件であって必要条件ではない」の注記、wiki Deception（4 言語）に同じ趣旨の段落 | （このコミット） |
 
 ## 要判断
 
@@ -86,6 +86,11 @@
 - `docs/gate.md`・`docs/response.md`（#41）: 挿入位置の 1 文。
 
 ## 他レーンへの依頼
+
+- **frontend**: `frontend/src/pages/deception/DeceptionPage.tsx` の AI カナリア説明（`explainer` の rule1/rule2・why）が旧仕様のまま
+  （「指示されたパスへのアクセス → AI スコア 0.99 の critical」「トリップは常に critical」）。#133 以降は「カナリアヘッダでの追従だけが
+  AI 断定、経路だけは medium・クロスサイト等は low、未発火は非 AI の根拠にならない」。本レーンはフロントを触っていない
+  （npm のチェックを回す時間を優先しなかった）。KPI の補足「Each trip raises a critical alert」も同様。
 
 - **respond / triage（自動承認の最終防衛線）**: 本対応で守られるのは **ルール判定（mock / fallback）の経路だけ**。実 LLM のトリアージは
   medium の deception インシデントにも block_ip を提案し得て、自動承認なら実行される。`details.provenance in (passive, induced)` の

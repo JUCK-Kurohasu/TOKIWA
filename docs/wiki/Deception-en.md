@@ -15,6 +15,8 @@ This is the core mechanism of Mirage. It embeds "**hidden instructions that only
 - The values never appear as links (`href`) or as OpenAPI examples. If a crawler or fuzzer that mechanically follows links happened to
   "follow" them by chance, the basis for concluding that the client is an AI would collapse.
 
+Whether an agent follows the hidden instructions depends on its AI model and design, and is probabilistic (some models recognize the instruction as an attack and ignore it). **A canary that did not fire is not evidence that the client is not an AI.** To judge whether a client is an AI, rely mainly on the behavioral score in [AI sessions](Web-UI-en).
+
 When a request sends the value in the canary header as instructed, you can conclude that it comes from an LLM-driven client (AI score 0.99).
 However, anyone who opens a protected page can read the value, so a third party can make other people open `/api/internal/<value>/`
 (an `<img>` embedded in a forum or an email, the link preview of a link pasted into a chat). Accessing that path alone is therefore not

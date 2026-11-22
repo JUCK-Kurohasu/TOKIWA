@@ -15,6 +15,8 @@ Es el mecanismo central de Mirage. Dentro de los señuelos se incrustan "**instr
 - Los valores no aparecen como enlaces (`href`) ni como ejemplos de OpenAPI. Si un rastreador o un fuzzer que sigue enlaces mecánicamente
   los "obedeciera" por casualidad, se perdería la base para afirmar que se trata de una IA.
 
+Que un agente siga las instrucciones ocultas depende de su modelo de IA y de su diseño, y es probabilístico (algunos modelos reconocen la instrucción como un ataque y la ignoran). **Que un canario no se dispare no prueba que el cliente no sea una IA.** Para determinar si es una IA, básese sobre todo en la puntuación de comportamiento de **[AI sessions](Web-UI-es)** (Sesiones de IA).
+
 Si llega una solicitud que envía el valor en la cabecera del canario según las instrucciones, puede concluirse que procede de un cliente impulsado por un LLM (puntuación de IA 0.99).
 Sin embargo, cualquiera que abra una página protegida puede leer el valor, así que un tercero puede hacer que otras personas abran `/api/internal/<valor>/`
 (un `<img>` incrustado en un foro o en un correo, la vista previa de un enlace pegado en un chat). Por eso, acceder solo a esa ruta no se toma como prueba de una IA
