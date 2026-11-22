@@ -1,19 +1,28 @@
-"""Response actions (FR-12): list, propose, approve, reject, revert. Writes require analyst or admin."""
+"""Response actions (FR-12): list, propose, approve, reject, revert; suppressions (audit #63).
+
+Writes require analyst or admin."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from tokiwa.api.deps import AnalystUser, CurrentUser
-from tokiwa.respond import service
+from tokiwa.respond import service, suppress
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.response import ActionProposal, ActionProposer, ActionStatus, ResponseAction
+from tokiwa.schemas.suppressions import ResponseSuppression, ResponseSuppressionIn, SuppressOptions
 
 router = APIRouter(prefix="/api/v1/response", tags=["response"])
 
 
-class RejectRequest(BaseModel):
+class RejectRequest(SuppressOptions):
+    """``suppress_hours`` / ``suppress_permanent``: do not re-propose this type + target (audit #63)."""
+
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class RevertRequest(SuppressOptions):
     reason: str | None = Field(default=None, max_length=2000)
 
 
@@ -26,6 +35,10 @@ def _http(exc: Exception) -> HTTPException:
         return HTTPException(422, str(exc))
     if isinstance(exc, service.ActionExecutionError):
         return HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
+    if isinstance(exc, suppress.SuppressionNotFound):
+        return HTTPException(status.HTTP_404_NOT_FOUND, "suppression not found")
+    if isinstance(exc, suppress.SuppressionStateError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     raise exc
 
 
@@ -34,6 +47,8 @@ _ERRORS = (
     service.ActionStateError,
     service.ActionValidationError,
     service.ActionExecutionError,
+    suppress.SuppressionNotFound,
+    suppress.SuppressionStateError,
 )
 
 
@@ -79,15 +94,48 @@ async def approve(action_id: str, user: AnalystUser) -> ResponseAction:
 async def reject(action_id: str, user: AnalystUser, body: RejectRequest | None = None) -> ResponseAction:
     try:
         return await service.reject_action(
-            action_id, actor=user.username, reason=body.reason if body else None
+            action_id, actor=user.username, reason=body.reason if body else None, suppress_options=body
         )
     except _ERRORS as exc:
         raise _http(exc) from None
 
 
 @router.post("/actions/{action_id}/revert", response_model=ResponseAction)
-async def revert(action_id: str, user: AnalystUser) -> ResponseAction:
+async def revert(action_id: str, user: AnalystUser, body: RevertRequest | None = None) -> ResponseAction:
     try:
-        return await service.revert_action(action_id, actor=user.username)
+        return await service.revert_action(
+            action_id, actor=user.username, reason=body.reason if body else None, suppress_options=body
+        )
+    except _ERRORS as exc:
+        raise _http(exc) from None
+
+
+# ---------------------------------------------------------------- suppressions (audit #63)
+
+
+@router.get("/suppressions", response_model=Page[ResponseSuppression])
+async def list_suppressions(
+    user: CurrentUser,
+    active: bool = True,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> Page[ResponseSuppression]:
+    """Suppressions in force (``active=false``: also expired / lifted ones)."""
+    return await suppress.list_suppressions(active_only=active, limit=limit, offset=offset)
+
+
+@router.post("/suppressions", response_model=ResponseSuppression)
+async def create_suppression(body: ResponseSuppressionIn, user: AnalystUser) -> ResponseSuppression:
+    """Suppress a type + target ahead of time (e.g. a shared NAT / monitoring address). Mode ``suppress``."""
+    try:
+        return await suppress.create_suppression(body, actor=user.username)
+    except _ERRORS as exc:
+        raise _http(exc) from None
+
+
+@router.post("/suppressions/{suppression_id}/lift", response_model=ResponseSuppression)
+async def lift_suppression(suppression_id: str, user: AnalystUser) -> ResponseSuppression:
+    try:
+        return await suppress.lift_suppression(suppression_id, actor=user.username)
     except _ERRORS as exc:
         raise _http(exc) from None

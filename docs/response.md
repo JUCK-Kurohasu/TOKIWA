@@ -21,22 +21,42 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
 | 取り消し | analyst 以上 | `revert_action()`（`active` かつ reversible のみ） |
 | 期限切れ | `@periodic("response.expiry", 30s)` | `expire_due_actions()`（`active` のみ。何も実行しない） |
 
-- すべての遷移を `record_audit` に記録（`response.propose / propose_duplicate / propose_rejected / approve /
-  execute / execute_failed / reject / revert / revert_failed / expire`）。
+- すべての遷移を `record_audit` に記録（`response.propose / propose_duplicate / propose_rejected / propose_suppressed /
+  auto_approve_suppressed / approve / execute / execute_failed / reject / revert / revert_failed / expire / suppress /
+  suppression_lift`）。
 - バス: 新規提案で `action.proposed`、以降の変化（重複マージ含む）は `action.updated`。
 - 重複: 同一 `(action_type, 正規化 target)` が `proposed / approved / active` なら新規作成せず、理由を追記して既存を返す。
 - 起動時、`approved` のまま `executed_at` が無い行（実行中にプロセス停止）は `failed` にする（**自動再実行しない**）。
+- 却下・取り消しは **抑止**（下記 1.1）を記録する。抑止中の対象は再提案されない／自動承認されない。
 - 実行直前に現在の設定で **再検証** する（提案後に protected_cidrs を追加した場合などは `failed`）。
 - 取り消しは先に状態を `reverted` にしてから executor.revert を呼ぶ（Gate は次のポーリングで即解除）。
   revert が失敗したら `active` に戻し `result.revert_error` を記録、API は 502。
 - 期限切れは状態を `expired` にしてから revert。revert 失敗は `result.revert_error` に記録（nft 要素はカーネル側 timeout でも消える）。
+
+### 1.1 抑止（suppression、監査 #63）
+
+重複判定は未完了の行（proposed / approved / active）しか見ないので、以前は却下・取り消しした `(型, 対象)` が次のアラートの
+トリアージで再提案され、自動承認が有効な型では取り消した誤遮断がすぐ再適用されていた。人間の判断を `response_suppressions`
+テーブル（`respond/suppress.py`）に残し、`create_proposal` が同じトランザクション内で照合する。
+
+| mode | いつ作られるか | 提案元 rule / llm / policy | 提案元 user（API） |
+|---|---|---|---|
+| `suppress` | 却下・取り消しで「N 時間 / 恒久的に再提案しない」を選んだとき、`POST /response/suppressions` | **作らない**（行・バス・承認依頼通知なし。監査 `response.propose_suppressed`、`hits` 加算） | 作るが **自動承認しない**（`result.suppression`） |
+| `manual_only` | 上記の指定がない却下・取り消し **すべて**（`response.auto_approve_cooldown_minutes`、既定 1440 分。0 で無効） | 作るが自動承認しない | 同左 |
+
+- 照合: 型が同じで、対象が一致（IP / CIDR は **重なり**: 抑止した /24 の中のホスト、抑止したホストを含む広い CIDR も該当）。
+  型が違えば別扱い（block_ip を抑止しても rate_limit は提案される）。期限切れ・解除済みは無視。
+- 自動承認されなかった場合は `response.auto_approve_suppressed`（自動承認が許可されている型のときだけ）。
+- 一覧 `GET /response/suppressions`、解除 `POST /response/suppressions/{id}/lift`（analyst）。対処画面の「抑止」タブから解除できる。
+- 取り消しの executor が失敗して `active` に戻っても抑止は残る（抑止は提案を止めるだけで何も実行しない）。
+- 期限切れ（TTL）は人間の判断ではないので抑止を作らない。
 
 ## 2. 安全性（FR-12）
 
 1. **承認なしに実行されない**。`_execute()` は DB の行が `approved` かつ `approved_by` / `approved_at` 付きでなければ拒否。
    `approved` にするのは `approve_action()` だけで、呼び出し元は
    (a) `POST /response/actions/{id}/approve`（`AnalystUser`）と
-   (b) `create_proposal()` 内の `if auto_approve_allowed(...)` のみ。
+   (b) `create_proposal()` 内の `if auto_approve_allowed(...) and hold is None`（一致する抑止が無いとき）のみ。
 2. 自動承認は **2 キー**: `response.auto_approve_enabled = true` **かつ** 型が `response.auto_approve_actions` に含まれる。
    既定は off / 空。承認者は `approved_by = "policy"`。
 3. executor が受け取るのは `ExecutionRequest`（正規化 IP/CIDR・パス・識別子、許可キーの型付き params、TTL 秒、
@@ -158,6 +178,7 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | キー | 既定 | 意味 |
 |---|---|---|
 | auto_approve_enabled / auto_approve_actions | false / [] | 自動承認の 2 キー |
+| auto_approve_cooldown_minutes | 1440 | 人間が却下・取り消した型 + 対象は、この時間自動承認しない（0 で無効。§1.1） |
 | default_ttl_minutes / max_ttl_minutes | 60 / 10080 | TTL 既定と上限（超過は切り詰め、`result.validation_notes` に記録） |
 | protected_cidrs | 127.0.0.0/8, ::1/128 | 絶対に対象にしない範囲（管理端末・監視系・上流 LB を足す） |
 | protect_server_addresses | true | サーバー自身の IP を保護 |

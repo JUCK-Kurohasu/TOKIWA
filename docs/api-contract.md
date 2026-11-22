@@ -120,8 +120,11 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | GET | /response/actions/{id} | user | → `ResponseAction` |
 | POST | /response/actions | analyst | `ActionProposal` → `ResponseAction`（status=proposed。重複は既存を返す。検証エラー 422） |
 | POST | /response/actions/{id}/approve | analyst | → `ResponseAction` |
-| POST | /response/actions/{id}/reject | analyst | `{reason?}` → `ResponseAction` |
-| POST | /response/actions/{id}/revert | analyst | → `ResponseAction` |
+| POST | /response/actions/{id}/reject | analyst | `{reason?, suppress_hours?, suppress_permanent?}` → `ResponseAction`。抑止（#63）を記録: 指定時は `suppress`、無指定でも `manual_only`（`response.auto_approve_cooldown_minutes`） |
+| POST | /response/actions/{id}/revert | analyst | `{reason?, suppress_hours?, suppress_permanent?}`（任意）→ `ResponseAction`。抑止の扱いは reject と同じ |
+| GET | /response/suppressions | user | `?active=true&limit&offset` → `Page[ResponseSuppression]`（`active=false` で期限切れ・解除済みも） |
+| POST | /response/suppressions | analyst | `{action_type, target, reason?, suppress_hours? \| suppress_permanent?}` → `ResponseSuppression`（mode=suppress。target 不正は 422） |
+| POST | /response/suppressions/{id}/lift | analyst | → `ResponseSuppression`（解除済みは 409、無ければ 404） |
 | GET | /gate/policy | token:gate | → `GatePolicy`（`ETag: "<version>"`、`If-None-Match` 一致で 304）。200 / 304 とも取得を Gate（トークン + 送信元アドレス）ごとに記録（`gate_polls` テーブル） |
 | GET | /gate/status | user | → `GateStatus`（`schemas/gate_status.py`）: `{generated_at, current_version, stale_after_seconds, gates:[{token_name, source_ip, first_seen, last_seen, last_version, last_status, fetch_count, current, stale}], actions:[{action_id, active_since, gates_applied, gates_applied_fresh, last_applied_at}]}`。`actions` は有効な Gate 系アクション（block_ip / rate_limit / tarpit / deceive）ごとに「有効化後にポリシーを取得した Gate 数」。`stale` は最終取得から `stale_after_seconds`（max(120, gate.policy_refresh_seconds×12)）超 |
 
