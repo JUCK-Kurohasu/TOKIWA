@@ -11,6 +11,7 @@ Sub-command groups are provided by modules (created by their owners) and attache
     tokiwa intel sync ...        vulnerability intel                (tokiwa.intel.cli)
     tokiwa eval run ...          replay + metrics                   (tokiwa.eval.cli)
     tokiwa sim run ...           lab traffic simulator              (tokiwa.eval.sim_cli)
+    tokiwa data purge|export     subject-level delete / export      (tokiwa.data_cli)
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ _SUBCOMMANDS = {
     "intel": "tokiwa.intel.cli",
     "eval": "tokiwa.eval.cli",
     "sim": "tokiwa.eval.sim_cli",
+    "data": "tokiwa.data_cli",
 }
 for _name, _mod in _SUBCOMMANDS.items():
     try:

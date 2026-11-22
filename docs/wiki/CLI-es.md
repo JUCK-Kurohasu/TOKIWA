@@ -17,6 +17,7 @@ Las opciones actualizadas de cada comando pueden consultarse con `--help`.
 | `tokiwa intel` | Feeds de vulnerabilidades |
 | `tokiwa sim` | Simulador de tráfico para el laboratorio |
 | `tokiwa eval` | Arnés de evaluación |
+| `tokiwa data` | Borrar / exportar los datos de una IP o sesión |
 
 > ⚠️ Ejecute los comandos que acceden directamente a la base de datos (`user`, `token`, `intel`, etc.) con **la misma configuración** que el servidor (el mismo directorio actual
 > o el mismo `TOKIWA_DATABASE__URL`). La ruta por defecto de la base de datos, `./data/tokiwa.db`, es relativa.
@@ -66,6 +67,21 @@ operación queda en el registro de auditoría con el actor `cli`. `rotate` emite
 y vinculación y mantiene válido el anterior durante `--grace-hours` (24 horas por defecto; 0 lo revoca ya). Gate vuelve a
 leer su archivo de token cuando cambia, así que basta con escribir el token nuevo en el archivo, sin reiniciar. Si un nombre
 coincide con varios tokens activos, indique el id.
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # por defecto solo cuenta (dry run)
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+Borra o exporta todo lo guardado sobre una IP de origen, una sesión de actor o un intervalo de tiempo (solicitudes de acceso
+o supresión de interesados, datos de clientes ingeridos por error). Los criterios se combinan con AND. Cobertura: se borran
+las filas de `events`, `actor_sessions` y `deception_trips`; en `alerts` se vacía `details` (la fila se mantiene porque los
+incidentes la referencian); en `llm_calls` solo se vacían el prompt y la respuesta (se conserva el coste). Los registros del
+LLM se comparan con la IP / el ID de sesión respetando límites de palabra (`10.0.0.1` no coincide con `10.0.0.15`). `export`
+escribe JSONL (un `{"table": ..., "row": {...}}` por línea); el archivo de `--out` tiene permisos 600. Ambos quedan en el
+registro de auditoría con el actor `cli`. No cubre resúmenes de incidentes, conversaciones del copiloto ni copias de seguridad.
 
 ## tokiwa gate run
 

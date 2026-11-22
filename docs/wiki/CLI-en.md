@@ -17,6 +17,7 @@ Use `--help` to see the latest options for each command.
 | `tokiwa intel` | Vulnerability feeds |
 | `tokiwa sim` | Lab traffic simulator |
 | `tokiwa eval` | Evaluation harness |
+| `tokiwa data` | Delete / export the data of a given IP or session |
 
 > ⚠️ Run commands that access the DB directly (`user`, `token`, `intel`, and so on) with the **same configuration** as the server (the same current directory,
 > or the same `TOKIWA_DATABASE__URL`). The default DB path `./data/tokiwa.db` is a relative path.
@@ -65,6 +66,21 @@ These work on the server host without an admin login (lost password, incident in
 in the audit log with actor `cli`. `rotate` issues a new token with the same name, scopes and binding and keeps the old
 one valid for `--grace-hours` (default 24 hours; 0 revokes it now). The Gate re-reads its token file when it changes, so
 writing the new token to the file switches over without a restart. If a name matches several active tokens, pass the id.
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # default: counts only (dry run)
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+Deletes or exports everything stored about a source IP, an actor session or a time range (data-subject access or deletion
+requests, customer data ingested by mistake). Selectors combine with AND. Covered: `events`, `actor_sessions` and
+`deception_trips` rows are deleted; `alerts` get their `details` cleared (the row stays, incidents refer to it); `llm_calls`
+lose only the prompt and response text (cost records stay). LLM records are matched on the IP / session id with word
+boundaries (`10.0.0.1` does not match `10.0.0.15`). `export` writes JSONL (one `{"table": ..., "row": {...}}` per line); an
+`--out` file gets mode 600. Both are recorded in the audit log with actor `cli`. Incident summaries, Copilot conversations
+and backups are not covered.
 
 ## tokiwa gate run
 

@@ -17,6 +17,7 @@ Docker イメージでは `tokiwa ...`（またはコンテナの引数として
 | `tokiwa intel` | 脆弱性フィード |
 | `tokiwa sim` | ラボ用トラフィックシミュレータ |
 | `tokiwa eval` | 評価ハーネス |
+| `tokiwa data` | 特定の IP・セッションのデータの削除・書き出し |
 
 > ⚠️ DB に直接アクセスするコマンド（`user`、`token`、`intel` など）は、サーバーと **同じ設定**（同じカレントディレクトリ、
 > または同じ `TOKIWA_DATABASE__URL`）で実行してください。既定の DB パス `./data/tokiwa.db` は相対パスです。
@@ -65,6 +66,20 @@ tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 新�
 操作は監査ログに actor `cli` で記録されます。`rotate` は同じ名前・スコープ・縛りの新トークンを発行し、旧トークンを
 `--grace-hours`（既定 24 時間、0 で即時失効）だけ有効のまま残します。Gate はトークンファイルの変更を自動で読み直すので、
 新しいトークンをファイルに書けば再起動なしで切り替わります。名前が複数の有効なトークンに当たるときは id を指定します。
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # 既定は件数だけ表示（dry run）
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+特定の送信元 IP・アクターセッション・期間について、保存されたデータをまとめて削除・書き出しします（本人からの開示・削除の依頼、
+誤って取り込んだ顧客データの除去など）。条件は AND で組み合わせます。対象: `events`・`actor_sessions`・`deception_trips` は行を削除、
+`alerts` は `details` を消去（インシデントとの紐付けのため行は残す）、`llm_calls` はプロンプト・応答本文だけを消去（費用の記録は残す）。
+LLM の記録は IP / セッション ID を語の境界つきで照合します（`10.0.0.1` は `10.0.0.15` に一致しない）。`export` は JSONL
+（1 行 1 レコード `{"table": ..., "row": {...}}`）で、`--out` のファイルは権限 600。どちらも監査ログに actor `cli` で残ります。
+インシデントの概要文・コパイロットの会話・バックアップは対象外です。
 
 ## tokiwa gate run
 
