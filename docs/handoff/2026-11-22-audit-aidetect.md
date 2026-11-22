@@ -3,6 +3,9 @@
 担当 Issue（この順）: #19 (high), #88, #124 + #115 + #85（UA 表）, #125。指摘の詳細は `docs/audit/2026-11/findings/*.jsonl`
 （#19=L04-01, #88=L04-08, #124=L02-06, #115=L02-05, #85=L01-08, #125=L02-07）。再現は `docs/audit/2026-11/repro/L04/lab/`。
 
+チェック（9d7bd32 時点）: backend 全体 1522 passed（失敗 0。respond の既存テストで aiosqlite の「Event loop is closed」スレッド警告が
+出るが本レーンとは無関係）、ruff check / format 緑、mypy は既知 4 件のみ、`check_wiki.py` OK。フロントは触っていない。
+
 ## 対応状況
 
 | Issue | 状態 | 何をしたか | コミット |
@@ -12,7 +15,7 @@
 | #124 | 完全（katana 等の新規ツールは除く。下記 未検証） | UA 表を `aidetect/ua_catalog.py` の `UA_RULES` 1 つにまとめ、`fingerprints._UA_RULES`（全ファミリ、順序どおり）と `web_recon._TOOLS`（`alert` 付き＝スキャナ系のみ）をそこから生成。各ツールのパターンは旧 2 表の和集合（旧来一致したものは一致し続ける）。Web 側は 1 本の大文字小文字無視の選択（グループ名 `t<i>`、元 UA の位置で切り出し）。既存アラートの名前は維持（`alert_name`: invicti→`netsparker`、zap→`owasp_zap`。`client_tool` も旧 id のまま）。AI 判定側に新たに入ったスキャナ: commix, havij, xsstrike, hydra, dirsearch, joomscan, skipfish, qualys, appscan, webinspect, paros, jaeles, fimap, morfeus, zmeu, jorgee, censys（→ `scanner_client` の反証が効く）。テスト `tests/aidetect/test_ua_catalog.py`: スキャナ集合 = Web 検知器の集合 = 見本 UA の集合、見本ごとに両方が同じツールと判定 | b94ef36 |
 | #115 | 完全（robots.txt→本体の逐次パターンの特徴化は除く） | `ModelContextProtocol/… (Autonomous` → `mcp-fetch-autonomous`、`(User-Specified` → `mcp-fetch-user-specified`、その他 `ModelContextProtocol/` → `mcp-fetch`（いずれも AI_AGENT。`ai.llm_client_fingerprint` が LOW で鳴る）。AI 信号の強さを `scoring.DECLARED_CLIENT_STRENGTH` でツール別に（1.0 / 0.6 / 0.8） | 同上 |
 | #85 | 完全 | `artex-enrich/` → `artex-enrich`、`spa-api-recon` → `artex-api-recon`、`artex[-_]…` → `artex`（AI_AGENT、強さ 0.6）。`spa-api-recon` は UNKNOWN 時代に付いていた `nonstandard_mozilla_ua`（自動化クライアント）を失わないよう、エンジントークン（AppleWebKit/Gecko/Trident/Presto）の無い Mozilla 接頭辞の AI_AGENT にも付けるようにした（ChatGPT-/Claude-User は対象外）。`docs/detection/ai-attacks.md` に既知 UA を追記 | 同上 |
-| #125 | 部分（文書化のみ。評価のアブレーションと公開事例での検証は未実施） | `docs/detection/ai-attacks.md` §2.1 と §7-12 に「`x-stainless-*` / MCP ヘッダは LLM アプリ→プロバイダ・MCP クライアント→サーバー区間のもので、`llm_sdk_headers` は LLM アプリの API や MCP エンドポイントを守るときだけ有効。来ないことは AI でない証拠にならない」と明記。`fingerprints.py` のヘッダ定義にも同じ注記。**重み（+1.0）は変えていない**（変える根拠となる実トラフィックが無い。前提違いなら「載らないので効かない」だけで誤検知は増えない） | この #125 のコミット（ハッシュは git log で） |
+| #125 | 部分（文書化のみ。評価のアブレーションと公開事例での検証は未実施） | `docs/detection/ai-attacks.md` §2.1 と §7-12 に「`x-stainless-*` / MCP ヘッダは LLM アプリ→プロバイダ・MCP クライアント→サーバー区間のもので、`llm_sdk_headers` は LLM アプリの API や MCP エンドポイントを守るときだけ有効。来ないことは AI でない証拠にならない」と明記。`fingerprints.py` のヘッダ定義にも同じ注記。**重み（+1.0）は変えていない**（変える根拠となる実トラフィックが無い。前提違いなら「載らないので効かない」だけで誤検知は増えない） | 9d7bd32 |
 
 ## 評価（`tokiwa eval run --dataset eval/datasets/lab-mini.jsonl --llm mock`）
 
