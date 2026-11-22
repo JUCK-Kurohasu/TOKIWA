@@ -42,6 +42,9 @@ class ServerSettings(BaseModel):
     # Serve the unauthenticated Swagger UI (/api/docs) and OpenAPI document (/api/openapi.json).
     # True keeps existing setups and docs working; set false in production (they map the API for scanners).
     expose_docs: bool = True
+    # CSP / X-Frame-Options / nosniff / Referrer-Policy on every response (tokiwa.api.middleware). Turn off only
+    # if a reverse proxy sets its own policy or a customised UI needs a different CSP.
+    security_headers: bool = True
 
 
 class DatabaseSettings(BaseModel):

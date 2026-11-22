@@ -1,6 +1,7 @@
 """Pure-ASGI middlewares for the API server (no BaseHTTPMiddleware: it buffers/wraps streaming responses).
 
 - :class:`BodySizeLimitMiddleware`  413 for request bodies over the configured size (audit #57)
+- :class:`SecurityHeadersMiddleware`  CSP / frame / nosniff / referrer headers on every response (audit #66)
 """
 
 from __future__ import annotations
@@ -8,8 +9,39 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+# --- security headers (audit #66) ------------------------------------------------------------------------
+# The UI renders attacker-supplied telemetry all day and keeps its JWT in localStorage, so a CSP is the
+# backstop if an XSS ever slips into a view. The Vite build has no inline scripts (checked on the build
+# output); 'unsafe-inline' for styles is needed because a bundled library injects a <style> element.
+SPA_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+    "form-action 'self'; object-src 'none'"
+)
+# FastAPI's Swagger UI loads its JS/CSS from cdn.jsdelivr.net, its favicon from fastapi.tiangolo.com, and
+# boots with an inline <script>; only the docs pages get these allowances.
+DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; "
+    "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+    "form-action 'self'; object-src 'none'"
+)
+# JSON / SSE responses are never rendered as documents by the UI: nothing may load from them.
+API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+DOCS_PREFIX = "/api/docs"
+API_PREFIX = "/api/"
+ASSETS_PREFIX = "/assets/"
+# Vite puts a content hash in every file name under /assets/, so they can be cached forever.
+ASSETS_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_COMMON_HEADERS = (
+    ("x-content-type-options", "nosniff"),
+    ("x-frame-options", "DENY"),
+    ("referrer-policy", "no-referrer"),
+)
 
 
 class RequestBodyTooLarge(HTTPException):
@@ -101,3 +133,45 @@ async def _reject(send: Send, limit: int) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+def security_headers_for(path: str) -> list[tuple[str, str]]:
+    """Headers for a response to ``path``: common ones + the CSP of its tier (docs / API / UI)."""
+    if path == DOCS_PREFIX or path.startswith(DOCS_PREFIX + "/"):
+        csp = DOCS_CSP
+    elif path.startswith(API_PREFIX):
+        csp = API_CSP
+    else:
+        csp = SPA_CSP
+    headers = [*_COMMON_HEADERS, ("content-security-policy", csp)]
+    if path.startswith(ASSETS_PREFIX):
+        headers.append(("cache-control", ASSETS_CACHE_CONTROL))
+    return headers
+
+
+class SecurityHeadersMiddleware:
+    """Add security headers to every HTTP response; a header the route already set is left alone.
+
+    (``/api/v1/stream`` sets its own ``Cache-Control``; ``index.html`` is served with ``no-store`` by the SPA
+    route.) Pure ASGI so streaming responses (SSE) pass through untouched.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        extra = security_headers_for(scope.get("path", ""))
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message["headers"] = list(message.get("headers", []))
+                headers = MutableHeaders(scope=message)
+                for name, value in extra:
+                    if name not in headers:
+                        headers.append(name, value)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)

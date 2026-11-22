@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from tokiwa import __version__, runtime
-from tokiwa.api.middleware import BodySizeLimitMiddleware
+from tokiwa.api.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from tokiwa.api.pagination import offset_guard
 from tokiwa.config import Settings, get_settings
 from tokiwa.db.session import create_all, dispose_engine, init_engine
@@ -84,9 +84,15 @@ def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
         if api_path == "api" or api_path.startswith("api/"):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
         candidate = (static_dir / full_path).resolve()
-        if full_path and candidate.is_file() and static_dir.resolve() in candidate.parents:
+        if (
+            full_path
+            and candidate.is_file()
+            and static_dir.resolve() in candidate.parents
+            and candidate != index.resolve()
+        ):
             return FileResponse(candidate)
-        return FileResponse(index)
+        # The shell names the current hashed bundles: never cache it, or a deploy keeps serving stale JS (#66).
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 
 def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
@@ -128,6 +134,8 @@ def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
         default_limit=settings.server.max_body_bytes,
         prefix_limits=[(INGEST_PATH_PREFIX, settings.server.max_ingest_body_bytes)],
     )
+    if settings.server.security_headers:
+        app.add_middleware(SecurityHeadersMiddleware)  # outside the body limit: 413s get the headers too
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,
