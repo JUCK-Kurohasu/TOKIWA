@@ -83,7 +83,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，
   `password=` 等参数的值，以及令牌、密钥、电子邮件地址等）。
 - **fail-open**：即使 TOKIWA 服务器停止，Gate 的代理功能也不会停止（事件会暂时缓存并重新发送）。
-- **fail-static**：无法获取策略时，保持最后一次的策略（以免出现“让服务器宕机就能解除封禁”这样的漏洞）。
+- **fail-static**：无法获取策略时，保持最后一次的策略（以免出现“让服务器宕机就能解除封禁”这样的漏洞）。但 Gate 仍会遵守每条封禁自身的期限（TTL），到期即解除。
 - 健康检查：`GET /__tokiwa/health` → `{"status":"ok"}`。对来自本地 / 私有 IP 的请求，还会返回发送统计等信息。
 - 不支持：WebSocket（返回 501）、HTTP/2 上游、gRPC。Gate 以单进程运行为前提。
 

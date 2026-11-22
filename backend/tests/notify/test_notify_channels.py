@@ -56,7 +56,7 @@ def test_webhook_payload_shape() -> None:
 
 def test_slack_payload_shape_and_escaping() -> None:
     p = slack_payload(_n())
-    assert set(p) == {"text", "blocks"}
+    assert set(p) == {"text", "mrkdwn", "blocks"}
     types = [b["type"] for b in p["blocks"]]
     assert types[0] == "header" and "section" in types and types[-1] == "context"
     body = p["blocks"][1]["text"]["text"]
@@ -96,8 +96,13 @@ def test_mask_and_merge_roundtrip() -> None:
     assert "SECRETTOKEN" not in str(masked) and "s3cr3t" not in str(masked)
     # Echoing the masked form back keeps the stored secrets; a new value replaces them.
     assert merge_masked(ChannelKind.WEBHOOK, masked, cfg) == cfg
-    changed = merge_masked(ChannelKind.WEBHOOK, {**masked, "url": "https://example.org/new"}, cfg)
-    assert changed["url"] == "https://example.org/new" and changed["headers"] == {"X-Auth": "s3cr3t"}
+    # A new URL with the masked header value would ship the stored secret elsewhere (audit #118).
+    with pytest.raises(ChannelConfigError, match="re-enter the header"):
+        merge_masked(ChannelKind.WEBHOOK, {**masked, "url": "https://example.org/new"}, cfg)
+    changed = merge_masked(
+        ChannelKind.WEBHOOK, {"url": "https://example.org/new", "headers": {"X-Auth": "new"}}, cfg
+    )
+    assert changed["url"] == "https://example.org/new" and changed["headers"] == {"X-Auth": "new"}
     email = validate_config(
         ChannelKind.EMAIL,
         {"host": "smtp.lab", "from_addr": "t@lab.example", "to_addrs": ["a@lab.example"], "password": "pw"},
@@ -199,7 +204,7 @@ async def test_deliver_slack_posts_expected_json(settings) -> None:  # type: ign
     import json
 
     body = json.loads(sent.content)
-    assert set(body) == {"text", "blocks"}
+    assert set(body) == {"text", "mrkdwn", "blocks"}
 
 
 async def test_deliver_refused_destination_reports_safely(settings) -> None:  # type: ignore[no-untyped-def]
@@ -238,14 +243,14 @@ class FakeSMTP:
 async def test_deliver_email_uses_smtp_in_thread(settings, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     FakeSMTP.instances.clear()
     monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
-    monkeypatch.setenv("TEST_SMTP_PW", "from-env")
+    monkeypatch.setenv("TOKIWA_NOTIFY_SMTP_PASSWORD", "from-env")
     cfg = {
         "host": "smtp.lab",
         "port": 587,
         "from_addr": "tokiwa@lab.example",
         "to_addrs": ["soc@lab.example", "oncall@lab.example"],
         "username": "tokiwa",
-        "password_env": "TEST_SMTP_PW",
+        "password_env": "TOKIWA_NOTIFY_SMTP_PASSWORD",
     }
     await deliver(
         ChannelKind.EMAIL,

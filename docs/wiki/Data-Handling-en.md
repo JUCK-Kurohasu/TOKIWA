@@ -139,12 +139,13 @@ export TOKIWA_COPILOT__ENABLED=false           # turn off the Copilot
 | Notification | Content |
 |---|---|
 | Alert | Title (up to 200 characters), description (up to 600 characters), source IP, category, rule ID, AI score |
-| Incident | Title, source IPs (5 in the text, up to 20 in the webhook `data`), actor type, AI score, number of alerts, attack stage, **summary (up to 600 characters)** |
-| Approval request for a response action | Action type, target IP, TTL, proposer, **reason (up to 500 characters)** |
+| Incident | Title, source IPs (5 in the text, up to 20 in the webhook `data`), actor type, AI score, number of alerts, attack stage, **summary (up to 600 characters; only with `notify.include_summary=true`)** |
+| Approval request for a response action | Action type, target IP, TTL, proposer, **reason (up to 500 characters; only with `notify.include_summary=true`)** |
 
 - Event bodies, queries and headers are not included. However, alert titles and descriptions can contain fragments of attacker-controlled strings, such as paths and parameter names.
-- Incident summaries and action reasons can be text written by the LLM during triage. If the LLM writes personal items from the evidence, that text is sent to the destination as is (how often this happens with a real LLM is unverified).
-- There is no setting to choose which items are included in notifications.
+- Incident summaries and action reasons can be text written by the LLM during triage. Because the LLM may write personal items from the evidence, they are not included by default (`notify.include_summary=true` includes them; how often this happens with a real LLM is unverified).
+- With `notify.include_source_ip=false`, source IPs and IP / CIDR action targets are shown as `(hidden)` (and removed from the webhook `data`).
+- In Slack, Discord and email, URLs in the text are made non-clickable (`hxxps://`) and Discord formatting (links, emphasis) is disabled.
 
 ## Retention
 

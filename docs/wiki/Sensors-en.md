@@ -84,7 +84,7 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,
   parameter values such as `password=`, tokens, keys, email addresses, and so on).
 - **fail-open**: If the TOKIWA server goes down, the Gate keeps proxying (events are buffered temporarily and resent).
-- **fail-static**: If the Gate cannot fetch the policy, it keeps the last policy (so that taking the server down does not become a loophole for lifting blocks).
+- **fail-static**: If the Gate cannot fetch the policy, it keeps the last policy (so that taking the server down does not become a loophole for lifting blocks). Each block's own expiry (TTL) is still honoured by the Gate: entries past it are lifted.
 - Health check: `GET /__tokiwa/health` → `{"status":"ok"}`. Requests from local / private IPs also get send statistics and more.
 - Not supported: WebSocket (returns 501), HTTP/2 upstreams, gRPC. The Gate assumes a single process.
 

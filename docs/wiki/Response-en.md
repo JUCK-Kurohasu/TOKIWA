@@ -15,7 +15,7 @@ proposed ──approve──▶ approved ──execution succeeds──▶ activ
 
 | Operation | Who | Notes |
 |---|---|---|
-| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, the reason is appended to it instead of creating a new one |
+| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, no new one is created. While it awaits approval the reason is appended; after approval the reason is left as approved and the new proposal is recorded separately ("proposals received after approval") |
 | Approve / reject | `analyst` or higher | Approving executes the action immediately |
 | Revert | `analyst` or higher | Actions that are `active` and revertible |
 | Expire | Automatic (checked every 30 seconds) | Lifted once the TTL has passed |
@@ -64,6 +64,7 @@ Gates are told apart by "token + source address", so several Gates behind one re
    - Anything that overlaps the **protected ranges** (`response.protected_cidrs`; default `127.0.0.0/8`, `::1/128`)
    - The server's own IP addresses (`response.protect_server_addresses`, on by default)
 4. Right before execution, the action is **validated again** against the current settings (for example, if you added a protected range after the proposal, it becomes `failed`).
+5. **Active actions are re-checked against the current settings too.** An action that falls in a range you later added to `response.protected_cidrs` (or similar) is dropped from the policy on the Gate's next pull and becomes `reverted` within 30 seconds (or at restart), with `response.auto_revert` in the audit log.
 
 > 💡 We strongly recommend adding the IPs of admin workstations, monitoring systems, and upstream load balancers to `response.protected_cidrs`.
 
@@ -84,7 +85,7 @@ response:
 
 The approver of an auto-approved response action is recorded as `policy`. Think carefully before auto-approving blocks (`block_ip`), because false positives have a large impact.
 
-> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase).
+> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase). An action approved by the same user who proposed it in the UI is labelled "Self-approved", and what was approved (reason, target, TTL, etc.) is kept in the audit log and in the action's record.
 
 ## Reject, revert and suppression (stopping re-proposals)
 
@@ -130,7 +131,9 @@ When you register Webhook / Slack / Discord / email under **Settings → Notific
 
 - The same content is sent at most once every 10 minutes (`notify.dedup_minutes`). However, it is sent if the severity increases.
 - The notification language is `notify.language` (`ja` / `en` / `both`). Links use `notify.public_ui_url`.
+- By default, approval requests carry only the action type, target, TTL, proposer and the link to the UI. Reasons written by the LLM and incident summaries can be steered by an attacker and may contain personal data, so they are included only with `notify.include_summary=true`. To leave source IPs out, set `notify.include_source_ip=false`. In Slack, Discord and email, URLs in the text are made non-clickable (`hxxps://`) and Discord formatting is disabled.
 - **SSRF protection**: Destinations must be http / https, and redirects are not followed. By default, a destination is rejected if its name resolves
   to a private address (loopback, internal network, cloud metadata, and so on). You can also restrict the allowed hosts with
   `notify.allowed_hosts`.
-- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead.
+- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead. Only `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` names and the names listed in `notify.smtp_password_envs` are accepted (TOKIWA's own settings `TOKIWA_*__*` and API keys such as `ANTHROPIC_*` are refused even if listed). If you used another name before, rename the variable or add it to `notify.smtp_password_envs` (otherwise sending fails with an explanation).
+- A channel with a username (SMTP AUTH) requires STARTTLS or SSL. Re-enter the password when you change the host, port or username (and webhook header values when you change the URL).

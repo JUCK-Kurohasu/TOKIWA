@@ -150,7 +150,12 @@ deception:
 | `notify.public_ui_url` | 无 | 通知中包含的 UI 链接地址 |
 | `notify.language` | `both` | 通知的语言 |
 | `notify.dedup_minutes` | 10 | 抑制相同通知的时间 |
+| `notify.include_summary` | false | 在通知中包含 LLM 写的文字（安全事件摘要、处置理由） |
+| `notify.include_source_ip` | true | 在通知中包含来源 IP 和 IP / CIDR 处置目标（false 时显示 `(hidden)`） |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | 发送目标的限制（SSRF 防护） |
+| `notify.smtp_password_envs` | `[]` | 邮件 `password_env` 可额外使用的环境变量名（默认可用 `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`） |
+| `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP 发送目标的限制（考虑到内部中继，默认不拒绝私有地址） |
+| `notify.smtp_allow_plaintext_auth` | false | 允许不使用 TLS 的 SMTP 认证 |
 | `copilot.enabled` | true | Copilot（AI 助手） |
 | `copilot.tier` | `deep` | 使用的模型层级 |
 | `copilot.max_tool_iterations` | 8 | 单次提问中使用工具的最大次数 |

@@ -1,12 +1,18 @@
 """Channel-independent notification content (ja / en templates).
 
 Alert titles and descriptions can contain attacker-controlled fragments (paths, user agents). They are
-shown to humans only, but we still strip control characters, cap lengths, and let each channel escape its
-own markup (Slack mrkdwn, Discord mentions) in :mod:`tokiwa.notify.channels`.
+shown to humans only, but we still strip control / bidi / zero-width characters, cap lengths, and let each
+channel neutralize its own markup (Slack, Discord Markdown, links) in :mod:`tokiwa.notify.channels`.
+
+Audit #128 / #168: free text written by the LLM (incident summary, proposal ``reason``) is left out unless
+``notify.include_summary`` (it is steerable through the telemetry and may quote personal data from the
+evidence into a third-party chat service); ``notify.include_source_ip=false`` hides IP addresses (source IPs and
+IP / CIDR action targets). Approval requests then carry only structured fields and the UI link.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from typing import Any, Literal
 
@@ -20,6 +26,10 @@ from tokiwa.schemas.response import ResponseAction
 NotificationKind = Literal["alert", "incident", "action", "test"]
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+# Bidi overrides / isolates and zero-width characters: they can make a target or a link read differently from
+# what it is (e.g. reversed text in an approval request).
+_INVISIBLE = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿]")
+HIDDEN = "(hidden)"
 
 
 class Notification(BaseModel):
@@ -36,9 +46,29 @@ class Notification(BaseModel):
 
 
 def clean(value: object, limit: int = 300) -> str:
-    """Single-line-safe display text: no control chars (keeps \\n), length-capped."""
-    s = _CONTROL.sub(" ", str(value))
+    """Single-line-safe display text: no control chars (keeps \\n) or invisible ones, length-capped."""
+    s = _INVISIBLE.sub("", _CONTROL.sub(" ", str(value)))
     return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return False
+    return True
+
+
+def _ip(value: str | None, settings: NotifySettings) -> str | None:
+    """An IP shown in a notification, or :data:`HIDDEN` when ``notify.include_source_ip`` is off."""
+    if value is None:
+        return None
+    return value if settings.include_source_ip else HIDDEN
+
+
+def _target(value: str, settings: NotifySettings) -> str:
+    """Action targets are hidden like source IPs when they are IP / CIDR (paths and names stay)."""
+    return HIDDEN if not settings.include_source_ip and _is_ip(value) else value
 
 
 def ui_link(path: str, settings: NotifySettings | None = None) -> str | None:
@@ -67,7 +97,7 @@ def _body(ja: str, en: str, settings: NotifySettings) -> str:
 def render_alert(alert: Alert, settings: NotifySettings | None = None) -> Notification:
     s = settings or get_settings().notify
     title = clean(alert.title, 200)
-    src = alert.source_ip or "-"
+    src = _ip(alert.source_ip, s) or "-"
     ai = f"{alert.ai_score:.2f}" if alert.ai_score is not None else "-"
     desc = clean(alert.description, 600)
     ja = f"新しいアラート（{alert.severity.value}）: {title}\n送信元: {src} / カテゴリ: {alert.category.value} / AI スコア: {ai}"
@@ -92,7 +122,7 @@ def render_alert(alert: Alert, settings: NotifySettings | None = None) -> Notifi
         data={
             "alert_id": alert.id,
             "rule_id": alert.rule_id,
-            "source_ip": alert.source_ip,
+            "source_ip": alert.source_ip if s.include_source_ip else None,
             "severity": alert.severity.value,
             "category": alert.category.value,
             "ai_score": alert.ai_score,
@@ -109,14 +139,18 @@ def render_incident(
 ) -> Notification:
     s = settings or get_settings().notify
     title = clean(incident.title, 200)
-    ips = ", ".join(incident.source_ips[:5]) or "-"
+    ips = (
+        (", ".join(incident.source_ips[:5]) if s.include_source_ip else HIDDEN)
+        if incident.source_ips
+        else "-"
+    )
     ai = f"{incident.ai_score:.2f}" if incident.ai_score is not None else "-"
     if previous is None:
         head_ja, head_en = "新しいインシデント", "New incident"
     else:
         head_ja = f"インシデントの重大度が上昇（{previous.value} → {incident.severity.value}）"
         head_en = f"Incident severity raised ({previous.value} -> {incident.severity.value})"
-    summary = clean(incident.summary, 600)
+    summary = clean(incident.summary, 600) if s.include_summary else ""
     ja = (
         f"{head_ja}: {title}\n送信元: {ips} / アクター: {incident.actor_type.value} / AI スコア: {ai}"
         f" / アラート数: {incident.alert_count}"
@@ -148,7 +182,7 @@ def render_incident(
             "previous_severity": previous.value if previous else None,
             "actor_type": incident.actor_type.value,
             "ai_score": incident.ai_score,
-            "source_ips": incident.source_ips[:20],
+            "source_ips": incident.source_ips[:20] if s.include_source_ip else [],
         },
     )
 
@@ -163,9 +197,10 @@ def render_action(
     """Approval request (pending) or an informational notice when policy auto-approved it."""
     s = settings or get_settings().notify
     t = action.action_type.value
-    target = clean(action.target, 120)
+    target = clean(_target(action.target, s), 120)
     ttl = f"{action.ttl_minutes} min" if action.ttl_minutes else "-"
-    reason = clean(action.reason, 500)
+    # The reason is usually LLM-written (steerable through telemetry): only with notify.include_summary.
+    reason = clean(action.reason, 500) if s.include_summary else ""
     if pending:
         ja = f"対処の承認依頼: {t} → {target}（TTL {ttl}, 提案元 {action.proposed_by.value}）\n承認するまで実行されません。"
         en = f"Approval required: {t} -> {target} (TTL {ttl}, proposed by {action.proposed_by.value})\nNothing runs until a human approves."
@@ -194,7 +229,7 @@ def render_action(
         data={
             "action_id": action.id,
             "action_type": t,
-            "target": action.target,
+            "target": _target(action.target, s),
             "status": action.status.value,
             "ttl_minutes": action.ttl_minutes,
             "incident_id": action.incident_id,
@@ -213,7 +248,7 @@ def render_action_notice(
 ) -> Notification:
     """Body of an approved ``notify`` response action. Built from validated fields only (no free text)."""
     s = settings or get_settings().notify
-    tgt = clean(target, 120)
+    tgt = clean(_target(target, s), 120)
     link = (
         ui_link(f"/incidents/{incident_id}", s)
         if incident_id
@@ -229,7 +264,12 @@ def render_action_notice(
         url=link,
         dedup_key=None,
         fields={"target": tgt, "incident": incident_id or "-", "alert": alert_id or "-"},
-        data={"action_id": action_id, "target": target, "incident_id": incident_id, "alert_id": alert_id},
+        data={
+            "action_id": action_id,
+            "target": _target(target, s),
+            "incident_id": incident_id,
+            "alert_id": alert_id,
+        },
     )
 
 

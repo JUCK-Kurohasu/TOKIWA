@@ -15,18 +15,16 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Request, Response
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from tokiwa.api.deps import CurrentUser, GateToken
 from tokiwa.config import get_settings
 from tokiwa.db.models.gate_status import GatePollRow
-from tokiwa.db.models.response import ResponseActionRow
 from tokiwa.db.session import session_scope
-from tokiwa.respond.policy import build_gate_policy
-from tokiwa.respond.validate import GATE_ACTIONS
+from tokiwa.respond.policy import build_gate_policy, enforceable_gate_rows
 from tokiwa.schemas.gate_status import GateActionReflection, GateInstance, GateStatus
-from tokiwa.schemas.response import ActionStatus, GatePolicy
+from tokiwa.schemas.response import GatePolicy
 from tokiwa.schemas.system import ApiToken
 from tokiwa.util import sha256_hex, utcnow
 
@@ -125,19 +123,9 @@ async def gate_status(_: CurrentUser) -> GateStatus:
         polls = list(
             (await session.execute(select(GatePollRow).order_by(GatePollRow.last_seen.desc()))).scalars()
         )
-        actions = list(
-            (
-                await session.execute(
-                    select(ResponseActionRow)
-                    .where(
-                        ResponseActionRow.status == ActionStatus.ACTIVE.value,
-                        ResponseActionRow.action_type.in_([t.value for t in GATE_ACTIONS]),
-                        or_(ResponseActionRow.expires_at.is_(None), ResponseActionRow.expires_at > now),
-                    )
-                    .order_by(ResponseActionRow.created_at)
-                )
-            ).scalars()
-        )
+    # Same rows the policy is built from: one refused by the current settings is not served (audit #64), so it
+    # must not be reported as applied either.
+    actions = await enforceable_gate_rows(now)
     gates = [
         GateInstance.model_validate(p).model_copy(
             update={"current": p.last_version == policy.version, "stale": now - p.last_seen > stale}

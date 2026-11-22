@@ -15,7 +15,7 @@ proposed（提议）──批准──▶ approved ──执行成功──▶ a
 
 | 操作 | 执行者 | 备注 |
 |---|---|---|
-| 提议 | LLM（分诊）/ 规则 / 用户 | 如果已存在相同类型、相同对象的提议，则不新建，而是追加理由 |
+| 提议 | LLM（分诊）/ 规则 / 用户 | 如果已存在相同类型、相同对象的提议，则不新建。待批准时追加理由；批准后不再修改理由，而是作为“批准后收到的提议”另行记录 |
 | 批准、拒绝 | `analyst` 及以上 | 批准后立即执行 |
 | 撤销 | `analyst` 及以上 | 仅限处于 `active` 且可撤销的处置 |
 | 到期失效 | 自动（每 30 秒检查一次） | 超过 TTL 后解除 |
@@ -64,6 +64,7 @@ Gate 按“令牌 + 来源地址”区分，因此位于同一反向代理之后
    - 与 **受保护对象**（`response.protected_cidrs`。默认 `127.0.0.0/8`、`::1/128`）重叠的对象
    - 服务器自身的 IP 地址（`response.protect_server_addresses`，默认 ON）
 4. 在执行之前，会按当前设置 **再次校验**（例如在提议之后新增了受保护对象时，状态会变为 `failed`）。
+5. **生效中的处置也会按当前设置重新校验**。落在之后新增到 `response.protected_cidrs` 等范围内的处置，会在 Gate 下次获取策略时从下发内容中移除，并在 30 秒内（或重启时）变为 `reverted`（审计日志记录 `response.auto_revert`）。
 
 > 💡 强烈建议事先将管理终端、监控系统、上游负载均衡器的 IP 添加到 `response.protected_cidrs` 中。
 
@@ -84,7 +85,7 @@ response:
 
 自动批准的处置，其批准者会记录为 `policy`。由于误报的影响很大，是否对封禁（`block_ip`）启用自动批准，请慎重判断。
 
-> 要求提议者与批准者为不同人员的“双人批准”，在 v0.1 中尚未强制执行（计划在下一个开发阶段作为设置项添加）。
+> 要求提议者与批准者为不同人员的“双人批准”，在 v0.1 中尚未强制执行（计划在下一个开发阶段作为设置项添加）。由在界面上提议的同一用户批准的处置会显示“自我批准”，批准时的内容（理由、对象、TTL 等）会保留在审计日志和处置记录中。
 
 ## 拒绝、撤销与抑制（阻止再次提议）
 
@@ -130,7 +131,9 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 
 - 相同内容每 10 分钟最多发送 1 次（`notify.dedup_minutes`）。但严重级别上升时仍会发送。
 - 通知的语言由 `notify.language`（`ja` / `en` / `both`）决定。链接使用 `notify.public_ui_url`。
+- 默认情况下，处置的审批请求只包含类型、目标、TTL、提议者和指向界面的链接。LLM 写的理由和安全事件摘要可能被攻击者诱导、也可能含有个人信息，因此仅在 `notify.include_summary=true` 时包含。若不想包含来源 IP，请设置 `notify.include_source_ip=false`。在 Slack、Discord 和邮件中，正文里的 URL 会改为不可点击的形式（`hxxps://`），并禁用 Discord 的格式。
 - **SSRF 防护**：发送目标仅限 http / https，且不跟随重定向。默认情况下，如果域名解析的结果是私有
   地址（回环地址、内网、云元数据等），则拒绝发送。也可以通过
   `notify.allowed_hosts` 限定允许的主机。
-- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。
+- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。可用的环境变量名仅限 `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` 以及在设置 `notify.smtp_password_envs` 中列出的名称（TOKIWA 自身的设置 `TOKIWA_*__*` 和 `ANTHROPIC_*` 等 API 密钥即使列出也不能使用）。如果之前使用了其他名称，请重命名该变量或将其加入 `notify.smtp_password_envs`（否则发送会失败并给出原因）。
+- 指定了用户名（SMTP 认证）的渠道必须使用 STARTTLS 或 SSL。更改主机、端口或用户名时请重新输入密码（更改 Webhook 的 URL 时也请重新输入头部值）。

@@ -15,7 +15,7 @@ proposed (propuesta) ──aprobar──▶ approved ──ejecución correcta�
 
 | Operación | Quién | Observaciones |
 |---|---|---|
-| Proponer | LLM (triaje) / reglas / usuario | Si ya existe una propuesta del mismo tipo y para el mismo objetivo, no se crea otra: se añade el motivo a la existente |
+| Proponer | LLM (triaje) / reglas / usuario | Si ya existe una propuesta del mismo tipo y para el mismo objetivo, no se crea otra. Mientras espera aprobación se añade el motivo; tras la aprobación el motivo queda como se aprobó y la nueva propuesta se registra aparte ("propuestas recibidas tras la aprobación") |
 | Aprobar / rechazar | `analyst` o superior | Al aprobarla, se ejecuta de inmediato |
 | Revertir | `analyst` o superior | Acciones en estado `active` que admiten reversión |
 | Vencimiento | Automático (comprobación cada 30 segundos) | Se levanta al superar el TTL |
@@ -64,6 +64,7 @@ Los Gates se distinguen por «token + dirección de origen», así que varios Ga
    - Los que se solapan con los **objetivos protegidos** (`response.protected_cidrs`; por defecto `127.0.0.0/8`, `::1/128`)
    - Las direcciones IP del propio servidor (`response.protect_server_addresses`, activado por defecto)
 4. Justo antes de la ejecución se **vuelve a validar** con la configuración vigente (por ejemplo, si se añade un objetivo protegido después de la propuesta, la acción pasa a `failed`).
+5. **Las acciones activas también se vuelven a comprobar con la configuración vigente.** Una acción que cae en un rango añadido después a `response.protected_cidrs` (u opciones similares) se retira de la política en la siguiente consulta del Gate y pasa a `reverted` en 30 segundos (o al reiniciar), con `response.auto_revert` en el registro de auditoría.
 
 > 💡 Se recomienda encarecidamente añadir a `response.protected_cidrs` las IP de los equipos de administración, de los sistemas de monitorización y de los balanceadores de carga ascendentes.
 
@@ -84,7 +85,7 @@ response:
 
 En las acciones de respuesta aprobadas automáticamente, el aprobador se registra como `policy`. La aprobación automática de bloqueos (`block_ip`) debe decidirse con cautela, porque un falso positivo tiene un impacto grande.
 
-> La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo).
+> La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo). Una acción aprobada por el mismo usuario que la propuso en la interfaz se marca como "Autoaprobada", y lo aprobado (motivo, objetivo, TTL, etc.) queda en el registro de auditoría y en el registro de la acción.
 
 ## Rechazo, reversión y supresión (detener nuevas propuestas)
 
@@ -130,7 +131,9 @@ Si registra Webhook / Slack / Discord / correo electrónico en **Settings → No
 
 - Un mismo contenido se envía como máximo una vez cada 10 minutos (`notify.dedup_minutes`). No obstante, se envía si la severidad aumenta.
 - El idioma de las notificaciones se define con `notify.language` (`ja` / `en` / `both`). Los enlaces usan `notify.public_ui_url`.
+- Por defecto, las solicitudes de aprobación solo incluyen el tipo de acción, el objetivo, el TTL, el proponente y el enlace a la interfaz. Los motivos escritos por el LLM y los resúmenes de incidentes pueden ser manipulados por un atacante y contener datos personales, por lo que solo se incluyen con `notify.include_summary=true`. Para omitir las IP de origen, configure `notify.include_source_ip=false`. En Slack, Discord y correo, las URL del texto dejan de ser enlaces (`hxxps://`) y se desactiva el formato de Discord.
 - **Protección contra SSRF**: solo se admiten destinos http / https y no se siguen redirecciones. Por defecto, se rechaza el destino si la resolución de nombres
   da una dirección privada (loopback, red interna, metadatos de la nube, etc.). También se pueden limitar los hosts permitidos
   con `notify.allowed_hosts`.
-- Se recomienda no guardar la contraseña del correo en la base de datos y pasarla mediante `password_env` (nombre de una variable de entorno).
+- Se recomienda no guardar la contraseña del correo en la base de datos y pasarla mediante `password_env` (nombre de una variable de entorno). Solo se aceptan nombres `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` y los que figuren en `notify.smtp_password_envs` (la configuración propia de TOKIWA `TOKIWA_*__*` y las claves de API como `ANTHROPIC_*` se rechazan aunque se listen). Si antes usaba otro nombre, renombre la variable o añádala a `notify.smtp_password_envs` (de lo contrario el envío falla con una explicación).
+- Un canal con nombre de usuario (SMTP AUTH) requiere STARTTLS o SSL. Vuelva a introducir la contraseña al cambiar el host, el puerto o el usuario (y los valores de cabecera del webhook al cambiar la URL).

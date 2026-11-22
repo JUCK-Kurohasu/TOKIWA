@@ -23,6 +23,7 @@ import {
   ApprovalNotice,
   ProposeActionDialog,
   ProposerBadge,
+  SelfApprovedBadge,
 } from "@/components/common/ResponseActions";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -393,7 +394,10 @@ export function ResponsePage() {
                         <TD>
                           <ProposerBadge proposer={a.proposed_by} />
                         </TD>
-                        <TD className="text-xs">{a.approved_by ?? <span className="text-muted">-</span>}</TD>
+                        <TD className="text-xs">
+                          {a.approved_by ?? <span className="text-muted">-</span>}
+                          <SelfApprovedBadge action={a} />
+                        </TD>
                         <TD
                           className="whitespace-nowrap text-xs text-muted"
                           title={dateTimeTitle(a.created_at)}
