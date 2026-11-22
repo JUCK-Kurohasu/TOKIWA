@@ -274,6 +274,18 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
         return merged
     await bus.publish("action.proposed", created)
     if auto_approve_allowed(v.action_type, settings) and hold is None:
+        weak = await _weak_deception_basis(v.alert_id, v.incident_id)
+        if weak:
+            # Audit #133: a passive / browser-induced canary trip can be caused by a third party (an <img> on
+            # their page makes any visitor's browser "trip" the decoy). Rule triage no longer proposes blocks from
+            # such trips, but an LLM verdict still might — so policy never auto-approves on that evidence alone.
+            await record_audit(
+                POLICY_ACTOR,
+                "response.auto_approve_withheld",
+                target=created.id,
+                details={"reason": "weak_deception_evidence", "alerts": weak},
+            )
+            return created
         log.info("auto-approving %s %s by policy", v.action_type.value, v.target)
         return await approve_action(created.id, actor=POLICY_ACTOR)
     if hold is not None and auto_approve_allowed(v.action_type, settings):
@@ -284,6 +296,36 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
             details={"suppression_id": hold.id, "mode": hold.mode},
         )
     return created
+
+
+_WEAK_DECEPTION_PROVENANCE = frozenset({"passive", "induced"})
+
+
+async def _weak_deception_basis(alert_id: str | None, incident_id: str | None) -> list[str]:
+    """Alert ids, if the proposal rests *only* on passive / induced deception trips (else ``[]``).
+
+    The evidence is the proposal's alert, or every alert of its incident. Any other alert (a SQLi signature, a
+    direct canary follow, ...) means the block is not founded on third-party-triggerable evidence alone.
+    """
+    from tokiwa.db.models.detection import AlertRow
+
+    if alert_id is None and incident_id is None:
+        return []
+    async with session_scope() as session:
+        stmt = select(AlertRow.id, AlertRow.detector, AlertRow.details)
+        stmt = (
+            stmt.where(AlertRow.id == alert_id)
+            if alert_id
+            else stmt.where(AlertRow.incident_id == incident_id)
+        )
+        rows = (await session.execute(stmt.limit(500))).all()
+    if not rows:
+        return []
+    for _id, detector, details in rows:
+        provenance = (details or {}).get("provenance")
+        if not str(detector).startswith("deception.") or provenance not in _WEAK_DECEPTION_PROVENANCE:
+            return []
+    return [r[0] for r in rows]
 
 
 def _initial_result(notes: tuple[str, ...], hold: ResponseSuppressionRow | None) -> dict[str, Any]:

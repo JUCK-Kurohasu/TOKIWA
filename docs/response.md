@@ -58,6 +58,8 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
 - 照合: 型が同じで、対象が一致（IP / CIDR は **重なり**: 抑止した /24 の中のホスト、抑止したホストを含む広い CIDR も該当）。
   型が違えば別扱い（block_ip を抑止しても rate_limit は提案される）。期限切れ・解除済みは無視。
 - 自動承認されなかった場合は `response.auto_approve_suppressed`（自動承認が許可されている型のときだけ）。
+- 監査 #133: 提案の根拠（`alert_id` のアラート、なければ `incident_id` の全アラート）が `deception.*` で `details.provenance` が
+  `passive` / `induced` のものだけなら、自動承認しない（`response.auto_approve_withheld`、details に該当アラート ID）。
 - 一覧 `GET /response/suppressions`、解除 `POST /response/suppressions/{id}/lift`（analyst）。対処画面の「抑止」タブから解除できる。
 - 取り消しの executor が失敗して `active` に戻っても抑止は残る（抑止は提案を止めるだけで何も実行しない）。
 - 期限切れ（TTL）は人間の判断ではないので抑止を作らない。
