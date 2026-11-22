@@ -64,6 +64,8 @@ const strings = {
     empty: "この期間の LLM 利用はありません",
     purpose: "目的",
     noPurpose: "目的別の内訳はありません",
+    unpriced:
+      "料金表にないモデルの呼び出しが {n} 件あります（{models}）。費用は最も高い既知単価での見積もりです（日次予算もこの見積もりで判定）。正しい単価を llm.pricing に設定してください（無料のローカルモデルは 0）。",
   },
   en: {
     period: "Period",
@@ -87,6 +89,8 @@ const strings = {
     empty: "No LLM usage in this period",
     purpose: "Purpose",
     noPurpose: "No per-purpose breakdown",
+    unpriced:
+      "{n} call(s) used a model that is not in the pricing table ({models}). Their cost is an estimate at the highest known rates (the daily budget uses this estimate too). Set the real price in llm.pricing (0 for a free local model).",
   },
 };
 
@@ -199,8 +203,9 @@ export function UsageTab() {
           calls: acc.calls + (d.calls ?? 0),
           input: acc.input + (d.input_tokens ?? 0),
           output: acc.output + (d.output_tokens ?? 0),
+          unpriced: acc.unpriced + (d.unpriced_calls ?? 0),
         }),
-        { cost: 0, calls: 0, input: 0, output: 0 },
+        { cost: 0, calls: 0, input: 0, output: 0, unpriced: 0 },
       ),
     [rows],
   );
@@ -246,6 +251,16 @@ export function UsageTab() {
   return (
     <div className="space-y-4">
       {header}
+      {totals.unpriced > 0 && (
+        <p
+          role="alert"
+          className="rounded-md border border-sev-medium/40 bg-sev-medium/10 p-3 text-xs text-sev-medium"
+        >
+          {L.unpriced
+            .replace("{n}", formatNumber(totals.unpriced))
+            .replace("{models}", (usage.data?.unpriced_models ?? []).join(", ") || "-")}
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label={L.totalCost} value={formatUsd(totals.cost)} tone="ai" />
         <KpiCard label={L.calls} value={formatNumber(totals.calls)} />

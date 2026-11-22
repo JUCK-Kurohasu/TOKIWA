@@ -122,6 +122,8 @@ class LLMConfigOut(BaseModel):
     anthropic_api_key_set: bool = False
     openai_api_key_set: bool = False
     overridden: list[str] = Field(default_factory=list)  # fields currently set by the runtime overlay
+    # Configured models without a price: their calls are charged at the highest known rates (#35). Fix: llm.pricing.
+    unpriced_models: list[str] = Field(default_factory=list)
 
 
 def _validate_with(base: LLMSettings, extra: dict[str, Any]) -> LLMSettings:
@@ -237,6 +239,7 @@ async def config_view(gateway: LLMGateway | None = None) -> LLMConfigOut:
         anthropic_api_key_set=anthropic_api_key(gw.settings) is not None,
         openai_api_key_set=bool(openai_key is not None and openai_key.get_secret_value()),
         overridden=sorted(overlay),
+        unpriced_models=gw.unpriced_models(),
     )
 
 
