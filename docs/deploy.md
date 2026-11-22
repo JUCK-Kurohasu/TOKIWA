@@ -11,7 +11,7 @@
 | イメージ | 1 つのイメージで全ロールを実行。既定は `tokiwa serve`（API + Web UI + バックグラウンドジョブ、:8788） |
 | ビルド | ① node 22 で `frontend/dist` をビルド → ② python 3.12-slim + uv で `uv sync --frozen --no-dev --no-editable`（`postgres` extra = asyncpg 同梱）→ ③ ランタイムに venv と UI だけコピー |
 | 実行ユーザー | uid/gid `10001`（`tokiwa`）。root では動かない |
-| 状態 | すべて `/data`（ボリューム）: SQLite `tokiwa.db`（+ `-wal`/`-shm`）、JWT 署名鍵 `secret.key` |
+| 状態 | すべて `/data`（ボリューム）: SQLite `tokiwa.db`（+ `-wal`/`-shm`）、JWT 署名鍵 `secret.key`、デセプションの鍵リング `deception.key` |
 | 設定 | 環境変数 `TOKIWA_*`（ネストは `__`、`backend/src/tokiwa/config.py`）。任意で `/etc/tokiwa/tokiwa.yaml` |
 | ヘルスチェック | `GET /api/v1/health`（`tokiwa-healthcheck`、30 秒間隔・起動中は 2 秒間隔） |
 | Sigma ルール | ビルド時に `rules/` があれば `/app/rules` にコピー（`TOKIWA_DETECTION__SIGMA_RULE_DIRS=["/app/rules/sigma"]`） |
@@ -125,7 +125,16 @@ docker image prune -f      # 古いイメージの掃除（任意）
 ## 7. バックアップとリストア
 
 `secret.key` を失うと発行済みのログインセッション（JWT）が無効になる（API トークンは DB 内のハッシュなので影響なし）。
-DB と一緒に保存すること。
+`deception.key`（デセプションの鍵リング、監査 #68）を失うと、デコイ内の派生値（偽 AWS シークレット・DB パスワード・
+デコイ内のカナリア値）が変わり、**既に攻撃者の手に渡った値が検知されなくなる**（警告は出ない）。どちらも DB と一緒に保存すること。
+
+**鍵のローテーション**:
+- `secret.key`（JWT）は単独で入れ替えてよい（全員ログアウトされる）。#68 以降、デセプションの派生値は `deception.key` に
+  依存し、JWT 鍵には依存しない（初回起動時に、それまで JWT 鍵から導出していた鍵をそのまま `deception.key` に書き出すので、
+  既存のデコイの値は変わらない）。**#68 より前の版で JWT 鍵を入れ替えると派生値が変わる** — 版を上げてから入れ替えること。
+- `deception.key` は 1 行 1 鍵（16 進）で、**先頭が現用**（新しい値の描画に使う）、**全行が照合対象**。入れ替えるときは
+  新しい鍵（`python -c "import secrets; print(secrets.token_hex(32))"`）を先頭に足し、古い行は残す。古い鍵をいつ消すか
+  （配布済みの値をいつまで検知したいか）は運用判断。
 
 ### SQLite（既定）
 
@@ -137,6 +146,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -146,6 +156,7 @@ $C exec -T tokiwa rm /data/backup.db
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
@@ -164,7 +175,7 @@ $C exec -T postgres pg_restore -U tokiwa -d tokiwa --clean --if-exists < backups
 $C start tokiwa
 ```
 
-`secret.key` は PostgreSQL 構成でも `/data`（tokiwa-data ボリューム）にあるので別途保存する。
+`secret.key` と `deception.key` は PostgreSQL 構成でも `/data`（tokiwa-data ボリューム）にあるので別途保存する。
 
 ## 8. PostgreSQL への切替
 

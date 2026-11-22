@@ -39,12 +39,13 @@ from tokiwa.gate.netmatch import parse_ip
 from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
+    LEGACY_POSITIONS,
     Headers,
     UpstreamTarget,
     decode_content,
     encode_snippet,
     forwarded_request_headers,
-    inject_before_body_close,
+    inject_html,
     raw_path_of,
     strip_hop_by_hop,
 )
@@ -430,7 +431,9 @@ class Gate:
             ex.response_content_type = content_type
             verdict = self._injection_verdict(ex, response, content_type) if policy.html_injection else "no"
             if verdict == "yes" and policy.html_injection:
-                await self._send_injected(send, ex, response, resp_headers, policy.html_injection)
+                await self._send_injected(
+                    send, ex, response, resp_headers, policy.html_injection, policy.html_injection_positions
+                )
             else:
                 if verdict == "too_large":
                     ex.tag("gate:inject_skipped")
@@ -497,7 +500,13 @@ class Gate:
         await send({"type": "http.response.body", "body": b"", "more_body": False})
 
     async def _send_injected(
-        self, send: Send, ex: Exchange, response: httpx.Response, headers: Headers, snippet: str
+        self,
+        send: Send,
+        ex: Exchange,
+        response: httpx.Response,
+        headers: Headers,
+        snippet: str,
+        positions: tuple[str, ...] = LEGACY_POSITIONS,
     ) -> None:
         limit = self.options.max_inject_bytes
         raw = bytearray()
@@ -525,7 +534,7 @@ class Gate:
         encoding = b", ".join(v for k, v in headers if k == b"content-encoding").decode("latin-1")
         decoded = decode_content(body, encoding, limit)
         injected = (
-            inject_before_body_close(decoded, encode_snippet(snippet, content_type))
+            inject_html(decoded, encode_snippet(snippet, content_type), positions)
             if decoded is not None
             else None
         )

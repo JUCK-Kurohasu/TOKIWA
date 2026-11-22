@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +39,7 @@ from tokiwa.db.session import session_scope
 from tokiwa.deception import render
 from tokiwa.deception.labyrinth import normalize_base
 from tokiwa.deception.matcher import DeceptionIndex, Trip, match_event
-from tokiwa.deception.tokens import derive_key, flavor_for, generate_token, validate_token
+from tokiwa.deception.tokens import derive_key, derive_keys, flavor_for, generate_token, validate_token
 from tokiwa.pipeline.store import get_events
 from tokiwa.runtime import on_startup
 from tokiwa.schemas.common import Page
@@ -62,8 +63,8 @@ DEFAULT_CANARIES: list[tuple[str, str | None, bool, str]] = [
         "AI canary: hidden HTML instruction",
         None,
         True,
-        "Injected before </body> of upstream HTML responses (GatePolicy.html_injection). "
-        "上流 HTML の </body> 直前に挿入される隠し指示。",
+        "Injected into upstream HTML responses (GatePolicy.html_injection; positions: "
+        "deception.html_injection_positions). 上流 HTML に挿入される隠し指示（既定 <body> 直後と </body> 直前）。",
     ),
     (
         "AI canary: internal OpenAPI",
@@ -169,14 +170,26 @@ async def get_cache(*, force: bool = False) -> _Cache:
         except Exception:
             log.warning("deception: could not load assets (retry in %.0fs)", _RETRY_SECONDS, exc_info=True)
             ttl = _RETRY_SECONDS
-    key = derive_key() if engine is not None else b""
-    index = DeceptionIndex.build(assets, key=key, settings=settings.deception)
+    keys = derive_keys() if engine is not None else [b""]
+    key = keys[0]
+    index = DeceptionIndex.build(assets, key=key, settings=settings.deception, older_keys=keys[1:])
     _cache = _Cache(engine, settings, gen, now, ttl, assets, index, key)
     return _cache
 
 
 async def get_index(*, force: bool = False) -> DeceptionIndex:
     return (await get_cache(force=force)).index
+
+
+def cached_index() -> DeceptionIndex | None:
+    """Last built index without I/O (may be up to ``CACHE_TTL_SECONDS`` old; None before the first build).
+
+    For synchronous callers such as the sessionizer (:func:`tokiwa.deception.provenance.decisive_canary_hit`).
+    """
+    c = _cache
+    if c is None or c.engine is not _db_engine() or c.settings is not get_settings():
+        return None  # built for another database / settings object (tests, reconfiguration)
+    return c.index
 
 
 async def gate_decoys() -> tuple[list[DecoyRoute], str | None]:
@@ -214,9 +227,37 @@ def _clean_path(kind: DeceptionKind, path: str | None, settings: Settings) -> st
         raise DeceptionError("path must start with '/' and must not contain whitespace, '?' or '#'")
     if "*" in p[:-1]:
         raise DeceptionError("'*' is only allowed at the end of a path (prefix route)")
-    if p in ("/", "/*"):
-        raise DeceptionError("path '/' would shadow the whole protected site")
-    return p
+    return _gate_safe_path(p)
+
+
+def _gate_safe_path(p: str) -> str:
+    """Normalize like the Gate and refuse paths that would take over the protected site (audit #65).
+
+    The Gate answers a decoy for *every* visitor and never forwards it upstream. It matches the decoded request
+    path after ``gate.policy.normalize_path``, so ``/.``, ``//``, ``/a/..`` or ``/%2e`` all mean ``/`` (the whole
+    site) even though they passed a literal ``p == "/"`` check. A prefix route needs at least one complete
+    segment before ``*``: ``/a*`` would also take ``/about``, ``/account``, ``/api/...``. The stored path is the
+    Gate-normalized one, so duplicates such as ``/a/../.env`` vs ``/.env`` are caught as conflicts.
+    """
+    from tokiwa.gate.policy import normalize_path as gate_normalize_path
+
+    if render.shadows_site(p):
+        raise DeceptionError(f"path {p!r} normalizes to '/' and would shadow the whole protected site")
+    star = p.endswith("*")
+    base = p[:-1] if star else p
+    seen = gate_normalize_path(unquote(unquote(base)))  # what a request for this path looks like at the Gate
+    if star:
+        segments = [s for s in seen.split("/") if s]
+        complete = len(segments) if seen.endswith("/") else len(segments) - 1
+        if complete < 1:
+            raise DeceptionError(
+                f"prefix route {p!r} would also take every top-level path starting with {base!r}; "
+                "put at least one complete segment before '*' (e.g. '/admin/*', not '/a*')"
+            )
+    norm = gate_normalize_path(base)
+    if star and base.endswith("/") and not norm.endswith("/"):
+        norm += "/"
+    return norm + ("*" if star else "")
 
 
 def _clean_template(template: str | None) -> str | None:
@@ -439,7 +480,11 @@ async def seed_defaults() -> list[DeceptionAsset]:
 
         for raw in d.decoy_paths:
             p = raw.strip()
-            if not p or (DeceptionKind.DECOY_PATH.value, p) in have:
+            try:  # stored paths are Gate-normalized (#65): compare in that form, or "/a//b" re-seeds every start
+                stored = _gate_safe_path(p) if p else p
+            except DeceptionError:
+                stored = p  # _try() below logs why it is skipped
+            if not p or (DeceptionKind.DECOY_PATH.value, stored) in have:
                 continue
             await _try(
                 DeceptionAssetIn(
@@ -491,6 +536,8 @@ def _trip_detail(e: Event, t: Trip) -> dict[str, Any]:
         "method": h.method if h else None,
         "user_agent": h.user_agent if h else None,
         "depth": t.depth,
+        "provenance": t.provenance.value,
+        "induced_by": t.induced_by,
     }
 
 
@@ -548,6 +595,7 @@ async def record_trips(events: Sequence[Event]) -> list[tuple[Event, Trip]]:
                 "session_id": e.session_id,
                 "trip_type": t.trip_type.value,
                 "ai_canary_followed": t.ai_followed,
+                "provenance": t.provenance.value,
                 "timestamp": ensure_utc(e.timestamp).isoformat(),
             },
         )
@@ -560,6 +608,9 @@ def _trip_event(row: DeceptionTripRow, ev: Event | None) -> Event:
         asset_id=row.asset_id, asset_kind=row.asset_kind, token=detail.get("token"), detail=row.trip_type
     )
     tags = ["deception:trip", f"deception:{row.trip_type}"]
+    provenance = detail.get("provenance")
+    if provenance and provenance != "direct":
+        tags.append(f"deception:{provenance}")  # passive / induced: not an AI verdict (#133)
     if ev is None:  # event purged by retention: synthesize from the trip row
         path = detail.get("path")
         return Event(

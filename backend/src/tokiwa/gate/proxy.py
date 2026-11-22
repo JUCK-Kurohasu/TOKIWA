@@ -173,6 +173,67 @@ def inject_before_body_close(html: bytes, snippet: bytes) -> bytes | None:
     return html[: last.start()] + snippet + html[last.start() :]
 
 
+# Where the canary snippet goes (GatePolicy.html_injection_positions, audit #41). Agents' tools often keep only
+# the first N characters of a page (ARTEX: 30,000), so a snippet only before </body> of a large page is cut off.
+POSITION_HEAD = (
+    "head"  # right after <head ...>: the snippet's leading HTML comment only (a <div> would end <head>)
+)
+POSITION_BODY_START = "body_start"  # right after <body ...>
+POSITION_BODY_END = "body_end"  # right before the last </body> (the only position before #41)
+LEGACY_POSITIONS = (POSITION_BODY_END,)
+
+# Raw-text regions are skipped so "<body>" inside a script string, a comment or a <title> is never taken for the
+# tag (inserting there would break the script). Attribute values may contain ">" when quoted.
+_OPEN_TAG_SCAN = re.compile(
+    rb"<!--.*?-->"
+    rb"|<(script|style|textarea|title|template)\b.*?</\1\s*>"
+    rb"|<(head|body)\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEADING_COMMENTS = re.compile(rb"\s*((?:<!--.*?-->\s*)+)", re.DOTALL)
+
+
+def _open_tag_end(html: bytes, name: bytes) -> int | None:
+    """Offset just after the first real ``<head ...>`` / ``<body ...>`` open tag, or None."""
+    for m in _OPEN_TAG_SCAN.finditer(html):
+        tag = m.group(2)
+        if tag is not None and tag.lower() == name:
+            return m.end()
+        if tag is not None and tag.lower() == b"body" and name == b"head":
+            return None  # <head> after <body> would not be the document head
+    return None
+
+
+def inject_html(html: bytes, snippet: bytes, positions: Iterable[str] = LEGACY_POSITIONS) -> bytes | None:
+    """Insert ``snippet`` at each requested position that exists. None when none of them exists.
+
+    Unknown position names are ignored (a newer server may know more than this gate).
+    """
+    wanted = set(positions)
+    inserts: list[tuple[int, bytes]] = []
+    if POSITION_HEAD in wanted:
+        comment = _LEADING_COMMENTS.match(snippet)
+        at = _open_tag_end(html, b"head") if comment else None
+        if comment and at is not None:
+            inserts.append((at, b"\n" + comment.group(1).strip() + b"\n"))
+    if POSITION_BODY_START in wanted:
+        at = _open_tag_end(html, b"body")
+        if at is not None:
+            inserts.append((at, snippet))
+    if POSITION_BODY_END in wanted:
+        last = None
+        for last in _BODY_CLOSE.finditer(html):  # noqa: B007 - we want the final match
+            pass
+        if last is not None and not any(at > last.start() for at, _ in inserts):
+            inserts.append((last.start(), snippet))
+    if not inserts:
+        return None
+    out = html
+    for at, piece in sorted(inserts, key=lambda x: x[0], reverse=True):
+        out = out[:at] + piece + out[at:]
+    return out
+
+
 def decode_content(raw: bytes, content_encoding: str, limit: int) -> bytes | None:
     """Undo ``Content-Encoding`` when it is safe and possible.
 

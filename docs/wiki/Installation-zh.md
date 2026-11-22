@@ -128,6 +128,7 @@ tokiwa.example.internal {
 
 需要保存的是 **数据库** 和 **签名密钥 `secret.key`** 这两样（都位于 `/data`）。丢失 `secret.key` 会导致
 已登录的会话失效（API 令牌是数据库中的哈希值，因此不受影响）。
+请同时保存欺骗功能的密钥环 `deception.key`（同样位于 `/data`）。丢失后，诱饵中的伪造凭据和金丝雀的值会改变，攻击者已经拿到的值将不再被检测到（[欺骗（Mirage）](Deception-zh)）。
 
 SQLite 使用 WAL 模式，因此不要在运行中直接复制文件，而应使用在线备份 API。
 
@@ -137,6 +138,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -146,11 +148,12 @@ $C exec -T tokiwa rm /data/backup.db
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-使用 PostgreSQL 时，请使用 `pg_dump -Fc` / `pg_restore`，并另行保存 `secret.key`。
+使用 PostgreSQL 时，请使用 `pg_dump -Fc` / `pg_restore`，并另行保存 `secret.key` 和 `deception.key`。
 
 ## 升级
 

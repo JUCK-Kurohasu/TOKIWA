@@ -27,6 +27,7 @@ import httpx
 from pydantic import ValidationError
 
 from tokiwa.gate.netmatch import IpTable
+from tokiwa.gate.proxy import LEGACY_POSITIONS
 from tokiwa.gate.tokens import TokenSource
 from tokiwa.schemas.response import DecoyRoute, GatePolicy
 from tokiwa.util import utcnow
@@ -114,6 +115,8 @@ class CompiledPolicy:
     decoys: DecoyMatcher
     html_injection: str | None
     invalid_entries: tuple[str, ...] = ()
+    # where html_injection goes (gate.proxy.inject_html); servers before audit #41 send none -> before </body>
+    html_injection_positions: tuple[str, ...] = LEGACY_POSITIONS
 
     @classmethod
     def empty(cls) -> CompiledPolicy:
@@ -156,6 +159,7 @@ class CompiledPolicy:
             decoys=decoys,
             html_injection=policy.html_injection or None,
             invalid_entries=invalid,
+            html_injection_positions=tuple(policy.html_injection_positions or LEGACY_POSITIONS),
         )
 
     def summary(self) -> dict[str, object]:

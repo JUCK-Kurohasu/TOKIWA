@@ -171,6 +171,7 @@ def policy_version(
     decoys: list[DecoyRoute],
     html_injection: str | None,
     entry_expires_at: dict[str, dict[str, datetime]] | None = None,
+    html_injection_positions: list[str] | None = None,
 ) -> str:
     doc: dict[str, Any] = {
         "blocked": blocked,
@@ -186,6 +187,8 @@ def policy_version(
             section: {k: v.isoformat() for k, v in entries.items()}
             for section, entries in entry_expires_at.items()
         }
+    if html_injection_positions is not None:  # deception #41: a position change must reach running gates
+        doc["html_injection_positions"] = html_injection_positions
     return sha256_hex(json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 
 
@@ -229,8 +232,18 @@ async def build_gate_policy(now: datetime | None = None) -> GatePolicy:
         # A deception bug must not take enforcement down: serve actions without decoys.
         log.exception("build_gate_decoys failed; serving policy without decoys")
         decoys, html_injection = [], None
+    positions = deception_policy.html_injection_positions() if html_injection else None
     return GatePolicy(
-        version=policy_version(blocked, rate_limited, tarpit, deceive, decoys, html_injection, expires),
+        version=policy_version(
+            blocked,
+            rate_limited,
+            tarpit,
+            deceive,
+            decoys,
+            html_injection,
+            entry_expires_at=expires,
+            html_injection_positions=positions,
+        ),
         generated_at=now,
         blocked=blocked,
         rate_limited=rate_limited,
@@ -239,4 +252,5 @@ async def build_gate_policy(now: datetime | None = None) -> GatePolicy:
         decoys=decoys,
         html_injection=html_injection,
         entry_expires_at=expires,
+        html_injection_positions=positions,
     )

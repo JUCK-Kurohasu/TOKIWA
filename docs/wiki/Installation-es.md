@@ -128,6 +128,7 @@ se autentican con tokens de API: excluya esas rutas o haga que los sensores apun
 
 Hay que guardar dos cosas: la **base de datos** y la **clave de firma `secret.key`** (ambas en `/data`). Si se pierde `secret.key`,
 las sesiones iniciadas dejan de ser válidas (los tokens de API no se ven afectados, porque se guardan como hashes en la base de datos).
+Guarde también el anillo de claves de engaño `deception.key` (también en `/data`). Si se pierde, cambian las credenciales falsas y los valores de canario de los señuelos, y los valores que un atacante ya obtuvo dejan de detectarse ([Engaño](Deception-es)).
 
 SQLite funciona en modo WAL, así que no copie el archivo directamente mientras está en funcionamiento; use la API de copia de seguridad en línea.
 
@@ -137,6 +138,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -146,11 +148,12 @@ Para restaurar, reemplace los archivos con el servicio detenido.
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-Con PostgreSQL, use `pg_dump -Fc` / `pg_restore` y guarde `secret.key` por separado.
+Con PostgreSQL, use `pg_dump -Fc` / `pg_restore` y guarde `secret.key` y `deception.key` por separado.
 
 ## Actualización
 

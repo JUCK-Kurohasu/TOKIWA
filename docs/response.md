@@ -140,13 +140,13 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
   期限切れジョブ実行前でも期限を過ぎたものは含めない。
 - `blocked` / `deceive`: アドレスファミリごとに `ipaddress.collapse_addresses`（重複・内包・隣接を統合）、v4 → v6 の昇順。
 - `rate_limited`: 同一キーは最小 rpm（厳しい方）。`tarpit`: 同一キーは最大 ms（上限 30000）。
-- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。例外時はデコイ無しで配信（遮断は止めない）。
+- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。`html_injection_positions`: `deception.policy.html_injection_positions()`（挿入があるときだけ。version に含む）。例外時はデコイ無しで配信（遮断は止めない）。
 - `entry_expires_at`（監査 #64）: `{"blocked"|"rate_limited"|"tarpit"|"deceive": {エントリ: expires_at}}`。
   統合されたエントリは寄与した行の **最も遅い** 期限、期限なしの行が 1 つでもあればエントリごと省略（期限なし）。
   Gate は `受信時刻 + (expires_at - generated_at)`（単調時計）でエントリを外すので、サーバーに届かない間
   （fail-static）も、Gate の時計がずれていても TTL を超えて強制しない。古い Gate はこのフィールドを無視する。
-- `version`: 上記内容（`generated_at` を除く。`entry_expires_at` は空でなければ含む）の正規化 JSON の SHA-256。
-  内容が同じなら同じ値。同じエントリの期限だけが延びた場合も変わる。
+- `version`: 上記内容（`generated_at` を除く。`entry_expires_at` は空でなければ、`html_injection_positions` は挿入があるときに含む）の
+  正規化 JSON の SHA-256。内容が同じなら同じ値。同じエントリの期限だけが延びた場合も変わる。
 - `ETag: "<version>"` を返す。`If-None-Match` が一致すれば 304（本文なし）。Gate は使わなくてもよい。
 
 ## 6. 通知（`notify/`）

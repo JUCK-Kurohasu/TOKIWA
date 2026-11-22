@@ -411,7 +411,11 @@ class SessionTracker:
             s.sensor = e.sensor_id or ""
         if e.kind == EventKind.DECEPTION:
             kind = (e.deception.asset_kind if e.deception else None) or "unknown"
-            if kind == "ai_canary":
+            # A served canary route is decisive only for a deliberate canary-header follow: a link or an <img>
+            # makes anyone fetch the canary path / pages (audit #133; owner: deception module).
+            from tokiwa.deception.provenance import decisive_canary_hit
+
+            if kind == "ai_canary" and decisive_canary_hit(e):
                 s.extras.canary_hits += 1
             else:
                 s.extras.decoy_hits += 1

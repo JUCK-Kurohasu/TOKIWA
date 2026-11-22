@@ -128,6 +128,7 @@ API トークンで認証されるので、これらのパスは除外するか�
 
 保存すべきものは **DB** と **署名鍵 `secret.key`** の 2 つです（どちらも `/data`）。`secret.key` を失うと
 ログイン中のセッションが無効になります（API トークンは DB 内のハッシュなので影響しません）。
+デセプションの鍵リング `deception.key`（同じく `/data`）も一緒に保存してください。失うとデコイ内の偽の認証情報・カナリアの値が変わり、既に攻撃者の手に渡った値が検知されなくなります（[デセプション](Deception)）。
 
 SQLite は WAL モードなので、稼働中にファイルを直接コピーせず、オンラインバックアップ API を使います。
 
@@ -137,6 +138,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -146,11 +148,12 @@ $C exec -T tokiwa rm /data/backup.db
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-PostgreSQL の場合は `pg_dump -Fc` / `pg_restore` を使い、`secret.key` は別途保存します。
+PostgreSQL の場合は `pg_dump -Fc` / `pg_restore` を使い、`secret.key` と `deception.key` は別途保存します。
 
 ## アップグレード
 
