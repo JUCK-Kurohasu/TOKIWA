@@ -189,7 +189,8 @@ DB が初期化されていない文脈（他モジュールの単体テスト�
 | GET | /preview/{id} | analyst | `?path`（迷路のページ）→ `DeceptionPreview{asset_id, path, content_type, body, status_code, headers, served, extra_paths}` |
 
 bus `deception.tripped`: `{asset_id, asset_kind, asset_name, event_id, source_ip, session_id, trip_type,
-ai_canary_followed, timestamp}`。他モジュール向け関数: `service.create_asset(DeceptionAssetIn)`,
+ai_canary_followed, provenance, timestamp}`（`provenance` は `direct` / `passive` / `induced`、§5。`ai_canary_followed` は
+`direct` の追従のときだけ true）。他モジュール向け関数: `service.create_asset(DeceptionAssetIn)`,
 `service.delete_asset(id)`, `service.disable_asset(id)`（respond の deploy_canary / revert）。
 
 ## 8. 設定（調整できるところ）

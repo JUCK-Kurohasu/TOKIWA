@@ -480,7 +480,11 @@ async def seed_defaults() -> list[DeceptionAsset]:
 
         for raw in d.decoy_paths:
             p = raw.strip()
-            if not p or (DeceptionKind.DECOY_PATH.value, p) in have:
+            try:  # stored paths are Gate-normalized (#65): compare in that form, or "/a//b" re-seeds every start
+                stored = _gate_safe_path(p) if p else p
+            except DeceptionError:
+                stored = p  # _try() below logs why it is skipped
+            if not p or (DeceptionKind.DECOY_PATH.value, stored) in have:
                 continue
             await _try(
                 DeceptionAssetIn(

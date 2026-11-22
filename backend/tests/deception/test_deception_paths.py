@@ -75,3 +75,15 @@ def test_old_rows_with_a_root_path_are_not_served(make_asset: MakeAsset) -> None
     assert matcher.match("/") is None and matcher.match("/.env") is not None
     assert all(shadows_site(p) for p in SITE_ROOTS)
     assert not any(shadows_site(p) for p in ["/.env", "/admin/*", "/a*", "/.well-known/x"])
+
+
+@pytest.mark.usefixtures("db")
+async def test_seeding_an_unnormalized_decoy_path_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tokiwa.config import reset_settings_cache
+
+    monkeypatch.setenv("TOKIWA_DECEPTION__DECOY_PATHS", '["/old//dump.sql"]')
+    reset_settings_cache()
+    first = await service.seed_defaults()
+    assert [a.path for a in first if a.kind == DeceptionKind.DECOY_PATH] == ["/old/dump.sql"]
+    again = await service.seed_defaults()
+    assert [a for a in again if a.kind == DeceptionKind.DECOY_PATH] == []
