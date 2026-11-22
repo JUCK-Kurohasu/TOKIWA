@@ -47,6 +47,14 @@ async def lock_accounts(session: AsyncSession) -> set[str]:
     return set(rows.scalars())
 
 
+async def revoke_sessions(session: AsyncSession, user_id: str) -> bool:
+    """Invalidate every JWT issued to the user so far (atomic ``token_version + 1``). False if no such user."""
+    result = await session.execute(
+        update(UserRow).where(UserRow.id == user_id).values(token_version=UserRow.token_version + 1)
+    )
+    return bool(getattr(result, "rowcount", 0))
+
+
 async def user_count(session: AsyncSession) -> int:
     return int((await session.execute(select(func.count()).select_from(UserRow))).scalar_one())
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -12,7 +12,13 @@ from tokiwa import __version__
 from tokiwa.api.deps import CurrentUser, DbSession
 from tokiwa.audit import record_audit
 from tokiwa.auth import throttle
-from tokiwa.auth.accounts import lock_accounts, mark_setup_completed, setup_completed, user_count
+from tokiwa.auth.accounts import (
+    lock_accounts,
+    mark_setup_completed,
+    revoke_sessions,
+    setup_completed,
+    user_count,
+)
 from tokiwa.auth.security import create_access_token, hash_password_async, verify_password_async
 from tokiwa.auth.setup_code import (
     announce_setup_code,
@@ -136,7 +142,7 @@ async def setup(body: SetupRequest, request: Request, session: DbSession) -> Tok
         {"username": row.username, "client_ip": ip},
         session=session,
     )
-    token, ttl = create_access_token(row.id, row.username, row.role)
+    token, ttl = create_access_token(row.id, row.username, row.role, row.token_version)
     return TokenResponse(access_token=token, expires_in=ttl, user=User.model_validate(row))
 
 
@@ -190,10 +196,24 @@ async def login(body: LoginRequest, request: Request, session: DbSession) -> Tok
     await throttle.clear_user(session, body.username, ip)
     row.last_login = utcnow()
     await record_audit(row.username, "auth.login.success", row.id, {"client_ip": ip}, session=session)
-    token, ttl = create_access_token(row.id, row.username, row.role)
+    token, ttl = create_access_token(row.id, row.username, row.role, row.token_version)
     return TokenResponse(access_token=token, expires_in=ttl, user=User.model_validate(row))
 
 
 @router.get("/me", response_model=User)
 async def me(user: CurrentUser) -> User:
     return user
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(user: CurrentUser, request: Request, session: DbSession) -> Response:
+    """Server-side logout: invalidates **every** JWT of this user (all browsers/devices), not only this one.
+
+    A JWT cannot be revoked individually without a per-token deny list; the per-user version counter covers the
+    cases that matter (stolen token, shared machine) at the cost of logging out the user's other sessions (#34).
+    """
+    await revoke_sessions(session, user.id)
+    await record_audit(
+        user.username, "auth.logout", user.id, {"client_ip": _client_ip(request)}, session=session
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -3,6 +3,9 @@
 Invariants: an admin cannot delete themselves, and the last remaining admin can be neither deleted nor
 demoted (otherwise nobody could manage users/tokens/settings any more). Every change is audit-logged.
 
+A password or role change, and ``POST /users/{id}/revoke-sessions``, invalidate the user's existing JWTs
+(``users.token_version``, #34).
+
 Changes run under :func:`tokiwa.auth.accounts.lock_accounts`: two admins demoting/deleting each other at the
 same moment must not both pass the "more than one admin" check (#92 / #170). After the lock, the target and the
 acting admin are re-read, because either may have changed while this request waited.
@@ -16,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tokiwa.api.deps import AdminUser, DbSession
 from tokiwa.audit import record_audit
-from tokiwa.auth.accounts import lock_accounts
+from tokiwa.auth.accounts import lock_accounts, revoke_sessions
 from tokiwa.auth.security import hash_password_async
 from tokiwa.db.models.core import UserRow
 from tokiwa.schemas.system import Role, User, UserCreate
@@ -91,8 +94,23 @@ async def update_user(user_id: str, body: UserUpdate, session: DbSession, admin:
         details["password_changed"] = True  # never log the password itself
     if len(details) > 1:  # something actually changed
         await session.flush()
+        # Existing logins of that user end (also the caller's own when changing themselves): a password or role
+        # change is often the response to a stolen session (#34).
+        await revoke_sessions(session, row.id)
+        details["sessions_revoked"] = True
         await record_audit(admin.username, "user.update", row.id, details, session=session)
     return User.model_validate(row)
+
+
+@router.post("/{user_id}/revoke-sessions", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_user_sessions(user_id: str, session: DbSession, admin: AdminUser) -> Response:
+    """Log the user out everywhere: every JWT issued to them so far stops working (#34)."""
+    row = await _get_or_404(session, user_id)
+    await revoke_sessions(session, row.id)
+    await record_audit(
+        admin.username, "user.sessions_revoked", row.id, {"username": row.username}, session=session
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

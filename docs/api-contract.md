@@ -5,7 +5,7 @@
 > 「担当」は初期実装の担当モジュール（ルートファイル名）。
 
 共通:
-- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。センサーは `X-Tokiwa-Token: tkw_...`。
+- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。JWT はクレーム `ver` に `users.token_version` を持ち、パスワード・ロール変更／ログアウト／`revoke-sessions` で版数が上がると 401 `token revoked`（`ver` の無い旧 JWT は版数 0 として扱う）。センサーは `X-Tokiwa-Token: tkw_...`。
 - 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`。
   バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
 - 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。
@@ -18,9 +18,11 @@
 | POST | /auth/setup | public(初回のみ) | `SetupRequest`（`UserCreate` + `setup_code`。`schemas/auth.py`）→ `TokenResponse`。`auth.setup_code_required`（既定 true）のとき、起動ログと `data_dir/setup-code` に出る 1 回限りのコードが無い・違うと 403。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
 | POST | /auth/login | public | `LoginRequest`（username ≤128 / password ≤1024 文字）→ `TokenResponse`。失敗は 401 `invalid credentials`（存在しないユーザーでも同じ時間）。同じユーザー名 × 送信元 IP で `auth.login_max_failures` 回、送信元 IP で `auth.login_max_failures_per_ip` 回失敗すると `auth.login_lockout_minutes` の窓の間 429 + `Retry-After`。成功・失敗を `auth.login.success` / `auth.login.failure` として監査に記録 |
 | GET | /auth/me | user | → `User` |
+| POST | /auth/logout | user | → 204。そのユーザーの **全端末の** JWT を失効（`users.token_version` を上げる）。監査 `auth.logout` |
 | GET | /users | admin | → `User[]` |
 | POST | /users | admin | `UserCreate` → `User`（201。重複 username は 409） |
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
+| POST | /users/{id}/revoke-sessions | admin | → 204。対象ユーザーの JWT をすべて失効（404 = いない）。監査 `user.sessions_revoked` |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
 | GET | /tokens | admin | → `ApiToken[]` |
 | POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |

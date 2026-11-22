@@ -98,18 +98,32 @@ def reset_secret_cache() -> None:
     _secret_cache = None
 
 
-def create_access_token(user_id: str, username: str, role: str) -> tuple[str, int]:
+def create_access_token(user_id: str, username: str, role: str, token_version: int = 0) -> tuple[str, int]:
+    """``token_version`` is the user's ``users.token_version``; the API rejects the JWT once it has changed.
+
+    Why: a JWT is self-contained, so without a server-side counter a stolen token stayed valid for the whole TTL
+    even after a password change or logout (#34).
+    """
     ttl = get_settings().server.token_ttl_minutes * 60
     now = utcnow()
     payload: dict[str, Any] = {
         "sub": user_id,
         "name": username,
         "role": role,
+        "ver": int(token_version or 0),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=ttl)).timestamp()),
         "typ": "access",
     }
     return jwt.encode(payload, secret_key(), algorithm="HS256"), ttl
+
+
+def token_version_matches(claims: dict[str, Any], current: int | None) -> bool:
+    """JWTs issued before versioning have no ``ver`` and count as version 0 (the column's default)."""
+    ver = claims.get("ver", 0)
+    if not isinstance(ver, int) or isinstance(ver, bool):
+        return False
+    return ver == int(current or 0)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
