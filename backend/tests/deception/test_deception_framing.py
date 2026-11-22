@@ -340,6 +340,10 @@ async def test_induced_canary_trips_never_block_even_with_auto_approve(
     policy = await build_gate_policy()
     framed = set(policy.blocked) | set(policy.deceive) | set(policy.rate_limited) | set(policy.tarpit)
     assert not {n.split("/")[0] for n in framed} & set(victims)
+    # /.env through an <img>: web.sensitive_file_probe may still propose something for the victim, but nothing
+    # built on browser-induced evidence alone is auto-approved (respond guard) - it waits for a human.
+    assert env_ip not in {n.split("/")[0] for n in framed}, policy
+    assert all(a["status"] == "proposed" for a in actions if a["target"] == env_ip), actions
 
     # the control proves the pipeline would have blocked: decisive follow -> auto-approved block
     assert any(a["target"] == agent_ip and a["action_type"] == "block_ip" for a in actions), actions

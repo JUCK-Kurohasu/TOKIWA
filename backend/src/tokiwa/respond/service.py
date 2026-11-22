@@ -302,29 +302,58 @@ _WEAK_DECEPTION_PROVENANCE = frozenset({"passive", "induced"})
 
 
 async def _weak_deception_basis(alert_id: str | None, incident_id: str | None) -> list[str]:
-    """Alert ids, if the proposal rests *only* on passive / induced deception trips (else ``[]``).
+    """Alert ids, if the proposal rests *only* on evidence a third party can trigger (else ``[]``).
 
-    The evidence is the proposal's alert, or every alert of its incident. Any other alert (a SQLi signature, a
-    direct canary follow, ...) means the block is not founded on third-party-triggerable evidence alone.
+    The evidence is the proposal's alert, or every alert of its incident. An alert is "weak" when it is a
+    ``deception.*`` trip graded passive / induced, or when **every** one of its evidence events looks
+    browser-induced (cross-site / sub-resource / foreign Referer, :func:`tokiwa.deception.provenance.induced_by`):
+    an ``<img src="https://victim-site/.env">`` on a third-party page also raises ``web.sensitive_file_probe``
+    for the visitor. Any other alert means the action is not founded on such evidence alone.
+
+    This only withholds *auto*-approval. A client can send ``Sec-Fetch-Site: cross-site`` itself, so it must never
+    lower severity or drop the proposal - a human still decides.
     """
     from tokiwa.db.models.detection import AlertRow
+    from tokiwa.db.models.telemetry import EventRow
+    from tokiwa.deception.provenance import induced_by
+    from tokiwa.schemas.events import Event
 
     if alert_id is None and incident_id is None:
         return []
     async with session_scope() as session:
-        stmt = select(AlertRow.id, AlertRow.detector, AlertRow.details)
+        stmt = select(AlertRow.id, AlertRow.detector, AlertRow.details, AlertRow.evidence_event_ids)
         stmt = (
             stmt.where(AlertRow.id == alert_id)
             if alert_id
             else stmt.where(AlertRow.incident_id == incident_id)
         )
         rows = (await session.execute(stmt.limit(500))).all()
-    if not rows:
-        return []
-    for _id, detector, details in rows:
-        provenance = (details or {}).get("provenance")
-        if not str(detector).startswith("deception.") or provenance not in _WEAK_DECEPTION_PROVENANCE:
+        if not rows:
             return []
+        pending: dict[str, list[str]] = {}
+        for aid, detector, details, evidence in rows:
+            provenance = (details or {}).get("provenance")
+            if str(detector).startswith("deception.") and provenance in _WEAK_DECEPTION_PROVENANCE:
+                continue
+            ids = [str(i) for i in (evidence or [])][:200]
+            if not ids:
+                return []
+            pending[aid] = ids
+        if pending:
+            wanted = {i for ids in pending.values() for i in ids}
+            found = (
+                await session.execute(select(EventRow.id, EventRow.data).where(EventRow.id.in_(wanted)))
+            ).all()
+            induced: set[str] = set()
+            for eid, data in found:
+                try:
+                    if induced_by(Event.model_validate(data)):
+                        induced.add(eid)
+                except Exception:  # a malformed stored event is not evidence of anything
+                    log.debug("could not re-read event %s for provenance", eid, exc_info=True)
+            for ids in pending.values():
+                if not all(i in induced for i in ids):
+                    return []
     return [r[0] for r in rows]
 
 

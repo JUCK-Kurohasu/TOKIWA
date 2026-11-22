@@ -85,7 +85,7 @@ response:
 
 En las acciones de respuesta aprobadas automáticamente, el aprobador se registra como `policy`. La aprobación automática de bloqueos (`block_ip`) debe decidirse con cautela, porque un falso positivo tiene un impacto grande.
 
-Si la única evidencia son activaciones de engaño "inducidas" (un navegador puede ser llevado a provocarlas, p. ej. con un `<img>` en una página de terceros) o "pasivas" (solo valores alcanzables mediante un enlace), la acción queda pendiente aunque la aprobación automática esté activada (registro de auditoría `response.auto_approve_withheld`).
+Si la única evidencia es algo que un tercero puede hacer que un navegador provoque, la acción queda pendiente aunque la aprobación automática esté activada (registro de auditoría `response.auto_approve_withheld`). Incluye las activaciones de engaño "inducidas" (p. ej. con un `<img>` en una página de terceros) o "pasivas" (solo valores alcanzables mediante un enlace), y las alertas cuyas peticiones de evidencia parecen todas inducidas por el navegador (p. ej. la sonda de archivos sensibles que provoca `<img src="…/.env">`).
 
 > La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo). Una acción aprobada por el mismo usuario que la propuso en la interfaz se marca como "Autoaprobada", y lo aprobado (motivo, objetivo, TTL, etc.) queda en el registro de auditoría y en el registro de la acción.
 

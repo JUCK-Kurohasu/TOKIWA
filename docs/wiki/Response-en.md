@@ -85,7 +85,7 @@ response:
 
 The approver of an auto-approved response action is recorded as `policy`. Think carefully before auto-approving blocks (`block_ip`), because false positives have a large impact.
 
-If the only evidence is deception trips that are "induced" (a browser can be made to trigger them, e.g. by an `<img>` on a third-party page) or "passive" (only values reachable through a link), the action stays pending even when auto-approval is on (audit log `response.auto_approve_withheld`).
+If the only evidence is something a third party can make a browser trigger, the action stays pending even when auto-approval is on (audit log `response.auto_approve_withheld`). This covers deception trips that are "induced" (e.g. by an `<img>` on a third-party page) or "passive" (only values reachable through a link), and alerts whose evidence requests all look browser-induced (e.g. the sensitive-file probe raised by `<img src="…/.env">`).
 
 > "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase). An action approved by the same user who proposed it in the UI is labelled "Self-approved", and what was approved (reason, target, TTL, etc.) is kept in the audit log and in the action's record.
 
