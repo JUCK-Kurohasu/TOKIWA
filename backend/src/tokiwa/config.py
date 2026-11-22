@@ -304,7 +304,7 @@ class DeceptionSettings(BaseModel):
     # "body_end" (before </body>, the only position before audit #41). Tools of AI agents often keep only the first
     # N characters of a page (ARTEX: 30,000), so a snippet only at the end of a large page is never read.
     html_injection_positions: list[Literal["head", "body_start", "body_end"]] = Field(
-        default_factory=lambda: ["body_start", "body_end"], min_length=1
+        default=["body_start", "body_end"], min_length=1  # pydantic copies mutable defaults per instance
     )
     # Header the AI-canary instruction asks agents to send. Must NOT be listed in
     # llm.redaction.sensitive_headers, otherwise its value is masked before detection can see it.
