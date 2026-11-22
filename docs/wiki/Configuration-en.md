@@ -58,6 +58,7 @@ deception:
 | `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
 | `server.max_body_bytes` | 1048576 (1 MiB) | Request body limit; larger bodies get 413. Applies to every API except ingest |
+| `server.security_headers` | `true` | Add CSP, `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy: no-referrer` to every response. Set `false` only if a proxy sets its own policy or a customised UI does not fit the CSP |
 | `server.expose_docs` | `true` | Serve the API docs (`/api/docs`, `/api/openapi.json`) without authentication. `false` is recommended in production |
 | `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Body limit for `/api/v1/ingest/`. A batch above it gets 413 and the Gate / agent **drops** that batch; raise it together with a larger `batch_size` |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | For PostgreSQL: `postgresql+asyncpg://user:pass@host/db` |

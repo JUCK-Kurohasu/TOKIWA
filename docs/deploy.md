@@ -196,6 +196,12 @@ PostgreSQL はホストに公開しない（compose ネットワーク内のみ�
 - SSE（`/api/v1/stream`）はバッファリングを切り、タイムアウトを長くする。
 - プロキシが別ホスト/別コンテナの場合、uvicorn に `X-Forwarded-*` を信頼させる: `FORWARDED_ALLOW_IPS=<proxy の IP/CIDR>`。
 - TOKIWA 自体は `127.0.0.1:8788`（compose 既定）に置き、TLS はプロキシで終端する。
+- セキュリティヘッダ（CSP・`X-Frame-Options: DENY`・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`、
+  index.html の `Cache-Control: no-store`）は **TOKIWA 自身が付ける**（`server.security_headers`、既定 true）。プロキシで
+  CSP を重ねると両方が適用される（厳しい方が勝つ）ので、通常は足さない。HSTS は TLS を終端するプロキシで付ける。
+- ボディ上限はアプリ側にもある（`server.max_body_bytes` 1 MiB / ingest は `server.max_ingest_body_bytes` 32 MiB、超過は 413）。
+  プロキシの上限はこれ以上にする（小さいと ingest バッチがプロキシで 413 になり、センサーがそのバッチを破棄する）。
+- 本番では `TOKIWA_SERVER__EXPOSE_DOCS=false`（`/api/docs`・`/api/openapi.json` を無効化）を推奨。
 
 nginx:
 
@@ -205,7 +211,8 @@ server {
     http2 on;
     server_name tokiwa.example.internal;
     # ssl_certificate / ssl_certificate_key ...
-    client_max_body_size 20m;                 # ingest バッチ（最大 5000 イベント）用
+    client_max_body_size 32m;                 # ingest バッチ用（server.max_ingest_body_bytes と揃える）
+    add_header Strict-Transport-Security "max-age=31536000" always;   # CSP 等は TOKIWA が付ける
 
     location /api/v1/stream {
         proxy_pass http://127.0.0.1:8788;
@@ -231,6 +238,10 @@ Caddy:
 
 ```caddyfile
 tokiwa.example.internal {
+    header Strict-Transport-Security "max-age=31536000"   # CSP 等は TOKIWA が付ける
+    request_body {
+        max_size 32MB            # server.max_ingest_body_bytes と揃える
+    }
     reverse_proxy 127.0.0.1:8788 {
         flush_interval -1        # SSE をそのまま流す
     }

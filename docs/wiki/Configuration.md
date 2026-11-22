@@ -58,6 +58,7 @@ deception:
 | `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵。未設定なら `data_dir/secret.key` に生成・保存 |
 | `server.token_ttl_minutes` | 720 | ログインの有効時間 |
 | `server.max_body_bytes` | 1048576（1 MiB） | リクエストボディの上限。超えると 413。インジェスト以外の全 API に適用 |
+| `server.security_headers` | `true` | 全応答に CSP・`X-Frame-Options: DENY`・`nosniff`・`Referrer-Policy: no-referrer` を付ける。プロキシで独自ポリシーを付ける場合やカスタム UI で CSP が合わない場合のみ `false` |
 | `server.expose_docs` | `true` | API ドキュメント（`/api/docs`・`/api/openapi.json`）を認証なしで公開する。本番では `false` を推奨 |
 | `server.max_ingest_body_bytes` | 33554432（32 MiB） | `/api/v1/ingest/` のボディ上限。超えたバッチは 413 になり、Gate / エージェントはそのバッチを**破棄**する。`batch_size` を大きくする場合は合わせて上げる |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL は `postgresql+asyncpg://user:pass@host/db` |

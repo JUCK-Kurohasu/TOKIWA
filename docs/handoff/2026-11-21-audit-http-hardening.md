@@ -9,8 +9,8 @@
 | #91 コミットが応答送信後 | 完全 | `DbSession` を `Depends(get_session, scope="function")` に変更（コミットはルート関数の終了後・応答送信前）。`IntegrityError` → 409 の共通ハンドラ（app.py）。応答開始時点で別セッションから DB を見るテストを追加 | c5d9741 |
 | #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | ee30db5 |
 | #57 ボディ・フィールド長上限 | 部分（推奨 (1)(2) は完全、(3) トークン単位レート制限・(4) retention 既定有効は未対応） | (1) 純 ASGI の `BodySizeLimitMiddleware`（`api/middleware.py`）: `server.max_body_bytes`（既定 1 MiB）/ `server.max_ingest_body_bytes`（`/api/v1/ingest/`、既定 32 MiB）。Content-Length 申告と実受信バイト（chunked）の両方で 413。(2) `Event` の全文字列（ヘッダ値・ラベル値・リスト要素・ネストしたモデル含む）を 65,536 文字で**切り詰め**（拒否しない）、`raw` は JSON 64 KiB で adapters と同じ `{"_truncated","_bytes","text"}` 形に。切り詰め時はタグ `truncated` とラベル `tokiwa.truncated`（`field:元の長さ`）。wiki（Configuration / Sensors ×4 言語） | 9985076 |
-| #93 docs / openapi / version 公開・/api/* の SPA 200 | 部分（本レーン分は完全。`/auth/status` の version と CORS `allow_credentials` は未対応＝auth レーン / 要判断） | SPA フォールバックが `api` / `api/...` を JSON 404 に。`server.expose_docs`（既定 true＝後方互換）で `/api/docs`・`/api/openapi.json` を無効化可能。ReDoc（未記載の `/redoc`）を廃止、OAuth2 redirect を `/api/docs/oauth2-redirect` へ。`/health` は認証不要のまま `{"status":"ok"}`、有効なユーザー JWT があるときだけ `version`。wiki（CLI / Configuration ×4）・api-contract | （本コミット） |
-| #66 セキュリティヘッダ | 未着手 | | |
+| #93 docs / openapi / version 公開・/api/* の SPA 200 | 部分（本レーン分は完全。`/auth/status` の version と CORS `allow_credentials` は未対応＝auth レーン / 要判断） | SPA フォールバックが `api` / `api/...` を JSON 404 に。`server.expose_docs`（既定 true＝後方互換）で `/api/docs`・`/api/openapi.json` を無効化可能。ReDoc（未記載の `/redoc`）を廃止、OAuth2 redirect を `/api/docs/oauth2-redirect` へ。`/health` は認証不要のまま `{"status":"ok"}`、有効なユーザー JWT があるときだけ `version`。wiki（CLI / Configuration ×4）・api-contract | 47437fe |
+| #66 セキュリティヘッダ | 完全 | 純 ASGI の `SecurityHeadersMiddleware`: 全応答に nosniff / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer`、CSP は 3 段（UI: `script-src 'self'`、`/api/docs*`: jsdelivr + インライン許可、その他 `/api/*`: `default-src 'none'`）。既存ヘッダは上書きしない。index.html に `Cache-Control: no-store`、`/assets/*` に immutable。`server.security_headers`（既定 true）。Playwright で CSP 違反 0 件を確認（下記）。deploy.md のプロキシ例（HSTS・ボディ上限 32m）と wiki Configuration ×4 | d0ef5a4 ＋（本コミット: 文書・検証結果） |
 
 ## #91 の詳細（事実）
 
@@ -74,8 +74,35 @@
   を足すと実在ルートの 405 まで 404 になるので入れていない。
 - パストラバーサルの防御（`resolve()` + `parents` 判定）は変更なし。テストを追加して維持を確認。
 
+## #66 の詳細と検証結果
+
+- 事前確認: `npm run build` の `dist/index.html` はインラインスクリプトなし（`<script type="module" src="/assets/index-*.js">` のみ）。
+  バンドル内に `createElement("style")` が 1 か所あるため `style-src 'unsafe-inline'` が必要（監査推奨どおり）。
+  外部オリジンの読み込み（フォント等）はバンドル・CSS に無い。FastAPI の Swagger UI は `cdn.jsdelivr.net` の JS/CSS、
+  `fastapi.tiangolo.com` の favicon、起動用インライン `<script>` を使う → `/api/docs*` だけに緩い CSP。
+- **Playwright 検証（2026-11-22 実施）**: `frontend` を `npm run build` → `TOKIWA_SERVER__STATIC_DIR=frontend/dist uv run tokiwa serve
+  --host 127.0.0.1 --port 18788 --no-jobs`（DB/データはスクラッチ）→ 事前インストール済み Playwright の chromium で、
+  `securitypolicyviolation` リスナー（init script）とコンソールの両方で CSP 違反を収集。スクリプトは
+  セッションのスクラッチ（`csp-check.js`、リポジトリ外）に置いた。結果:
+
+  | 手順 | 描画 | CSP 違反（console / event） |
+  |---|---|---|
+  | SPA: ログイン画面 → admin でログイン → ダッシュボード | ○ | 0 / 0 |
+  | SPA: /alerts, /events, /incidents, /llm, /settings | ○（本文あり） | 0 / 0 |
+  | 対照: /alerts にインライン `<script>` を注入 | 実行されず | 1 / 1（`script-src-elem` で遮断＝収集が機能している証拠） |
+  | /api/docs（Swagger UI） | ○（100 operations） | 0 / 0 |
+  | /api/docs で GET /api/v1/health を Try it out → Execute | ○（応答表示） | 0 / 0 |
+
+  **注意（事実）**: サンドボックスから `cdn.jsdelivr.net` へは到達できない（プロキシが `ERR_TUNNEL_CONNECTION_FAILED`。直結の 1 回目は
+  Swagger が描画されず、CSP 違反は 0、失敗はネットワークのみ）。そのため 2 回目以降は Playwright の `route` で
+  `https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/*` を npm から取得した `swagger-ui-dist@5.35.1` の同名ファイルで応答させた。
+  ブラウザから見た URL/オリジンは本物と同じなので CSP の判定は実環境と同じだが、**実 CDN が返す版（@5 の最新）での確認ではない**。
+
 ## 要判断
 
+- （#66）CSP の `style-src 'unsafe-inline'` は残した（バンドルが `<style>` を注入するため）。外すにはその依存を特定し nonce/ハッシュ化が必要。
+- （#66）`Referrer-Policy: no-referrer`（`same-origin` ではなく最も厳しい方）。UI からの外部リンク（MITRE 等）にリファラは送られない。
+- （#66）HSTS はアプリでは付けない（HTTP のラボ運用を壊さないため）。TLS 終端のプロキシで付ける例を deploy.md に追加。
 - （#93）`server.expose_docs` 既定は **true（後方互換）**。AGENTS.md・wiki（CLI / Sensors）が `/api/docs` を案内しているため。
   **本番では false を推奨**（wiki の CLI / Configuration に記載）。既定 false にする場合は lab/compose・docs の案内も同時に変える。
 - （#93）ReDoc を廃止（`redoc_url=None`）。従来 `/redoc` で公開されていたが文書に記載なし。CSP に Google Fonts と blob ワーカーを
@@ -91,7 +118,9 @@
 
 ## 失敗した試み
 
-- なし
+- #94 のテストで `fastapi.dependencies.utils.get_flat_dependant` を使おうとしたが 0.159.1 には無く、`app.routes` も
+  `_IncludedRouter` で入れ子になっていた（内部 API）。→ OpenAPI 文書（公開 API）から offset を持つルートを列挙する方式にした。
+- #66 の Swagger 検証で実 CDN（jsdelivr）に到達できなかった（上記）。→ 同一 URL をローカルの swagger-ui-dist で応答させて検証。
 
 ## 担当外の変更
 
@@ -112,3 +141,9 @@
 ## 未検証事項
 
 - PostgreSQL での IntegrityError → 409（SQLite のみで確認。asyncpg の例外も `sqlalchemy.exc.IntegrityError` に包まれる想定だが未実行）。
+- 実 uvicorn 上での巨大ボディ: 413 の早期応答（`Connection: close`）はテスト（ASGITransport）と直接呼び出しで確認したのみ。
+  実ソケットで送信途中のクライアントにどう見えるか（RST になるか）は未確認。
+- Gate の最悪ケースのバッチサイズ見積もり（約 15 MB/100 件）は、Gate に届くリクエストヘッダが 64 個 × 2 KiB まで通る前提。
+  Gate 側の uvicorn（h11 / httptools）のヘッダサイズ上限で実際にはもっと小さい可能性がある（TODO(verify)）。
+- deploy.md の nginx `add_header` / Caddy `request_body { max_size }` の例は実機で構文確認していない。
+- 実 CDN（jsdelivr の swagger-ui-dist@5 最新）での Swagger 描画と CSP（ローカル同一 URL 応答では確認済み）。
