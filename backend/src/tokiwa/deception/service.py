@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -225,9 +226,37 @@ def _clean_path(kind: DeceptionKind, path: str | None, settings: Settings) -> st
         raise DeceptionError("path must start with '/' and must not contain whitespace, '?' or '#'")
     if "*" in p[:-1]:
         raise DeceptionError("'*' is only allowed at the end of a path (prefix route)")
-    if p in ("/", "/*"):
-        raise DeceptionError("path '/' would shadow the whole protected site")
-    return p
+    return _gate_safe_path(p)
+
+
+def _gate_safe_path(p: str) -> str:
+    """Normalize like the Gate and refuse paths that would take over the protected site (audit #65).
+
+    The Gate answers a decoy for *every* visitor and never forwards it upstream. It matches the decoded request
+    path after ``gate.policy.normalize_path``, so ``/.``, ``//``, ``/a/..`` or ``/%2e`` all mean ``/`` (the whole
+    site) even though they passed a literal ``p == "/"`` check. A prefix route needs at least one complete
+    segment before ``*``: ``/a*`` would also take ``/about``, ``/account``, ``/api/...``. The stored path is the
+    Gate-normalized one, so duplicates such as ``/a/../.env`` vs ``/.env`` are caught as conflicts.
+    """
+    from tokiwa.gate.policy import normalize_path as gate_normalize_path
+
+    if render.shadows_site(p):
+        raise DeceptionError(f"path {p!r} normalizes to '/' and would shadow the whole protected site")
+    star = p.endswith("*")
+    base = p[:-1] if star else p
+    seen = gate_normalize_path(unquote(unquote(base)))  # what a request for this path looks like at the Gate
+    if star:
+        segments = [s for s in seen.split("/") if s]
+        complete = len(segments) if seen.endswith("/") else len(segments) - 1
+        if complete < 1:
+            raise DeceptionError(
+                f"prefix route {p!r} would also take every top-level path starting with {base!r}; "
+                "put at least one complete segment before '*' (e.g. '/admin/*', not '/a*')"
+            )
+    norm = gate_normalize_path(base)
+    if star and base.endswith("/") and not norm.endswith("/"):
+        norm += "/"
+    return norm + ("*" if star else "")
 
 
 def _clean_template(template: str | None) -> str | None:

@@ -6,8 +6,10 @@ so the preview shows byte-for-byte what the Gate serves.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 from tokiwa.config import DeceptionSettings
 from tokiwa.deception import labyrinth
@@ -16,6 +18,8 @@ from tokiwa.deception.matcher import normalize_path
 from tokiwa.deception.tokens import Slot, honey_values, primary_slot
 from tokiwa.schemas.deception import DeceptionPreview
 from tokiwa.schemas.response import DeceptionAsset, DeceptionKind, DecoyRoute
+
+log = logging.getLogger(__name__)
 
 _NO_STORE = {"Cache-Control": "no-store"}
 
@@ -246,9 +250,23 @@ def render_site(site: SiteContext) -> tuple[list[DecoyRoute], str | None]:
         for r in routes_for_asset(a, site):
             if r.path in seen:
                 continue
+            if shadows_site(r.path):
+                log.warning(
+                    "deception: asset %s path %r would shadow the whole site; not served", a.id, r.path
+                )
+                continue
             seen.add(r.path)
             routes.append(r)
     return routes, html_injection(site)
+
+
+def shadows_site(path: str) -> bool:
+    """True when the Gate would answer this decoy route for ``/`` (audit #65). Assets created before the
+    validation in ``service._gate_safe_path`` may still hold such a path (``/.``, ``//``, ``/%2e``)."""
+    from tokiwa.gate.policy import normalize_path as gate_normalize_path
+
+    base = path[:-1] if path.endswith("*") else path
+    return gate_normalize_path(unquote(unquote(base))) in ("", "/") or gate_normalize_path(base) in ("", "/")
 
 
 def preview(asset: DeceptionAsset, site: SiteContext, path: str | None = None) -> DeceptionPreview:

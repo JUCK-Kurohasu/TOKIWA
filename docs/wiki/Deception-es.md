@@ -76,6 +76,8 @@ combine `ai_canary_followed` con la puntuación de comportamiento de **[AI sessi
 En la página **Deception** (Engaño) se pueden listar, añadir, activar y desactivar activos, **previsualizar el contenido que se sirve** y consultar la lista de activaciones (**Trip history** (Historial de activaciones): registros de quién tocó las trampas).
 También se pueden añadir trampas según el incidente mediante la acción de respuesta `deploy_canary`.
 
+Las trampas se devuelven a **todos los visitantes** y nunca se reenvían a la aplicación protegida. Por eso se rechazan las rutas que sustituirían todo el sitio (`/.`, `//`, `/a/..` y otras que equivalen a `/`) y las rutas de prefijo sin un segmento completo antes de `*` (`/a*` también ocuparía `/about` y `/api/…`; escriba `/admin/*`).
+
 ## Ajustes principales (`deception.*`)
 
 | Clave | Por defecto | Descripción |

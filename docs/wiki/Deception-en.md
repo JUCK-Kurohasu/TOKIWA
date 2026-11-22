@@ -76,6 +76,8 @@ look at `ai_canary_followed` together with the behavioral score in [AI sessions]
 On the **Deception** page, you can list, add, and enable / disable assets, **preview what is served**, and view the list of trips (records of touches).
 You can also add traps in response to an incident with the `deploy_canary` response action.
 
+Traps are returned to **every visitor** and never forwarded to the app you protect. Paths that would replace the whole site (`/.`, `//`, `/a/..` and others that mean the same as `/`) and prefix routes without a complete segment before `*` (`/a*` would also take `/about` and `/api/…`; write `/admin/*` instead) are therefore rejected.
+
 ## Main settings (`deception.*`)
 
 | Key | Default | Description |

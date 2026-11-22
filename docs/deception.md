@@ -161,6 +161,15 @@ DB が初期化されていない文脈（他モジュールの単体テスト�
 |---|---|---|---|
 | GET | /assets | user | `?kind&enabled` → `DeceptionAsset[]` |
 | POST | /assets | analyst | `DeceptionAssetIn` → `DeceptionAsset`（422 検証エラー / 409 トークン・パス重複） |
+
+パスの検証（監査 #65。`service._gate_safe_path`）: Gate はデコイを **全訪問者に** 返し上流へ転送しないので、Gate と同じ
+`gate.policy.normalize_path`（URL デコード後も）で `/` になるパス（`/.`、`//`、`/a/..`、`/%2e` …）は 422。前方一致（`*` 終端）は
+`*` の前に完全なセグメントが 1 つ以上必要（`/admin/*` は可、`/a*` は `/about`・`/api/…` まで奪うので 422）。保存するパスは Gate で
+正規化した形（`/a/../.env` → `/.env`）なので重複は 409 になる。respond の `deploy_canary` も `create_asset` を通るので同じ検証。
+検証前に作られた行がルートを指していても `render.shadows_site()` で Gate に渡さない（警告ログ）。
+未対応: 作成時に直近の `gate.http` で同じパスが上流から 2xx/3xx を返していないかの確認（409 + force）、承認画面での
+「全利用者に影響」表示、既定シードの事前確認（監査 #65 の (c)〜(e)）。
+
 | GET | /assets/{id} | user | → `DeceptionAsset` |
 | PATCH | /assets/{id} | analyst | `DeceptionAssetUpdate`（`token: null` でローテーション、kind は不変） |
 | DELETE | /assets/{id} | analyst | 204（トリップ履歴は残る） |
