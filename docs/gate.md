@@ -115,6 +115,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   イベントの `path` もクライアントが実際に送った値。
 - 本文はストリーミング転送しつつ先頭だけ捕捉。上流障害 **502**、タイムアウト **504**、応答途中の障害は接続中断。
 - `Set-Cookie` 等の重複ヘッダを保持。uvicorn は `server_header/date_header/proxy_headers` 無効で起動（上流の値を転送）。
+- 上流クライアントはクッキーを一切保存・送信しない（全訪問者で 1 つの httpx クライアントを共有するため。保存すると上流の
+  `Set-Cookie` が Cookie を送らない別の訪問者の要求に付いてしまう）。
 
 ### HTML カナリア注入
 対象: `text/html`、HEAD 以外、204/206/304 以外、宣言サイズ ≤ 2 MiB。gzip/deflate は解凍して注入し非圧縮で返す

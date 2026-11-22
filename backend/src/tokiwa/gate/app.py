@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from email.utils import formatdate
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 
 import httpx
@@ -118,6 +119,8 @@ class Gate:
         self.target = UpstreamTarget(settings.upstream)
         opts = self.options
         # trust_env=False: never route upstream/server traffic through HTTP(S)_PROXY from the environment.
+        # cookies=_no_cookie_jar(): one client serves every visitor, and httpx would otherwise store each upstream
+        # Set-Cookie and add it to the next request that carries no Cookie header -- someone else's session.
         self.upstream_client = httpx.AsyncClient(
             transport=upstream_transport,
             timeout=httpx.Timeout(opts.upstream_timeout, connect=opts.upstream_connect_timeout),
@@ -127,8 +130,11 @@ class Gate:
             ),
             follow_redirects=False,
             trust_env=False,
+            cookies=_no_cookie_jar(),
         )
-        self.server_client = httpx.AsyncClient(transport=server_transport, timeout=10.0, trust_env=False)
+        self.server_client = httpx.AsyncClient(
+            transport=server_transport, timeout=10.0, trust_env=False, cookies=_no_cookie_jar()
+        )
         self.policy = PolicyManager(
             self.server_client,
             settings.server_url,
@@ -607,6 +613,15 @@ class Gate:
                 ex.status = 403
         finally:
             self._capture(ex)
+
+
+def _no_cookie_jar() -> CookieJar:
+    """A cookie jar that never stores nor sends anything (the Gate is a shared, transparent proxy).
+
+    Passed to httpx as a raw ``CookieJar`` so httpx keeps it (a ``dict`` / ``httpx.Cookies`` would be copied into a
+    default jar without this policy).
+    """
+    return CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
 
 
 async def _raw_chunks(response: httpx.Response) -> AsyncIterator[bytes]:
