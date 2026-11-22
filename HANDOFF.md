@@ -3,11 +3,34 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-11-22（監査の系統 G / I / K を修正。ブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#179（ドラフト、未マージ））
+最終更新: 2026-11-22（監査の系統 G / I / K と、C・D・E・F の工数 S を修正。ブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#179（ドラフト、未マージ））
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
+
+## 監査修正 第 2 弾（2026-11-22）— 系統 C AI 判定 / D デセプション / E 対処・通知 / F LLM・トリアージ（工数 S）
+
+- **何をしたか**: 高重大度の #19（未来時刻 1 件で AI 判定が全停止）と #133（カナリア GET 1 回で無実の IP に遮断提案）を含む工数 S の 23 件を、
+  4 レーン（aidetect / deception / llm-triage / respond-notify）で修正。同じブランチ・同じ PR（JUCK-Kurohasu/TOKIWA#179）。詳細は
+  `docs/handoff/2026-11-22-audit-<レーン>.md`。
+- **完全（9）**: #85 #68 #35 #172 #63 #64 #130 #128 #168。
+- **部分（14）**: #19（センサー別の時計ずれの可視化）、#88（追い出し時のサマリ引き継ぎ）、#124（katana 等の UA は一次情報で未確認）、#115（robots→本体の逐次パターン）、
+  #125（文書化のみ）、#133（訪問者ごとのカナリア値ほか (3)〜(5)）、#30（近似一致は理由付きで不採用 — Closes にするかは要判断）、#41（HTML 以外への展開）、
+  #65（上流 2xx の確認・承認画面表示）、#84（canary_style・実機計測）、#96（ノンス）、#98（通知・暗号化・DNS 解決先の検査）、#62（通知での「AI 要約（未検証）」表示）、
+  #118（SMTP 接続先 IP の固定）。
+- **統合担当が足したもの**: 弱いデセプション証拠（`provenance` が passive / induced の `deception.*` だけ）に基づく提案は自動承認しない
+  （`response.auto_approve_withheld`。実 LLM が block_ip を提案しても自動で実行されない）。要約プロンプトに「個人名・連絡先を書かない」（#168。prompt を alert v3 / incident v4 に）。
+- **既定動作の変更**: 未来方向のスキュー超過イベントは取り込み時刻にクランプ＋`clock_skew`、カナリア経路だけの GET は medium・ブラウザ誘発は low
+  （`deception.downgrade_browser_induced`）、カナリア照合は大文字小文字無視、カナリア挿入は `<body>` 直後と `</body>` 直前、`/` 相当や浅い前方一致のデコイパスは 422、
+  `data_dir/deception.key` を新規作成（既存のカナリア値は不変）、料金表にないモデルは最高単価で計上、base_url を変えると保存済みキーを破棄・https 必須、
+  却下・取り消し後 24 時間は同じ対象を自動承認しない、安全設定の変更で既存の active 対処も外れる、**メール通知の `password_env` は許可リスト外だと送信停止**、
+  平文 AUTH の SMTP は拒否、**通知に LLM の要約・理由を既定で載せない**（`notify.include_summary`）、承認後の reason は固定。
+- **要判断（ユーザー）**: (1) #118 で既存のメール通知チャネルが止まりうる（`SMTP_PASSWORD` 等の変数名は `notify.smtp_password_envs` に列挙が必要）。
+  (2) `notify.include_summary=false` は人間が書いた理由も通知から落とす。(3) #30 を Closes にするか。(4) `<img src=/.env>` の誘発で `web.sensitive_file_probe`（high）が立ち
+  rate_limit が提案される件は未対応（detect-web 側で `deception.provenance.induced_by` を使えば下げられる）。(5) Sec-Fetch を送らないリンクプレビュー等のトリップは critical のまま。
+- **チェック**: 下の第 1 弾と同じ項目をすべて通した（件数は PR 本文）。実 LLM・実 ARTEX・実 Slack/Discord の表示は未検証（`TODO(verify)`）。
+- **次の一手（案）**: 残る工数 S は系統 A Gate（#54 #138 #140 #141 #143 #99 #146〜#149 #112）・B Web 検知（#51 #52 #53 #76 #89 #166 #173）・H センサー・インテル（#70 #121 #123 #131 #132）・J 運用（#71 #161 #100 #104〜#111）。#140/#141 は「検知の入力を攻撃者が消せる」テーマの中核。A と B は `detect/web_common.py` と Gate の捕捉で重なるので、同時に走らせるならファイル所有をはっきり分ける。並列は 4 体まで（今回も 4 体で 2 回上限に到達）。
 
 ## 監査修正 第 1 弾（2026-11-21〜22）— 系統 G API・認証 / I フロントエンド / K 評価・文書
 

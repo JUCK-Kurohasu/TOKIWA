@@ -52,3 +52,13 @@ Issue 化はしていない（要判断: 監査 Issue として追加登録す�
   さらに伸びた。遅いテストの洗い出し（`pytest --durations=20`）が次の課題。
 - auth レーンからの依頼: SSE の接続中に JWT を失効させても、開いているストリームは切れない（`token_version` の定期再確認が必要。未対応）。
   TOKIWA 自身への連続ログイン失敗を検知ルールにする件も未対応。
+
+## 第 2 弾（2026-11-22）
+
+| 順 | レーン | マージ | 全チェック | 備考 |
+|---|---|---|---|---|
+| 6 | aidetect / llm-triage / respond-notify のコミット済み分（途中） | 1e7354f | backend 1504 passed / frontend 緑 | 上限で 4 体とも中断したため先に統合 |
+| 7 | aidetect・llm-triage（完了） | 2f5ac54 | backend 1699 passed | 衝突なし |
+| 8 | respond-notify（完了） | 09309b5 | backend 1735 passed | 衝突なし。#168 の残り（要約プロンプトに個人名を書かない指示）を統合担当が追加 |
+| 9 | deception（完了） | d50bf49 | backend 1825 passed / mypy 既知 4 件 / frontend 緑 | `respond/policy.py`・`schemas/response.py`（GatePolicy に `entry_expires_at`（#64）と `html_injection_positions`（#41）を両方）・`docs/response.md` が衝突 → 両方残し、`policy_version` はキーワード引数で両方を渡す |
+| 10 | 自動承認のガード（#133 の残余リスク） | 0124c45 | 同上（134.9 秒） | deception レーンの報告: 実 LLM なら弱いデセプション証拠でも block_ip を提案しうる → respond 側で自動承認しない |
