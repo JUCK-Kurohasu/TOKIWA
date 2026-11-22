@@ -52,7 +52,8 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 
 | 指標 | 定義 |
 |---|---|
-| attack session detection rate | アラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（プロファイル別も） |
+| attack session detection rate (medium+) | **主指標**。medium 以上のアラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（プロファイル別も） |
+| attack session detection rate | 副指標。重大度を問わずアラートが 1 件以上帰属した攻撃セッション / 攻撃セッション（info/low 1 件でも検知扱い） |
 | benign session FPR | アラートが帰属した正常セッション / 正常セッション（全重大度 / medium 以上） |
 | event recall | 攻撃ラベルのイベントのうちアラート証拠に含まれた割合（**下限値**: 窓集計型は一部の証拠しか引用しない） |
 | benign event FPR | 正常アクターのイベントのうち証拠に含まれた割合 |
@@ -63,7 +64,18 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 | latency | バッチ処理時間（取り込み→アラート）p50/p95、アラート→トリアージ p50/p95（バス観測、無ければ DB の updated_at） |
 
 アラートの正解帰属は `evidence_event_ids` 経由が基本。証拠に正解付きイベントが無い場合のみ `source_ip` で帰属する
-（シミュレータはセッションごとに別の送信元 IP を使う）。
+（シミュレータはセッションごとに別の送信元 IP を使う）。この「IP フォールバック」で帰属したアラート数を
+`alerts.attributed_by_ip_fallback`（検知器別は `per_detector[].ip_fallback`）に出す。NAT・CDN・IP 回転のある実運用では
+この帰属は成り立たないので、件数が多いほど帰属系の指標は楽観側。
+
+### 区間と分母（#175）
+
+率はすべて `metrics.json` の `intervals.<指標パス>` に分子 `x`・分母 `n`・95% 区間（`ci_low`/`ci_high`、
+**Clopper–Pearson の正確な両側区間**。`tokiwa/eval/stats.py` に Wilson も実装）を持つ。`n < 30` は `reference_only: true`
+で、report.md では「参考値」と表示する。lab-mini（正常 3・AI 2 セッション）では「誤検知 0/3」の 95% 区間は 0〜70.8%、
+「AI 再現率 2/2」は 15.8〜100% で、点推定だけでは何も言えない。イベント単位の率（event recall / event FPR）は
+セッション内で相関するため区間が狭く出すぎる（`clustered: true`）。複数シードの平均±SD、母比率を変えた PR 曲線、
+time-to-first-alert は未実装（docs/handoff/2026-11-21-audit-eval-docs.md）。
 
 ## 回帰比較（要件 7-6）
 

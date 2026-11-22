@@ -50,6 +50,15 @@ def default_runs_dir() -> Path:
     return Path("eval/runs")
 
 
+def _rate(intervals: dict[str, dict[str, object]], path: str) -> str:
+    """``5/5 [95% CI 0.478-1]*`` (``*`` = n < 30, reference only)."""
+    iv = intervals.get(path)
+    if not iv or not iv.get("n"):
+        return "-"
+    star = "*" if iv.get("reference_only") else ""
+    return f"{iv['x']}/{iv['n']} [95% CI {iv['ci_low']:.3g}-{iv['ci_high']:.3g}]{star}"
+
+
 def _overrides(enable: list[str], disable: list[str]) -> dict[str, bool]:
     out = dict.fromkeys(enable, True)
     out.update(dict.fromkeys(disable, False))
@@ -110,14 +119,31 @@ def run(
     if as_json:
         typer.echo(json.dumps(m, ensure_ascii=False, indent=2, default=str))
     else:
-        d, ai = m["detection"], m["ai_attribution"]
+        ivs = m.get("intervals") or {}
         typer.echo(f"report: {out_dir / 'report.md'}")
         typer.echo(
-            f"attack sessions detected {d['attack_sessions_detected']}/{d['attack_sessions']} "
-            f"(rate {d['attack_session_rate']}), benign FPR {d['benign_session_fpr']}, "
-            f"alerts {m['alerts']['total']} (precision {m['alerts']['precision']})"
+            "attack sessions detected (medium+) "
+            + _rate(ivs, "detection.attack_session_rate_medium_plus")
+            + ", any severity "
+            + _rate(ivs, "detection.attack_session_rate")
         )
-        typer.echo(f"AI attribution P={ai['precision']} R={ai['recall']} AUC={ai['auc']}")
+        typer.echo(
+            "benign session FPR (medium+) "
+            + _rate(ivs, "detection.benign_session_fpr_medium_plus")
+            + ", any severity "
+            + _rate(ivs, "detection.benign_session_fpr")
+            + f"; alerts {m['alerts']['total']} (precision {m['alerts']['precision']}, "
+            f"{m['alerts'].get('attributed_by_ip_fallback', 0)} via source-IP fallback)"
+        )
+        typer.echo(
+            "AI attribution precision "
+            + _rate(ivs, "ai_attribution.precision")
+            + ", recall "
+            + _rate(ivs, "ai_attribution.recall")
+            + f", AUC {m['ai_attribution']['auc']}"
+        )
+        if any(iv.get("reference_only") for iv in ivs.values()):
+            typer.echo("(*) n < 30: reference value only — read the 95% interval, not the point value")
         cost = m["cost"]
         if cost.get("provider") == "mock":
             typer.echo(

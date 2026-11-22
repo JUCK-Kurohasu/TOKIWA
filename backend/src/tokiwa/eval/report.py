@@ -276,6 +276,29 @@ def _pct(v: Any) -> str:
     return "–" if v is None else f"{float(v) * 100:.1f}%"
 
 
+def _ci(iv: dict[str, Any]) -> str:
+    if not iv or iv.get("ci_low") is None:
+        return "–"
+    return f"{_pct(iv['ci_low'])} – {_pct(iv['ci_high'])}"
+
+
+def _ref_note(iv: dict[str, Any]) -> str:
+    notes = []
+    if iv.get("reference_only"):
+        notes.append("参考値 (n<30)")
+    if iv.get("clustered"):
+        notes.append("events clustered: CI too narrow")
+    return "; ".join(notes)
+
+
+def _rate_row(m: dict[str, Any], label: str, path: str) -> str:
+    """One summary row: value, x/n, interval and the 参考値 marker (from ``metrics.intervals``)."""
+    iv = (m.get("intervals") or {}).get(path)
+    if not iv:  # metrics.json from before intervals existed
+        return f"| {label} | {_pct(get_path(m, path))} | – | – | |"
+    return f"| {label} | {_pct(iv['value'])} | {iv['x']} / {iv['n']} | {_ci(iv)} | {_ref_note(iv)} |"
+
+
 def render_comparison(cmp_doc: dict[str, Any]) -> list[str]:
     out = ["", f"## Regression check vs `{cmp_doc.get('previous_run')}`", ""]
     verdict = "REGRESSION" if cmp_doc["has_regression"] else "no regression"
@@ -296,8 +319,7 @@ def render_comparison(cmp_doc: dict[str, Any]) -> list[str]:
 
 def render_markdown(doc: dict[str, Any]) -> str:
     run, ds, m = doc.get("run", {}), doc.get("dataset", {}), doc["metrics"]
-    det, ai, llm, cost, lat, al = (
-        m["detection"],
+    ai, llm, cost, lat, al = (
         m["ai_attribution"],
         m["llm"],
         m["cost"],
@@ -317,19 +339,43 @@ def render_markdown(doc: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
+        "Rates with numerator/denominator and a 95 % Clopper–Pearson interval. **参考値** = fewer than 30 trials:",
+        "the interval, not the point value, is what the data supports. The primary detection metric is medium+.",
+        "",
+        "| metric | value | x / n | 95% CI | note |",
+        "|---|---|---|---|---|",
+        _rate_row(
+            m, "attack session detection, medium+ (primary)", "detection.attack_session_rate_medium_plus"
+        ),
+        _rate_row(m, "attack session detection, any severity (secondary)", "detection.attack_session_rate"),
+        _rate_row(m, "benign session FPR, medium+", "detection.benign_session_fpr_medium_plus"),
+        _rate_row(m, "benign session FPR, any severity", "detection.benign_session_fpr"),
+        _rate_row(m, "event recall (lower bound)", "detection.event_recall"),
+        _rate_row(m, "benign event FPR", "detection.event_fpr"),
+        _rate_row(
+            m,
+            f"alert precision ({al['total']} alerts, {al['unattributed']} unattributed, "
+            f"{al.get('attributed_by_ip_fallback', '–')} via source-IP fallback)",
+            "alerts.precision",
+        ),
+        _rate_row(m, "AI attribution precision", "ai_attribution.precision"),
+        _rate_row(m, "AI attribution recall", "ai_attribution.recall"),
+        _rate_row(m, "AI attribution FPR (non-AI sessions flagged AI)", "ai_attribution.fpr"),
+        f"| AI attribution F1 / ROC-AUC | {_fmt(ai['f1'])} / {_fmt(ai['auc'])} | "
+        f"{ai.get('auc_positives', '–')} AI / {ai.get('auc_negatives', '–')} non-AI sessions | – | "
+        f"{'参考値 (n<30)' if min(ai.get('auc_positives') or 0, ai.get('auc_negatives') or 0) < 30 else ''} |",
+        _rate_row(m, f"LLM agreement: actor type{llm_tag}", "llm.actor_agreement"),
+        _rate_row(m, f"LLM agreement: malicious verdict{llm_tag}", "llm.verdict_agreement"),
+        _rate_row(m, f"LLM agreement: AI verdict{llm_tag}", "llm.ai_agreement"),
+        "",
+        "Event-level intervals assume independent events; events are clustered by session, so those two are too",
+        "narrow. Source-IP fallback attribution relies on the simulator's one-address-per-session layout.",
+        "",
+        "## Cost and latency",
+        "",
         "| metric | value |",
         "|---|---|",
-        f"| attack session detection rate | {_pct(det['attack_session_rate'])} "
-        f"({det['attack_sessions_detected']}/{det['attack_sessions']}) |",
-        f"| benign session FPR (any / medium+) | {_pct(det['benign_session_fpr'])} / "
-        f"{_pct(det['benign_session_fpr_medium_plus'])} |",
-        f"| event recall (lower bound) | {_pct(det['event_recall'])} |",
-        f"| benign event FPR | {_pct(det['event_fpr'])} |",
-        f"| alert precision | {_pct(al['precision'])} ({al['total']} alerts, {al['unattributed']} unattributed) |",
-        f"| AI attribution P / R / F1 | {_fmt(ai['precision'])} / {_fmt(ai['recall'])} / {_fmt(ai['f1'])} |",
-        f"| AI attribution ROC-AUC | {_fmt(ai['auc'])} |",
-        f"| LLM agreement actor / verdict / AI{llm_tag} | {_pct(llm['actor_agreement'])} / "
-        f"{_pct(llm['verdict_agreement'])} / {_pct(llm['ai_agreement'])} ({llm['triaged']} triaged) |",
+        f"| LLM calls / triaged records | {cost['llm_calls']} / {llm['triaged']} |",
         f"| LLM cost actual total / per alert | ${_fmt(cost['cost_usd'])} / ${_fmt(cost['cost_per_alert_usd'])} |",
         *(
             [
@@ -347,13 +393,16 @@ def render_markdown(doc: dict[str, Any]) -> str:
         "",
         "## Detection by profile",
         "",
-        "| profile | actor | sessions | detected | rate | medium+ | alerts |",
-        "|---|---|---|---|---|---|---|",
+        "| profile | actor | sessions | medium+ | medium+ 95% CI | any severity | alerts | note |",
+        "|---|---|---|---|---|---|---|---|",
     ]
+    ivs = m.get("intervals") or {}
     for name, row in m["per_profile"].items():
+        iv = ivs.get(f"per_profile.{name}.detection_rate_medium_plus") or {}
         out.append(
-            f"| {name} | {row['actor']} | {row['sessions']} | {row['detected']} | {_pct(row['detection_rate'])} "
-            f"| {row['detected_medium_plus']} | {row['alerts']} |"
+            f"| {name} | {row['actor']} | {row['sessions']} | {row['detected_medium_plus']}"
+            f" ({_pct(row.get('detection_rate_medium_plus'))}) | {_ci(iv)} | {row['detected']}"
+            f" ({_pct(row['detection_rate'])}) | {row['alerts']} | {_ref_note(iv)} |"
         )
     out += [
         "",
@@ -372,16 +421,21 @@ def render_markdown(doc: dict[str, Any]) -> str:
             out.append(f"| {actor} | " + " | ".join(str(row.get(p, 0)) for p in preds) + " |")
     out.append("")
     out.append("AUC by score source: " + ", ".join(f"{k}={_fmt(v)}" for k, v in ai["auc_by_source"].items()))
-    out += ["", "## Detectors", "", "| rule | alerts | hits | TP | FP | unattributed | precision | actors |"]
-    out.append("|---|---|---|---|---|---|---|---|")
+    out += [
+        "",
+        "## Detectors",
+        "",
+        "| rule | alerts | hits | TP | FP | unattributed | via source-IP fallback | precision | actors |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
     for r in m["per_detector"]:
         actors = ", ".join(f"{k}:{v}" for k, v in r["actors"].items())
         out.append(
             f"| `{r['rule_id']}` | {r['alerts']} | {r['hits']} | {r['tp']} | {r['fp']} | {r['unattributed']} "
-            f"| {_pct(r['precision'])} | {actors} |"
+            f"| {r.get('ip_fallback', '–')} | {_pct(r['precision'])} | {actors} |"
         )
     if not m["per_detector"]:
-        out.append("| (no alerts) | | | | | | | |")
+        out.append("| (no alerts) | | | | | | | | |")
     out += [
         "",
         "## LLM (mock provider — rule-based fallback, NOT an LLM measurement)" if mock else "## LLM",

@@ -202,6 +202,23 @@ def test_metrics_attribution_and_llm_agreement() -> None:
     # RunResults defaults to the mock provider: every tier is the rule fallback (#176)
     assert m["llm"]["by_tier"] == {"rules(mock)": 1} and m["llm"]["measures_llm"] is False
     assert m["cost"]["cost_per_alert_usd"] == round(0.01 / 3, 6)
+    # #175: alert z reached its session only through source_ip; every rate has x / n and an interval
+    assert m["alerts"]["attributed_by_ip_fallback"] == 1
+    assert {r["rule_id"]: r["ip_fallback"] for r in m["per_detector"]} == {
+        "r.sqli": 0,
+        "r.noise": 0,
+        "r.ip": 1,
+    }
+    assert m["detection"]["attack_session_rate_medium_plus"] == 1.0  # high (ai) + medium (hum)
+    iv = m["intervals"]
+    assert (iv["detection.attack_session_rate"]["x"], iv["detection.attack_session_rate"]["n"]) == (2, 2)
+    assert (
+        iv["detection.benign_session_fpr"]["ci_low"] == 0.025
+        and iv["detection.benign_session_fpr"]["reference_only"]
+    )
+    assert iv["detection.event_recall"]["clustered"] is True
+    assert (iv["detection.event_recall"]["x"], iv["detection.event_recall"]["n"]) == (1, 3)
+    assert iv["per_profile.human.detection_rate_medium_plus"]["x"] == 1
     assert m["latency"]["batch_p50_ms"] == 2.0
 
 
