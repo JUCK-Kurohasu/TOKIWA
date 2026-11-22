@@ -135,5 +135,7 @@ deception:
 | `copilot.enabled` | true | コパイロット |
 | `copilot.tier` | `deep` | 使うモデルのティア |
 | `copilot.max_tool_iterations` | 8 | 1 回の質問でツールを使う最大回数 |
+| `copilot.min_role` | `analyst` | 会話の作成・送信に必要な最低ロール（`viewer` / `analyst` / `admin`）。1 回の質問で deep ティアを最大 8 回呼び、日次予算は全体共通のため既定で viewer は不可 |
+| `copilot.messages_per_minute` | 6 | ユーザーごとの 1 分あたり送信数の上限（0 で無制限）。超えると 429 |
 
 すべての項目は `backend/src/tokiwa/config.py` にあります。Docker 用の例は、リポジトリ直下の `.env.example` を参照してください。

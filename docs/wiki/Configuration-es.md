@@ -135,5 +135,7 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `copilot.enabled` | true | Copiloto |
 | `copilot.tier` | `deep` | Nivel (tier) del modelo que se usa |
 | `copilot.max_tool_iterations` | 8 | Número máximo de usos de herramientas por pregunta |
+| `copilot.min_role` | `analyst` | Rol mínimo para crear conversaciones y enviar mensajes (`viewer` / `analyst` / `admin`). Una pregunta puede hacer hasta 8 llamadas de nivel deep contra el presupuesto diario común, así que por defecto se excluye a viewer |
+| `copilot.messages_per_minute` | 6 | Límite de mensajes por minuto y usuario (0 = sin límite). Al superarlo, la API responde 429 |
 
 Todas las opciones están en `backend/src/tokiwa/config.py`. Para un ejemplo para Docker, consulte `.env.example` en la raíz del repositorio.

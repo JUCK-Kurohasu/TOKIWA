@@ -11,8 +11,8 @@
 | #40 | 部分 | 出所ラベル（`ingest.token_id`/`ingest.token`、クライアントの `ingest.*` は破棄）、トークンの `allowed_sensor_ids`/`allowed_datasets`（API・CLI `--sensor-id`/`--dataset`）、gate スコープ無しトークンの `gate.*`/`deception.*`/kind=deception に `ingest.trust=low`。protected_cidrs は既存（`response.protected_cidrs`）なので文書化のみ。repro をテスト化（`tests/api/test_ingest_provenance.py`） | 608ef21 |
 | #33 | 部分 | `tokiwa token create` / `ApiTokenCreate` / UI の既定スコープを `ingest` のみに。Gate 用は `--scope ingest --scope gate` を明示。`token create` の全呼び出し（AGENTS.md, README, .env.example, docs/deploy.md, docs/gate.md, wiki Installation/Quick-Start/Sensors/CLI ×4 言語）を更新（lab/scripts/init-tokens.sh・Makefile・scripts は既に明示）。Gate はポリシー取得 403 時に「gate スコープ不足」のヒントをログ。docs/gate.md・docs/deception.md・wiki Deception×4 に「gate トークン漏えい＝デセプション配置の漏えい」。既存トークンの scopes は不変 | 3bc39ab |
 | #163 | 部分（(a)(b) は完全、(c)(d) は auth レーン） | (a) `ApiTokenRow` に `expires_at`/`created_by`/`rotated_from`（nullable）。期限切れは 401 `API token expired`。API `expires_in_days`（既定は無期限のまま）と `POST /tokens/{id}/rotate`。CLI `tokiwa token create --expires-in-days` / `list [--all]` / `revoke <id\|name>` / `rotate <id\|name> --grace-hours --expires-in-days`（共通処理 `tokiwa/auth/api_tokens.py`、監査 actor `cli`。CLI 作成も監査に残るようになった）。(b) Gate: `gate/tokens.py` の `TokenSource` がトークンファイルを mtime/サイズ/inode 変化で再読込、401 で強制再読込して変わっていれば即再送、変わらなければイベントをキューに保持してバックオフ（以前は 401 でバッチ破棄）。空・読めないファイルは直前のトークンを維持。`GateSettings.token_file`（`TOKIWA_GATE__TOKEN_FILE`）を追加し lab の gate に設定。UI のトークン一覧に「期限切れ」バッジ | 6b4d6f0 |
-| #157 | 完全 | viewer にはイベントを伏字済み射影で返す（403 ではなく射影なので viewer の画面は壊れない）。`tokiwa/api/visibility.py`。対象: events 一覧/詳細、sessions 詳細の events、alerts 詳細の evidence、deception trips（バイパス経路も塞いだ）。伏字: query・request_body・ヘッダ値（UA/host/content-type/accept/content-length 以外）・referrer のクエリ・raw・Gate 以外の message・cmdline・llm_app.prompt・deception.token。フロントの body 整形は JSON.parse 失敗時に原文表示なので崩れない（確認済み）。wiki Web-UI ×4 にロール表を追記 | (このコミット) |
-| #164 | 未着手 | | |
+| #157 | 完全 | viewer にはイベントを伏字済み射影で返す（403 ではなく射影なので viewer の画面は壊れない）。`tokiwa/api/visibility.py`。対象: events 一覧/詳細、sessions 詳細の events、alerts 詳細の evidence、deception trips（バイパス経路も塞いだ）。伏字: query・request_body・ヘッダ値（UA/host/content-type/accept/content-length 以外）・referrer のクエリ・raw・Gate 以外の message・cmdline・llm_app.prompt・deception.token。フロントの body 整形は JSON.parse 失敗時に原文表示なので崩れない（確認済み）。wiki Web-UI ×4 にロール表を追記 | 0cd2e99 |
+| #164 | 部分 | `copilot.min_role`（既定 analyst、viewer/admin に変更可）未満は会話作成・送信が 403（既存会話の閲覧は可）。ユーザー別（user.id キー）の送信レート `copilot.messages_per_minute`（既定 6/分、0=無制限）超過で 429 + Retry-After（ストリーム開始前に判定、409 等の拒否は枠を消費しない）。UI は既存の ApiErrorState で 403/429 を表示（送信時に会話作成→403 を `sendError` で表示することをコード上で確認） | (このコミット) |
 | #167 | 未着手 | | |
 | #158 | 未着手 | | |
 
@@ -37,6 +37,13 @@
 - `alerts.details`（検知器が入れる抜粋）・インシデントの LLM 分析文・`/llm/calls` 一覧の `related` は射影していない。
   抜粋に本文が入る検知器がある場合は別途。Copilot は #164 で既定 analyst 以上（viewer に許可すると search_events ツール
   経由で本文抜粋が LLM 回答に出うる）。
+
+### #164 で残したもの
+- 予算の用途別分割（triage/incident の予約枠と copilot 枠）・ユーザー別日次上限・同時会話数上限・予算 80%/100% 通知:
+  `llm/gateway.py`（LLM レーン）にまたがるため未実装。
+- レート制限はプロセス内メモリ（ワーカーごと）。複数ワーカー構成では「ワーカー数 × 上限」になる。
+- UI で viewer に Copilot のメニュー自体を隠す: `min_role` は設定で変わるのでフロントが知る手段（例 `/auth/me` や
+  `/system/info` に copilot 可否）が必要。frontend レーンへ依頼。
 
 ### #163 で残したもの
 - (c) `tokiwa user reset-password`、(d) CLI の DB 例外で SQL パラメータを出さない（hide_parameters）: auth レーン担当のため未着手。
@@ -81,9 +88,13 @@
 - `lab/compose.yaml`: gate サービスに `TOKIWA_GATE__TOKEN_FILE`（with-token.sh の env と併用。ファイルが読めればファイル優先）。
 - `frontend/src/pages/settings/TokensTab.tsx`: 状態列に「期限切れ」バッジ（数行）。
 - `tests/gate/test_gate_shipper.py`: 401 を恒久エラーの parametrize から外した（挙動変更のため）。
+- `config.py` の `CopilotSettings` に `min_role` / `messages_per_minute`（#164。copilot セクションのみ）。
 - `api/routes/alerts.py`（`get_alert` の evidence に `project_events`、2 行）、`api/routes/deception.py`（`list_trips` に同、3 行）（#157）。
 
 ## 他レーンへの依頼
+
+- frontend: viewer（`copilot.min_role` 未満）にはコパイロットの入力欄を無効化して説明を表示（#164）。
+- LLM: 予算の用途別枠（copilot が triage を枯渇させない）（#164 の残り）。
 
 - frontend: トークン画面に「ローテーション」ボタン（`POST /tokens/{id}/rotate`、新トークンを一度だけ表示）と有効期限の入力
   （`expires_in_days`）、`created_by` 列（#163）。

@@ -135,5 +135,7 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `copilot.enabled` | true | Copilot |
 | `copilot.tier` | `deep` | Model tier to use |
 | `copilot.max_tool_iterations` | 8 | Maximum number of tool uses per question |
+| `copilot.min_role` | `analyst` | Minimum role to create conversations and send messages (`viewer` / `analyst` / `admin`). One question can make up to 8 deep-tier calls against the shared daily budget, so viewers are excluded by default |
+| `copilot.messages_per_minute` | 6 | Per-user cap on messages per minute (0 = unlimited). Above it the API answers 429 |
 
 Every setting is defined in `backend/src/tokiwa/config.py`. For a Docker example, see `.env.example` in the repository root.
