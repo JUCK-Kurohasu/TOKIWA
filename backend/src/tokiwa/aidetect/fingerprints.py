@@ -60,7 +60,10 @@ _LIBRARY_HEADER_SETS = (
 )
 
 # Headers that indicate an LLM SDK / agent protocol client. ``x-stainless-*`` are sent by the Stainless-generated
-# OpenAI / Anthropic SDKs; ``mcp-session-id`` / ``mcp-protocol-version`` by MCP Streamable-HTTP clients.
+# OpenAI / Anthropic SDKs; ``mcp-session-id`` / ``mcp-protocol-version`` by MCP Streamable-HTTP clients. They belong
+# to the app -> LLM provider / MCP client -> server hop, so they only show up when the protected service *is* an LLM
+# API or MCP endpoint; attack tools reach ordinary targets with their own headers (audit #125,
+# docs/detection/ai-attacks.md §7). Their absence says nothing about AI involvement.
 _LLM_SDK_HEADER_PREFIXES = ("x-stainless-",)
 _LLM_SDK_HEADERS = frozenset(
     {"mcp-session-id", "mcp-protocol-version", "anthropic-version", "openai-organization", "openai-project"}
