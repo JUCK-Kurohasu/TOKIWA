@@ -138,7 +138,9 @@ OpenAI 互換（ローカル LLM）は Web 検索不可 → エラーとして�
    最小キャッシュ長（モデル依存、数百〜数千トークン）未満の短い system は黙ってキャッシュされない。
    効果は `llm_calls.cache_read_tokens` で確認する。
 5. 重大度しきい値（`triage.min_severity_for_llm`）未満は LLM に送らない（triage モジュール）。
-6. 価格表 `llm/pricing.py` は設定 `llm.pricing` で上書き可。未知モデル（ローカル LLM）は 0 円計上。
+6. 価格表 `llm/pricing.py` は設定 `llm.pricing` で上書き可。未知モデルは **最も高い既知単価** で見積もる（fail-closed、#35）。
+   日付・版・Bedrock 接頭辞付きの ID は正規化して表を引く。無料のローカル LLM は `llm.pricing` に 0 を登録する。
+   見積もりで計上した呼び出しは `llm_calls.cost_basis = "unpriced"`（使用量画面に件数を表示）。
 
 ## 8. 秘密情報・API キー（T5, T8）
 - 推奨は環境変数（`ANTHROPIC_API_KEY` / `TOKIWA_LLM__OPENAI_API_KEY`）。
@@ -147,6 +149,15 @@ OpenAI 互換（ローカル LLM）は Web 検索不可 → エラーとして�
 - **API レスポンスで決して返さない**: `GET/PUT /llm/config` は `anthropic_api_key_set` / `openai_api_key_set`
   の真偽のみ。base URL は `user:pass@` をマスクして返す。テスト: `tests/llm/test_llm_settings_routes.py`。
 - 監査ログ（`audit_log`, action=`llm.config.update`）にはキーの値を書かず `"set"` / `"cleared"` のみ。
+- **キーと接続先の束縛（#98）**: 実行時（UI / `PUT /llm/config`）の `*_base_url` は `llm/endpoints.py::validate_runtime_base_url`
+  を通す（https 必須・http は loopback のみ・リンクローカル / メタデータ / 0.0.0.0/8 / マルチキャストを拒否。`2852039166` や
+  `0xa9.0xfe.0xa9.0xfe`、`::ffff:169.254.169.254` のような数値表記も正規化して判定）。保存済みの行も読み込み時に同じ規則で再検査する。
+  URL を変えるとそのプロバイダの保存済みキーを捨て（同じ更新で新しいキーが来た場合を除く）、実行時 URL がある間は
+  **その URL 用に入力されたキーだけ** を使う（静的キー・`ANTHROPIC_API_KEY` は空キーで上書きして使わせない。SDK にも
+  `api_key` を明示して渡すので環境変数の資格情報チェーンは働かない）。束縛は overlay の `_key_bound_to` に保存。
+  束縛情報の無い旧形式の行（実行時 URL + キー）は fail-closed でキーを無視する。
+  未対応: ホスト名が DNS でリンクローカル等に解決される場合（`TODO(verify)`）、`llm.config.update` を通知の高優先イベントにすること（notify レーン）、
+  キーの暗号化保存（#102 系）。
 - アプリログに API キー・プロンプト本文を出さない（プロバイダはモデル名・ステータス・エラー種別のみをログ）。
 - Anthropic SDK の自動リトライは 2 回（408/409/429/5xx・接続エラー）。タイムアウトは `request_timeout_seconds`。
 

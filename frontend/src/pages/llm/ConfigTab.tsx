@@ -71,6 +71,10 @@ const strings = {
     keyStored: "設定済み",
     keyUnknown: "未変更（入力すると上書き）",
     urlUnchanged: "未変更（例: http://localhost:11434/v1）",
+    urlHint:
+      "https:// が必須です（http:// は localhost のみ）。URL を変えると保存済みの API キーは無効になるので、新しい宛先用のキーを同時に入力してください。リンクローカル・メタデータのアドレスは指定できません。",
+    rebind:
+      "{providers} の接続先が UI で変更されています。この接続先用の API キーが未入力のため、キーは送信されません（環境変数のキーも使いません）。キーを入力してください。",
     save: "保存",
     reset: "元に戻す",
     saved: "保存しました",
@@ -129,6 +133,10 @@ const strings = {
     keyStored: "Set",
     keyUnknown: "Unchanged (typing overwrites it)",
     urlUnchanged: "Unchanged (e.g. http://localhost:11434/v1)",
+    urlHint:
+      "https:// is required (http:// only for localhost). Changing the URL invalidates the stored API key, so enter the key for the new endpoint in the same save. Link-local and metadata addresses are refused.",
+    rebind:
+      "The endpoint of {providers} was changed from the UI and no API key has been entered for it, so no key is sent (the environment key is not used either). Enter the key.",
     save: "Save",
     reset: "Reset",
     saved: "Saved",
@@ -462,6 +470,11 @@ function ConfigForm({ config }: { config: LLMConfig }) {
                 <div>
                   <div className="text-sm font-medium">{L.credentials}</div>
                   <div className="text-[11px] text-muted">{L.credentialsHint}</div>
+                  {(config.api_key_rebind_required?.length ?? 0) > 0 && (
+                    <p role="alert" className="mt-1 text-[11px] font-medium text-sev-medium">
+                      {L.rebind.replace("{providers}", (config.api_key_rebind_required ?? []).join(", "))}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -490,8 +503,12 @@ function ConfigForm({ config }: { config: LLMConfig }) {
                     className="font-mono"
                     value={openaiUrl}
                     placeholder={config.openai_base_url || L.urlUnchanged}
+                    aria-describedby={`${uid}-ourl-hint`}
                     onChange={(e) => setOpenaiUrl(e.target.value)}
                   />
+                  <p id={`${uid}-ourl-hint`} className="mt-1 text-[11px] text-muted">
+                    {L.urlHint}
+                  </p>
                 </div>
                 <div>
                   <Label htmlFor={`${uid}-okey`}>

@@ -79,6 +79,8 @@ export interface LLMConfig {
   overridden?: string[];
   /** Configured models without a price: their calls are charged at the highest known rates (fail-closed). */
   unpriced_models?: string[];
+  /** Providers whose endpoint was changed from the UI without a key entered for it: the key must be entered again. */
+  api_key_rebind_required?: string[];
 }
 
 /**

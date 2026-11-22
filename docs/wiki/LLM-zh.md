@@ -36,6 +36,14 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 **会以明文保存在数据库中**。请注意数据库备份的管理，尽可能使用环境变量。
 密钥不会写入日志、审计日志或 LLM 的输入中。
 
+**从 UI / API 更改连接地址（`llm.anthropic_base_url` / `llm.openai_base_url`）时的限制**：必须使用 `https://`，
+`http://` 仅允许 `localhost` / `127.0.0.1` / `::1`。不能指定链路本地地址（`169.254.0.0/16`、`fe80::/10`）或云的元数据端点
+（`169.254.169.254`、`metadata.google.internal` 等，包括十进制、十六进制写法）。
+此外，**API 密钥与输入时的连接地址绑定**：在 UI 中更改 URL 后，已保存的密钥失效，在为新地址重新输入密钥之前，
+不会发送任何密钥（包括环境变量中的密钥）。可以在同一次保存中同时输入 URL 和密钥。
+如需以明文 HTTP 连接 localhost 以外的主机（例如 `http://ollama:11434/v1`），请通过环境变量或 `tokiwa.yaml` 设置
+（静态设置不受此限制）。
+
 设置完成后，可以通过 **LLM → Settings → Connection test**（连接测试）进行检查（对 fast / deep 每个 tier 各进行 1 次最小的结构化调用，计入预算和审计）。
 如果结果中的 **Provider**（提供方）为 `mock`，说明没有调用真实 API（提供方设置可能仍为 `mock`）。“Current status”（当前状态）除了设置值，还会显示实际在用的提供方。
 
