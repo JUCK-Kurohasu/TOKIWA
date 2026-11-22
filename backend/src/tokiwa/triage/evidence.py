@@ -21,13 +21,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tokiwa.correlate.scoring import extract_cves
+from tokiwa.correlate.scoring import AlertFacts, extract_cves, infer_actor_type
 from tokiwa.db.models.detection import AlertRow, IncidentRow
 from tokiwa.db.models.intel import VulnRow
 from tokiwa.db.models.telemetry import ActorSessionRow
 from tokiwa.pipeline.store import get_events
-from tokiwa.schemas.common import Severity
+from tokiwa.schemas.alerts import AlertStatus
+from tokiwa.schemas.common import ActorType, Severity
 from tokiwa.schemas.events import Event, EventKind
+from tokiwa.triage.attribution import is_llm_verdict
 
 BODY_HEAD_CHARS = 512
 # Request headers worth showing to the model (values are redacted by untrusted_block()).
@@ -145,7 +147,40 @@ def alert_subject(row: AlertRow) -> TriageSubject:
     )
 
 
-def incident_subject(row: IncidentRow, alerts: Sequence[AlertRow]) -> TriageSubject:
+def rule_actor_type(
+    alerts: Sequence[AlertRow],
+    *,
+    ai_score: float | None,
+    ai_threshold: float,
+    session_classifications: Sequence[str],
+) -> ActorType:
+    """Attribution from rules only (same inputs as correlation), never from a stored LLM verdict (#62)."""
+    active = [a for a in alerts if a.status != AlertStatus.FALSE_POSITIVE] or list(alerts)
+    facts = [
+        AlertFacts(
+            rule_id=a.rule_id,
+            category=a.category,
+            severity=a.severity,
+            ai_score=a.ai_score,
+            tags=list(a.tags or []),
+            entities=dict(a.entities or {}),
+        )
+        for a in active
+    ]
+    return infer_actor_type(
+        facts, ai_score=ai_score, ai_threshold=ai_threshold, session_classifications=session_classifications
+    )
+
+
+def incident_subject(
+    row: IncidentRow, alerts: Sequence[AlertRow], *, rule_actor: ActorType | str | None = None
+) -> TriageSubject:
+    """The incident as TOKIWA's detectors describe it - nothing a model wrote (#62).
+
+    ``row.summary`` is used only while it is still the correlator's (or the rule verdict's) text; once an LLM verdict
+    has overwritten it, it is left out here and shown separately as ``previous_llm_verdict``. ``actor_type`` is the
+    rule attribution passed in (``rule_actor``), not ``row.actor_type``, which an LLM tie-break may have set.
+    """
     ordered = sorted(alerts, key=lambda a: (-Severity(a.severity).rank, -a.last_seen.timestamp()))
     entities: dict[str, str] = {}
     cves: set[str] = set()
@@ -159,12 +194,12 @@ def incident_subject(row: IncidentRow, alerts: Sequence[AlertRow]) -> TriageSubj
         kind="incident",
         id=row.id,
         title=row.title[:500],
-        description=(row.summary or "")[:2000],
+        description="" if is_llm_verdict(row.triage) else (row.summary or "")[:2000],
         severity=Severity(row.severity),
         category=row.category,
         confidence=max(confidences),
         ai_score=row.ai_score,
-        actor_type=row.actor_type,
+        actor_type=str(rule_actor) if rule_actor is not None else None,
         mitre=list(row.mitre or []),
         kill_chain=list(row.kill_chain or []),
         rule_ids=list(dict.fromkeys(a.rule_id for a in ordered)),
@@ -307,6 +342,8 @@ class TriageContext:
     events: list[Event] = field(default_factory=list)
     sessions: list[dict[str, Any]] = field(default_factory=list)
     vulns: list[dict[str, Any]] = field(default_factory=list)
+    # An earlier LLM verdict for the same incident (unverified model output, its own untrusted block; #62).
+    previous_verdict: dict[str, Any] | None = None
 
     @property
     def source_ips(self) -> list[str]:

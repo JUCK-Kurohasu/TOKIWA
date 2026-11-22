@@ -79,6 +79,8 @@ Los sitios permitidos se configuran en `EXTERNAL_LINK_ALLOWLIST` de `frontend/sr
 Agrupaciones de alertas relacionadas por origen, sesión y entidad.
 
 - Lista: severidad, estado, **Actor attribution** (Atribución del actor: agente de IA / humano / escáner, etc.), puntuación de IA
+  (la atribución la deciden las reglas y el comportamiento. Solo cuando las reglas no pueden atribuir se usa el veredicto del LLM, y
+  solo para elevarla a agente de IA / escáner; un veredicto del LLM de «humano» o «benigno» no la cambia)
 - Detalle: fase del ataque (kill chain: reconocimiento → acceso inicial → …), triaje del LLM (resumen, fundamentación, acción de respuesta recomendada),
   "evidencias de participación de IA" señaladas por el LLM y alertas relacionadas. Permite asignar el **Assignee** (Responsable) y actualizar el **Status** (Estado).
 
