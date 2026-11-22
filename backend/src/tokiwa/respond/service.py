@@ -35,9 +35,12 @@ from tokiwa.audit import record_audit
 from tokiwa.bus import bus
 from tokiwa.config import get_settings
 from tokiwa.db.models.response import ResponseActionRow
+from tokiwa.db.models.response_suppression import ResponseSuppressionRow
 from tokiwa.db.session import session_scope
+from tokiwa.respond import suppress
 from tokiwa.respond.executors import ExecutionRequest, ExecutorError, get_executor
 from tokiwa.respond.policy import auto_approve_allowed
+from tokiwa.respond.suppress import ActionSuppressed
 from tokiwa.respond.validate import (
     ONE_SHOT_ACTIONS,
     ActionValidationError,
@@ -47,6 +50,7 @@ from tokiwa.respond.validate import (
 from tokiwa.runtime import on_startup
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.response import ActionProposal, ActionStatus, ResponseAction
+from tokiwa.schemas.suppressions import SuppressOptions
 from tokiwa.schemas.triage import ActionType
 from tokiwa.util import new_id, utcnow
 
@@ -61,6 +65,7 @@ __all__ = [
     "ActionExecutionError",
     "ActionNotFound",
     "ActionStateError",
+    "ActionSuppressed",
     "ActionValidationError",
     "approve_action",
     "create_proposal",
@@ -116,9 +121,13 @@ def _append_reason(existing: str, new: str) -> str:
 
 
 async def propose_action(proposal: ActionProposal) -> ResponseAction | None:
-    """Create (or merge into) a proposal. Returns None when validation rejects it."""
+    """Create (or merge into) a proposal. Returns None when validation rejects it or a human suppressed it."""
     try:
         return await create_proposal(proposal)
+    except ActionSuppressed as exc:
+        log.info("response proposal suppressed (%s %r): %s", proposal.action_type, proposal.target, exc)
+        await suppress.note_dropped(exc, actor=proposal.proposed_by.value)
+        return None
     except ActionValidationError as exc:
         log.info("response proposal rejected (%s %r): %s", proposal.action_type, proposal.target, exc)
         await record_audit(
@@ -131,7 +140,11 @@ async def propose_action(proposal: ActionProposal) -> ResponseAction | None:
 
 
 async def create_proposal(proposal: ActionProposal, *, actor: str | None = None) -> ResponseAction:
-    """Validate and store a proposal. Raises :class:`ActionValidationError` (used by the API for 422)."""
+    """Validate and store a proposal. Raises :class:`ActionValidationError` (used by the API for 422).
+
+    A matching suppression (audit #63) drops automated proposals (:class:`ActionSuppressed`, handled by
+    :func:`propose_action`) and forbids auto-approval for everything else.
+    """
     settings = get_settings().response
     v = validate_action(
         proposal.action_type,
@@ -146,6 +159,13 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
     reason = _clean_reason(proposal.reason)
     now = utcnow()
     async with _propose_lock(), session_scope() as session:
+        # Same transaction as the dedup below, so a concurrent reject / revert is seen by both or neither.
+        hold = await suppress.find_suppression(session, v.action_type.value, v.target, now)
+        if hold is not None and suppress.drops(hold, proposal.proposed_by):
+            raise ActionSuppressed(hold.id, v.action_type.value, v.target)  # rolled back; audited by caller
+        if hold is not None:
+            hold.hits = (hold.hits or 0) + 1
+            hold.last_hit_at = now
         existing = (
             await session.execute(
                 select(ResponseActionRow)
@@ -187,7 +207,7 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
                 status=ActionStatus.PROPOSED.value,
                 reversible=v.reversible,
                 ttl_minutes=v.ttl_minutes,
-                result={"validation_notes": list(v.notes)} if v.notes else {},
+                result=_initial_result(v.notes, hold),
             )
             session.add(row)
             await record_audit(
@@ -209,10 +229,29 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
         await bus.publish("action.updated", merged)
         return merged
     await bus.publish("action.proposed", created)
-    if auto_approve_allowed(v.action_type, settings):
+    if auto_approve_allowed(v.action_type, settings) and hold is None:
         log.info("auto-approving %s %s by policy", v.action_type.value, v.target)
         return await approve_action(created.id, actor=POLICY_ACTOR)
+    if hold is not None and auto_approve_allowed(v.action_type, settings):
+        await record_audit(
+            POLICY_ACTOR,
+            "response.auto_approve_suppressed",
+            target=created.id,
+            details={"suppression_id": hold.id, "mode": hold.mode},
+        )
     return created
+
+
+def _initial_result(notes: tuple[str, ...], hold: ResponseSuppressionRow | None) -> dict[str, Any]:
+    result: dict[str, Any] = {"validation_notes": list(notes)} if notes else {}
+    if hold is not None:
+        # Shown in the UI: why this proposal waits for a human although auto-approve may be on.
+        result["suppression"] = {
+            "id": hold.id,
+            "mode": hold.mode,
+            "expires_at": hold.expires_at.isoformat() if hold.expires_at else None,
+        }
+    return result
 
 
 # ---------------------------------------------------------------- approve / execute
@@ -355,7 +394,11 @@ async def _execute(action_id: str) -> ResponseAction:
 # ---------------------------------------------------------------- reject / revert / expire
 
 
-async def reject_action(action_id: str, *, actor: str, reason: str | None = None) -> ResponseAction:
+async def reject_action(
+    action_id: str, *, actor: str, reason: str | None = None, suppress_options: SuppressOptions | None = None
+) -> ResponseAction:
+    """Reject a proposal. Always records a suppression (audit #63): ``suppress`` when requested, otherwise
+    the ``manual_only`` cooldown, so the same proposal cannot come straight back auto-approved."""
     now = utcnow()
     async with session_scope() as session:
         res = await session.execute(
@@ -377,6 +420,18 @@ async def reject_action(action_id: str, *, actor: str, reason: str | None = None
         await record_audit(
             actor, "response.reject", target=action_id, details={"reason": reason or ""}, session=session
         )
+        held = await suppress.record_decision(
+            session,
+            row,
+            actor=actor,
+            decision="reject",
+            options=suppress_options,
+            reason=reason,
+            now=now,
+            settings=get_settings().response,
+        )
+        if held is not None:
+            row.result = {**result, "suppression_id": held.id}
         rejected = _schema(row)
     await bus.publish("action.updated", rejected)
     return rejected
@@ -393,8 +448,14 @@ async def _set_result(action_id: str, **values: Any) -> ResponseAction:
         return _schema(row)
 
 
-async def revert_action(action_id: str, *, actor: str) -> ResponseAction:
-    """Undo an active action. Status flips to ``reverted`` first, so the Gate stops enforcing immediately."""
+async def revert_action(
+    action_id: str, *, actor: str, reason: str | None = None, suppress_options: SuppressOptions | None = None
+) -> ResponseAction:
+    """Undo an active action. Status flips to ``reverted`` first, so the Gate stops enforcing immediately.
+
+    Records a suppression like :func:`reject_action`. It is kept even if the executor's revert fails (the
+    action is then ``active`` again): it only stops re-proposals, it never enforces anything.
+    """
     now = utcnow()
     async with session_scope() as session:
         row = await session.get(ResponseActionRow, action_id)
@@ -410,9 +471,28 @@ async def revert_action(action_id: str, *, actor: str) -> ResponseAction:
         )
         if res.rowcount != 1:  # type: ignore[attr-defined]
             raise ActionStateError(f"action is {row.status}; only active actions can be reverted")
-        await record_audit(actor, "response.revert", target=action_id, session=session)
+        await record_audit(
+            actor, "response.revert", target=action_id, details={"reason": reason or ""}, session=session
+        )
         row = await session.get(ResponseActionRow, action_id, populate_existing=True)
         assert row is not None
+        held = await suppress.record_decision(
+            session,
+            row,
+            actor=actor,
+            decision="revert",
+            options=suppress_options,
+            reason=reason,
+            now=now,
+            settings=get_settings().response,
+        )
+        extra: dict[str, Any] = {}
+        if reason:
+            extra["revert_reason"] = reason.strip()[:2000]
+        if held is not None:
+            extra["suppression_id"] = held.id
+        if extra:
+            row.result = {**(row.result or {}), **extra}
         req = _request(_Snapshot.of(row))
     try:
         outcome = await get_executor(req.action_type).revert(req)

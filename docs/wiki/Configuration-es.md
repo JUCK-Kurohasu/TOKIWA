@@ -103,6 +103,7 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | Clave | Por defecto | Descripción |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | Aprobación automática (requiere ambos ajustes) |
+| `auto_approve_cooldown_minutes` | 1440 | Tras rechazar o revertir una persona una acción, el mismo tipo + objetivo no se aprueba automáticamente durante estos minutos (0 lo desactiva) |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL por defecto y máximo |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | Rangos que nunca serán objetivo |
 | `protect_server_addresses` | true | Protege las IP del propio servidor |

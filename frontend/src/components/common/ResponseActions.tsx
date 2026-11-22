@@ -8,6 +8,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
+  BellOff,
   BellRing,
   Bird,
   BrickWall,
@@ -27,7 +28,14 @@ import { type FormEvent, useState } from "react";
 import { Link } from "react-router";
 import { api } from "@/api/client";
 import type { ActionStatus, ActionType, ResponseAction } from "@/api/types";
-import { ACTION_TYPES, type ActionProposal, type ActionRejectBody, IP_TARGET_ACTIONS } from "@/api/types-ops";
+import {
+  ACTION_TYPES,
+  type ActionProposal,
+  type ActionRejectBody,
+  type ActionRevertBody,
+  IP_TARGET_ACTIONS,
+  type SuppressOptions,
+} from "@/api/types-ops";
 import { Badge, Button, Dialog, ErrorState, Input, Label, Select, Textarea } from "@/components/ui";
 import { dateTimeTitle, formatDateTime, timeAgo } from "@/lib/format";
 import { useLabel, useLocal } from "@/lib/i18n";
@@ -165,6 +173,8 @@ const cardStrings = {
     viewerHint: "操作には analyst 以上の権限が必要です",
     notReversible: "取り消し不可",
     error: "エラー",
+    held: "抑止中のため自動承認しない",
+    heldSuppress: "抑止中の対象（人間の提案）",
   },
   en: {
     approve: "Approve…",
@@ -184,8 +194,18 @@ const cardStrings = {
     viewerHint: "Requires analyst role",
     notReversible: "Not reversible",
     error: "Error",
+    held: "Not auto-approved (suppressed target)",
+    heldSuppress: "Suppressed target (human proposal)",
   },
 };
+
+/** ``result.suppression`` written by create_proposal when a suppression matched (audit #63). */
+function heldBy(a: ResponseAction): { mode: string } | null {
+  const s = a.result?.suppression;
+  if (s && typeof s === "object" && "mode" in s && typeof (s as { mode: unknown }).mode === "string")
+    return { mode: (s as { mode: string }).mode };
+  return null;
+}
 
 /** TTL progress for an active action. */
 export function ExpiryBar({ action }: { action: ResponseAction }) {
@@ -228,6 +248,7 @@ export function ActionCard({ action, showLinks = true }: { action: ResponseActio
   const isPending = action.status === "proposed";
   const isActive = action.status === "active" || action.status === "approved";
   const failure = action.status === "failed" ? failureMessage(action) : null;
+  const held = isPending ? heldBy(action) : null;
 
   return (
     <div
@@ -248,6 +269,12 @@ export function ActionCard({ action, showLinks = true }: { action: ResponseActio
             <ActionStatusBadge status={action.status} />
             <ProposerBadge proposer={action.proposed_by} />
             {action.approved_by === "policy" && <Badge tone="warn">{L.autoApproved}</Badge>}
+            {held && (
+              <Badge tone="neutral">
+                <BellOff className="h-3 w-3" aria-hidden />
+                {held.mode === "suppress" ? L.heldSuppress : L.held}
+              </Badge>
+            )}
             {!action.reversible && (
               <Badge tone="danger">
                 <TriangleAlert className="h-3 w-3" aria-hidden />
@@ -357,6 +384,16 @@ const dialogStrings = {
     revertTitle: "対処を取り消し",
     revertConfirm: "取り消す",
     revertLead: "取り消すと、この対処は直ちに解除されます（Gate は次回のポリシー取得で反映）。",
+    revertReason: "取り消し理由（任意・監査ログに残ります）",
+    revertPlaceholder: "例: 共有 NAT の出口で、正規の利用者も使っている",
+    suppressLabel: "同じ対象への再提案",
+    suppressNone: "抑止しない（再提案はされるが、一定時間は自動承認しない）",
+    suppressHours: "指定した時間、再提案しない",
+    suppressPermanent: "恒久的に再提案しない（解除するまで）",
+    suppressHoursLabel: "時間（1〜8760）",
+    suppressHint:
+      "抑止すると、ルール・LLM からの同じ種別・同じ対象（重なる CIDR を含む）の提案は作られません。人間が提案した場合も自動承認はされません。対処画面の「抑止」タブで解除できます。",
+    suppressErr: "時間は 1〜8760 の整数で指定してください",
   },
   en: {
     approveTitle: "Approve and execute action",
@@ -383,6 +420,16 @@ const dialogStrings = {
     revertTitle: "Revert action",
     revertConfirm: "Revert",
     revertLead: "Reverting lifts this action immediately (the Gate applies it on its next policy pull).",
+    revertReason: "Reason (optional, recorded in the audit log)",
+    revertPlaceholder: "e.g. shared NAT egress also used by legitimate users",
+    suppressLabel: "Re-proposals for this target",
+    suppressNone: "Don't suppress (it may be proposed again, but is not auto-approved for a while)",
+    suppressHours: "Don't re-propose for a number of hours",
+    suppressPermanent: "Never re-propose (until lifted)",
+    suppressHoursLabel: "Hours (1–8760)",
+    suppressHint:
+      "While suppressed, rule and LLM proposals of the same type for the same target (including overlapping CIDRs) are not created, and human proposals are never auto-approved. Lift it from the Suppressions tab of the Response page.",
+    suppressErr: "Hours must be an integer between 1 and 8760",
   },
 };
 
@@ -485,6 +532,64 @@ function ApproveDialog({
   );
 }
 
+type SuppressChoice = "none" | "hours" | "permanent";
+
+/** Request fields for the chosen suppression, or null when the hours are invalid. */
+function suppressBody(choice: SuppressChoice, hours: string): SuppressOptions | null {
+  if (choice === "permanent") return { suppress_permanent: true };
+  if (choice === "none") return {};
+  const n = Number(hours);
+  if (!Number.isInteger(n) || n < 1 || n > 8760) return null;
+  return { suppress_hours: n };
+}
+
+function SuppressFields({
+  id,
+  choice,
+  hours,
+  onChoice,
+  onHours,
+}: {
+  id: string;
+  choice: SuppressChoice;
+  hours: string;
+  onChoice: (c: SuppressChoice) => void;
+  onHours: (h: string) => void;
+}) {
+  const L = useLocal(dialogStrings);
+  return (
+    <div className="space-y-2">
+      <div>
+        <Label htmlFor={`${id}-mode`}>{L.suppressLabel}</Label>
+        <Select
+          id={`${id}-mode`}
+          className="w-full"
+          value={choice}
+          onChange={(e) => onChoice(e.target.value as SuppressChoice)}
+        >
+          <option value="none">{L.suppressNone}</option>
+          <option value="hours">{L.suppressHours}</option>
+          <option value="permanent">{L.suppressPermanent}</option>
+        </Select>
+      </div>
+      {choice === "hours" && (
+        <div>
+          <Label htmlFor={`${id}-hours`}>{L.suppressHoursLabel}</Label>
+          <Input
+            id={`${id}-hours`}
+            type="number"
+            min={1}
+            max={8760}
+            value={hours}
+            onChange={(e) => onHours(e.target.value)}
+          />
+        </div>
+      )}
+      <p className="text-xs text-muted">{L.suppressHint}</p>
+    </div>
+  );
+}
+
 function RejectDialog({
   action,
   open,
@@ -497,14 +602,19 @@ function RejectDialog({
   const L = useLocal(dialogStrings);
   const invalidate = useInvalidateActions();
   const [reason, setReason] = useState("");
+  const [choice, setChoice] = useState<SuppressChoice>("none");
+  const [hours, setHours] = useState("24");
+  const suppress = suppressBody(choice, hours);
   const m = useMutation({
     mutationFn: () =>
       api.post<ResponseAction>(`/response/actions/${action.id}/reject`, {
         reason: reason.trim() || undefined,
+        ...suppress,
       } satisfies ActionRejectBody),
     onSuccess: () => {
       invalidate();
       setReason("");
+      setChoice("none");
       onClose();
     },
   });
@@ -523,7 +633,7 @@ function RejectDialog({
           <Button variant="ghost" onClick={close}>
             {L.cancel}
           </Button>
-          <Button variant="danger" onClick={() => m.mutate()} disabled={m.isPending}>
+          <Button variant="danger" onClick={() => m.mutate()} disabled={m.isPending || !suppress}>
             <X className="h-4 w-4" aria-hidden />
             {L.rejectConfirm}
           </Button>
@@ -543,6 +653,14 @@ function RejectDialog({
             maxLength={1000}
           />
         </div>
+        <SuppressFields
+          id={`reject-suppress-${action.id}`}
+          choice={choice}
+          hours={hours}
+          onChoice={setChoice}
+          onHours={setHours}
+        />
+        {!suppress && <p className="text-xs text-sev-critical">{L.suppressErr}</p>}
         {m.error && <ErrorState error={m.error} />}
       </div>
     </Dialog>
@@ -560,13 +678,24 @@ function RevertDialog({
 }) {
   const L = useLocal(dialogStrings);
   const invalidate = useInvalidateActions();
+  const [reason, setReason] = useState("");
+  const [choice, setChoice] = useState<SuppressChoice>("none");
+  const [hours, setHours] = useState("24");
+  const suppress = suppressBody(choice, hours);
   const m = useMutation({
-    mutationFn: () => api.post<ResponseAction>(`/response/actions/${action.id}/revert`),
+    mutationFn: () =>
+      api.post<ResponseAction>(`/response/actions/${action.id}/revert`, {
+        reason: reason.trim() || undefined,
+        ...suppress,
+      } satisfies ActionRevertBody),
     onSuccess: () => {
       invalidate();
+      setReason("");
+      setChoice("none");
       onClose();
     },
   });
+  const fieldId = `revert-reason-${action.id}`;
   const close = () => {
     m.reset();
     onClose();
@@ -581,7 +710,7 @@ function RevertDialog({
           <Button variant="ghost" onClick={close}>
             {L.cancel}
           </Button>
-          <Button variant="danger" onClick={() => m.mutate()} disabled={m.isPending}>
+          <Button variant="danger" onClick={() => m.mutate()} disabled={m.isPending || !suppress}>
             <Undo2 className="h-4 w-4" aria-hidden />
             {L.revertConfirm}
           </Button>
@@ -591,6 +720,25 @@ function RevertDialog({
       <div className="space-y-3">
         <p className="text-sm">{L.revertLead}</p>
         <ActionSummary action={action} />
+        <div>
+          <Label htmlFor={fieldId}>{L.revertReason}</Label>
+          <Textarea
+            id={fieldId}
+            rows={2}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={L.revertPlaceholder}
+            maxLength={1000}
+          />
+        </div>
+        <SuppressFields
+          id={`revert-suppress-${action.id}`}
+          choice={choice}
+          hours={hours}
+          onChoice={setChoice}
+          onHours={setHours}
+        />
+        {!suppress && <p className="text-xs text-sev-critical">{L.suppressErr}</p>}
         {m.error && <ErrorState error={m.error} />}
       </div>
     </Dialog>

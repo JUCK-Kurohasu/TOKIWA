@@ -103,6 +103,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | Key | Default | Description |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | Auto-approval (both settings are required) |
+| `auto_approve_cooldown_minutes` | 1440 | After a human rejects or reverts an action, the same type + target is not auto-approved for this many minutes (0 disables) |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | Default and maximum TTL |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | Ranges that are never targeted |
 | `protect_server_addresses` | true | Protect the server's own IPs |

@@ -118,7 +118,7 @@ con la información de vulnerabilidades y para priorizar los incidentes (si corr
 
 ### Response (Respuesta)
 
-Lista de las acciones de respuesta propuestas por el LLM, las reglas y los usuarios. Pestañas: **Awaiting approval** (Pendientes de aprobación) / **Active** (Activas) / **History** (Historial).
+Lista de las acciones de respuesta propuestas por el LLM, las reglas y los usuarios. Pestañas: **Awaiting approval** (Pendientes de aprobación) / **Active** (Activas) / **History** (Historial) / **Suppressions** (Supresiones: objetivos marcados como "no volver a proponer" al rechazar o revertir; aquí se levantan).
 Aprobar, rechazar y revertir requiere el rol `analyst` o superior. Más detalles en [Respuesta (flujo de aprobación)](Response-es).
 
 ### Deception (Engaño)

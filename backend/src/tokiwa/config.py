@@ -259,6 +259,9 @@ class ResponseSettings(BaseModel):
     # Safety: nothing is executed without human approval unless explicitly enabled per action type.
     auto_approve_enabled: bool = False
     auto_approve_actions: list[str] = Field(default_factory=list)
+    # Audit #63: after a human rejects or reverts an action, proposals for the same type and (overlapping)
+    # target are never auto-approved for this many minutes (they still wait for a human). 0 = off.
+    auto_approve_cooldown_minutes: int = 24 * 60
     default_ttl_minutes: int = 60
     max_ttl_minutes: int = 60 * 24 * 7
     nftables_enabled: bool = False

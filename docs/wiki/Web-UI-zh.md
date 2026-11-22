@@ -116,7 +116,7 @@ TOKIWA Agent 发送过来的主机信息。标签页：**Ports**（端口：监�
 
 ### Response（处置）
 
-由 LLM、规则、用户提议的处置列表。标签页：**Awaiting approval**（待批准）/ **Active**（生效中）/ **History**（历史）。
+由 LLM、规则、用户提议的处置列表。标签页：**Awaiting approval**（待批准）/ **Active**（生效中）/ **History**（历史）/ **Suppressions**（抑制：拒绝或撤销时标记为“不再提议”的目标，可在此解除）。
 批准、拒绝、撤销需要 `analyst` 及以上角色。详情请参阅 [处置（审批流程）](Response-zh)。
 
 ### Deception（欺骗防御）

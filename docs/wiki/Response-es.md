@@ -86,6 +86,20 @@ En las acciones de respuesta aprobadas automáticamente, el aprobador se registr
 
 > La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo).
 
+## Rechazo, reversión y supresión (detener nuevas propuestas)
+
+En los diálogos de rechazo y reversión se puede elegir qué ocurre con las "nuevas propuestas para este objetivo".
+
+| Opción | Propuestas de reglas / LLM del mismo tipo para el mismo objetivo | Aprobación automática |
+|---|---|---|
+| No suprimir (por defecto) | Se siguen proponiendo | **No durante 24 horas** (`response.auto_approve_cooldown_minutes`, 0 lo desactiva) |
+| No volver a proponer durante N horas / nunca | **No se crean** (`response.propose_suppressed` en el registro de auditoría; tampoco se envía la notificación de solicitud de aprobación) | No |
+
+- Los objetivos IP / CIDR coinciden por solapamiento (una IP dentro de un /24 suprimido, o un CIDR más amplio que contiene una IP suprimida, también coinciden). Un tipo de acción distinto se trata por separado.
+- Una propuesta que una persona hace manualmente se sigue creando aunque esté suprimida (nunca se aprueba automáticamente).
+- Las supresiones se consultan y levantan en la pestaña **Supresiones** de la página de respuesta (API: `GET /api/v1/response/suppressions`; para levantarla, `POST /api/v1/response/suppressions/{id}/lift`).
+- Para suprimir de antemano la IP de un NAT compartido o de un servicio de monitorización, use `POST /api/v1/response/suppressions`.
+
 ## Bloqueo con nftables (opcional)
 
 Sirve para detener también el tráfico que no pasa por Gate. **Está deshabilitado por defecto** y, mientras no se habilite, falla siempre.
