@@ -303,8 +303,9 @@ class DeceptionSettings(BaseModel):
     # Where the Gate inserts it: "head" (HTML comment only, right after <head>), "body_start" (after <body>),
     # "body_end" (before </body>, the only position before audit #41). Tools of AI agents often keep only the first
     # N characters of a page (ARTEX: 30,000), so a snippet only at the end of a large page is never read.
+    # (a plain list default is fine: pydantic copies mutable defaults per instance)
     html_injection_positions: list[Literal["head", "body_start", "body_end"]] = Field(
-        default=["body_start", "body_end"], min_length=1  # pydantic copies mutable defaults per instance
+        default=["body_start", "body_end"], min_length=1
     )
     # Header the AI-canary instruction asks agents to send. Must NOT be listed in
     # llm.redaction.sensitive_headers, otherwise its value is masked before detection can see it.
