@@ -20,6 +20,11 @@ Definitions (requirements §7 評価指標):
 Every rate also appears in ``intervals`` with its numerator, denominator and a 95 % Clopper–Pearson interval
 (:mod:`tokiwa.eval.stats`); ``reference_only`` marks n < 30 (#175). The primary detection metric is the medium+
 attack-session rate (any-severity is secondary: an info/low alert is not what an analyst acts on).
+``by_generator`` splits sessions by where they came from (#174): ``scripted`` = simulator profiles that act out the
+detection hypotheses (detectors were written and tuned against them), ``holdout`` = simulator profiles kept out of
+tuning (``Profile.holdout``), ``artex`` = imported ARTEX recordings, ``other`` = anything else. Read the holdout /
+artex rows as the generalisation estimate; the scripted rows mostly show the detectors recognise their own script.
+``ai_attribution.per_profile`` gives the AI-flag rate per profile.
 ``alerts.attributed_by_ip_fallback`` counts alerts tied to sessions only through ``source_ip``: that works because
 the simulator gives every session its own address, and would not hold behind NAT / CDNs / rotating IPs.
 
@@ -40,6 +45,7 @@ from typing import Any
 
 from tokiwa.eval.dataset import SessionTruth, Truth
 from tokiwa.eval.harness import RunResults
+from tokiwa.eval.profiles import HOLDOUT_PROFILES, PROFILES
 from tokiwa.eval.stats import rate_summary
 from tokiwa.llm.base import LLMUsage
 from tokiwa.llm.pricing import estimate_cost
@@ -310,6 +316,7 @@ def _ai_attribution(truth: Truth, att: _Attribution, threshold: float) -> dict[s
             {
                 "session": st.session,
                 "actor": st.actor,
+                "profile": st.profile,
                 "predicted_ai": predicted,
                 **{k: sc[k] for k in scores},
             }
@@ -322,7 +329,60 @@ def _ai_attribution(truth: Truth, att: _Attribution, threshold: float) -> dict[s
     out["auc_negatives"] = len(scores["combined"]["neg"])
     out["auc_by_source"] = {k: roc_auc(v["pos"], v["neg"]) for k, v in scores.items() if k != "combined"}
     out["confusion"] = {actor: dict(sorted(c.items())) for actor, c in sorted(confusion.items())}
+    per_profile: dict[str, dict[str, Any]] = {}
+    for row in per_session:
+        pp = per_profile.setdefault(
+            row["profile"], {"actor": row["actor"], "sessions": 0, "predicted_ai": 0, "holdout": False}
+        )
+        pp["sessions"] += 1
+        pp["predicted_ai"] += int(row["predicted_ai"])
+        pp["holdout"] = generator_of(row["profile"]) != "scripted"
+    for pp in per_profile.values():
+        pp["predicted_ai_rate"] = ratio(pp["predicted_ai"], pp["sessions"])
+    out["per_profile"] = dict(sorted(per_profile.items()))
     out["sessions"] = per_session
+    return out
+
+
+def generator_of(profile: str) -> str:
+    """Which generator produced a labelled session (see module docstring)."""
+    if profile in HOLDOUT_PROFILES:
+        return "holdout"
+    if profile == "artex":
+        return "artex"
+    if profile in PROFILES:
+        return "scripted"
+    return "other"
+
+
+def _by_generator(truth: Truth, att: _Attribution, ai: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    counts: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in ai["sessions"]:
+        st = truth.sessions[row["session"]]
+        c = counts[generator_of(st.profile)]
+        c["sessions"] += 1
+        if st.is_attack:
+            alerts = att.session_alerts.get(st.session, [])
+            c["attack_sessions"] += 1
+            c["attack_detected_medium_plus"] += int(
+                any(_SEV_RANK.get(str(a.get("severity")), 0) >= 2 for a in alerts)
+            )
+        if st.is_ai:
+            c["ai_sessions"] += 1
+            c["ai_flagged"] += int(row["predicted_ai"])
+        else:
+            c["non_ai_sessions"] += 1
+            c["non_ai_flagged_ai"] += int(row["predicted_ai"])
+    out: dict[str, dict[str, Any]] = {}
+    for gen, c in sorted(counts.items()):
+        out[gen] = {
+            **{k: c[k] for k in ("sessions", "attack_sessions", "ai_sessions", "non_ai_sessions")},
+            "attack_detection_medium_plus": rate_summary(
+                c["attack_detected_medium_plus"], c["attack_sessions"]
+            ),
+            "ai_recall": rate_summary(c["ai_flagged"], c["ai_sessions"]),
+            "ai_fpr": rate_summary(c["non_ai_flagged_ai"], c["non_ai_sessions"]),
+        }
     return out
 
 
@@ -490,6 +550,7 @@ def compute_metrics(truth: Truth, res: RunResults, *, ai_threshold: float | None
         "ai_attribution": ai,
         "llm": llm,
         "intervals": _intervals(detection, per_profile, alerts, ai, llm),
+        "by_generator": _by_generator(truth, att, ai),
         "cost": _cost(res, llm["triaged"]),
         "latency": _latency(res),
         "pipeline": {

@@ -60,6 +60,7 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 | benign event FPR | 正常アクターのイベントのうち証拠に含まれた割合 |
 | alert precision | 攻撃セッションのみに帰属したアラート / 何らかに帰属したアラート。検知器別にも出す |
 | AI attribution P/R/F1/AUC | セッションスコア = max(actor_session.ai_score, alert.ai_score, triage.ai_agent_likelihood)。`detection.ai_agent_threshold` 以上、または sessionizer の分類が `ai_agent` で AI と判定。AUC は Mann–Whitney |
+| by generator | `by_generator.<scripted/holdout/artex/other>`: 生成元ごとの medium+ 攻撃検知・AI 判定の再現率・非 AI の AI 誤判定（区間付き）。`scripted` は検知仮説を台本化したプロファイル、`holdout` は調整に使っていないプロファイル、`artex` は ARTEX 取り込み。`ai_attribution.per_profile` にプロファイル別の AI 判定率。`--compare` は生成元別の値も比較する |
 | LLM agreement | トリアージ済みアラート/インシデントで actor_type・悪性判定・AI 判定が正解と一致した割合（tier 別件数）。**`--llm mock` ではルール fallback の自己一致で LLM 品質ではない**（`llm.measures_llm=false`、`by_tier` は `rules(mock)`、要求された tier は `by_tier_requested`） |
 | cost | `llm_calls` のトークン・USD 合計、アラートあたり / トリアージあたり。mock では実費 $0 に加え `estimated_cost_usd`（mock の推定トークン〔入力 文字数/4・出力 200 固定〕× 料金表 `tokiwa.llm.pricing` + `llm.pricing`。実測ではない目安）と `estimated_cost_by_model_usd` |
 | latency | バッチ処理時間（取り込み→アラート）p50/p95、アラート→トリアージ p50/p95（バス観測、無ければ DB の updated_at） |

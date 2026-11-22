@@ -180,6 +180,11 @@ def compare_runs(current: dict[str, Any], previous: dict[str, Any]) -> dict[str,
         path = f"per_profile.{profile}.detection_rate"
         spec = MetricSpec(path, direction, PER_PROFILE_TOLERANCE, "abs")
         rows.append(_delta(path, get_path(prev, path), get_path(cur, path), spec))
+    for gen in sorted(set(cur.get("by_generator", {})) | set(prev.get("by_generator", {}))):
+        for sub in ("attack_detection_medium_plus", "ai_recall"):
+            path = f"by_generator.{gen}.{sub}.value"
+            spec = MetricSpec(path, "higher", PER_PROFILE_TOLERANCE, "abs")
+            rows.append(_delta(path, get_path(prev, path), get_path(cur, path), spec))
     regressions = [r.metric for r in rows if r.status in ("regressed", "changed")]
     mismatches = comparability_mismatches(current, previous)
     return {
@@ -299,6 +304,39 @@ def _rate_row(m: dict[str, Any], label: str, path: str) -> str:
     return f"| {label} | {_pct(iv['value'])} | {iv['x']} / {iv['n']} | {_ci(iv)} | {_ref_note(iv)} |"
 
 
+def render_by_generator(m: dict[str, Any]) -> list[str]:
+    """Scripted vs holdout vs imported sessions (#174)."""
+    gens = m.get("by_generator") or {}
+    if not gens:
+        return []
+    out = [
+        "",
+        "## By generator",
+        "",
+        "`scripted`: profiles that act out the detection hypotheses (detectors were tuned on them). `holdout` / `artex`:",
+        "not used for tuning — read these as the generalisation estimate.",
+        "",
+        "| generator | sessions | attack detection medium+ | 95% CI | AI flagged / AI sessions | 95% CI | non-AI flagged AI | note |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for gen, row in gens.items():
+        det, rec, fpr = row["attack_detection_medium_plus"], row["ai_recall"], row["ai_fpr"]
+        ref = any(iv.get("reference_only") and iv.get("n") for iv in (det, rec, fpr))
+        out.append(
+            f"| {gen} | {row['sessions']} | {det['x']}/{det['n']} | {_ci(det)} | {rec['x']}/{rec['n']} | {_ci(rec)} "
+            f"| {fpr['x']}/{fpr['n']} | {'参考値 (n<30)' if ref else ''} |"
+        )
+    per_profile = (m.get("ai_attribution") or {}).get("per_profile") or {}
+    if per_profile:
+        out += ["", "| profile | actor | holdout | sessions | flagged AI |", "|---|---|---|---|---|"]
+        for name, row in per_profile.items():
+            out.append(
+                f"| {name} | {row['actor']} | {'yes' if row.get('holdout') else ''} | {row['sessions']} "
+                f"| {row['predicted_ai']} ({_pct(row.get('predicted_ai_rate'))}) |"
+            )
+    return out
+
+
 def render_comparison(cmp_doc: dict[str, Any]) -> list[str]:
     out = ["", f"## Regression check vs `{cmp_doc.get('previous_run')}`", ""]
     verdict = "REGRESSION" if cmp_doc["has_regression"] else "no regression"
@@ -404,6 +442,7 @@ def render_markdown(doc: dict[str, Any]) -> str:
             f" ({_pct(row.get('detection_rate_medium_plus'))}) | {_ci(iv)} | {row['detected']}"
             f" ({_pct(row['detection_rate'])}) | {row['alerts']} | {_ref_note(iv)} |"
         )
+    out += render_by_generator(m)
     out += [
         "",
         "## AI attribution",
