@@ -18,12 +18,29 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from tokiwa import __version__, runtime
+from tokiwa.api.middleware import BodySizeLimitMiddleware
 from tokiwa.api.pagination import offset_guard
-from tokiwa.config import get_settings
+from tokiwa.config import Settings, get_settings
 from tokiwa.db.session import create_all, dispose_engine, init_engine
 from tokiwa.plugins import import_submodules
+from tokiwa.schemas.events import EVENT_FIELD_MAX_CHARS
 
 log = logging.getLogger(__name__)
+
+# Sensor/agent/Gate batches: these get server.max_ingest_body_bytes, everything else server.max_body_bytes.
+INGEST_PATH_PREFIX = "/api/v1/ingest/"
+
+
+def _warn_on_narrow_event_cap(settings: Settings) -> None:
+    """Event strings are cut at EVENT_FIELD_MAX_CHARS; a wider detector window would never see the cut part."""
+    inspect = settings.detection.web.max_inspect_chars
+    if inspect > EVENT_FIELD_MAX_CHARS:
+        log.warning(
+            "detection.web.max_inspect_chars=%d exceeds the event field cap (%d chars): longer fields are "
+            "truncated at ingest, so the extra inspection window is never used",
+            inspect,
+            EVENT_FIELD_MAX_CHARS,
+        )
 
 
 def _include_routers(app: FastAPI) -> None:
@@ -69,6 +86,7 @@ def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
 
 def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
     settings = get_settings()
+    _warn_on_narrow_event_cap(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -91,6 +109,13 @@ def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
         lifespan=lifespan,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+    )
+    # Starlette: the middleware added last is the outermost. CORS stays outermost so that 413s etc. still carry
+    # CORS headers for the browser.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        default_limit=settings.server.max_body_bytes,
+        prefix_limits=[(INGEST_PATH_PREFIX, settings.server.max_ingest_body_bytes)],
     )
     app.add_middleware(
         CORSMiddleware,

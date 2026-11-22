@@ -125,6 +125,8 @@ curl -X POST http://127.0.0.1:8788/api/v1/ingest/events \
 
 - 认证请求头为 `X-Tokiwa-Token: tkw_...` 或 `Authorization: Bearer tkw_...`。需要 `ingest` 作用域。
 - 每个请求最多 **5,000 个事件**。省略 `timestamp` 时使用接收时间。
+- 请求体默认最大 32 MiB（`server.max_ingest_body_bytes`，超过返回 413）。单个字符串字段超过 65,536 个字符时只保留开头部分，
+  并给事件加上标签 `truncated` 和标记 `tokiwa.truncated`（`字段:原始长度`）。事件不会被拒绝，检测基于截断后的值进行。
 - `kind` 包括 `http` / `port_snapshot` / `connection` / `ids_alert` / `dns` / `process` / `auth` / `deception` /
   `llm_app` / `custom` 等。Schema 详情请参阅服务器的 API 文档（`http://<server>:8788/api/docs`）。
 - ⚠️ **摄取 API 不会在服务器端进行脱敏**（Gate 和 Agent 会在发送前脱敏）。

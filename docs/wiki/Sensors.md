@@ -125,6 +125,9 @@ curl -X POST http://127.0.0.1:8788/api/v1/ingest/events \
 
 - 認証ヘッダは `X-Tokiwa-Token: tkw_...` または `Authorization: Bearer tkw_...`。スコープ `ingest` が必要です。
 - 1 リクエストあたり最大 **5,000 イベント**。`timestamp` を省略すると受信時刻になります。
+- リクエストボディは既定で最大 32 MiB（`server.max_ingest_body_bytes`、超えると 413）。1 つの文字列フィールドが 65,536 文字を
+  超えると先頭だけを残して切り詰め、イベントにタグ `truncated` とラベル `tokiwa.truncated`（`フィールド:元の長さ`）を付けます
+  （拒否はしません。検知は切り詰め後の値で行われます）。
 - `kind` には `http` / `port_snapshot` / `connection` / `ids_alert` / `dns` / `process` / `auth` / `deception` /
   `llm_app` / `custom` などがあります。スキーマの詳細は、サーバーの API ドキュメント（`http://<server>:8788/api/docs`）を参照してください。
 - ⚠️ **取り込み API ではサーバー側のマスキングは行われません**（Gate と Agent は送信前にマスクします）。

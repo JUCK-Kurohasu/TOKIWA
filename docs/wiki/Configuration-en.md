@@ -57,6 +57,8 @@ deception:
 | `server.data_dir` | `./data` | Where data is stored (signing key, and so on) |
 | `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
+| `server.max_body_bytes` | 1048576 (1 MiB) | Request body limit; larger bodies get 413. Applies to every API except ingest |
+| `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Body limit for `/api/v1/ingest/`. A batch above it gets 413 and the Gate / agent **drops** that batch; raise it together with a larger `batch_size` |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | For PostgreSQL: `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

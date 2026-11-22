@@ -57,6 +57,8 @@ deception:
 | `server.data_dir` | `./data` | データの保存先（署名鍵など） |
 | `server.secret_key` | 自動生成 | ログイン（JWT）の署名鍵。未設定なら `data_dir/secret.key` に生成・保存 |
 | `server.token_ttl_minutes` | 720 | ログインの有効時間 |
+| `server.max_body_bytes` | 1048576（1 MiB） | リクエストボディの上限。超えると 413。インジェスト以外の全 API に適用 |
+| `server.max_ingest_body_bytes` | 33554432（32 MiB） | `/api/v1/ingest/` のボディ上限。超えたバッチは 413 になり、Gate / エージェントはそのバッチを**破棄**する。`batch_size` を大きくする場合は合わせて上げる |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL は `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

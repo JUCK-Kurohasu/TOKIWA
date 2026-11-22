@@ -57,6 +57,8 @@ deception:
 | `server.data_dir` | `./data` | 数据的保存位置（签名密钥等） |
 | `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥。未设置时生成并保存到 `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | 登录的有效时间 |
+| `server.max_body_bytes` | 1048576（1 MiB） | 请求体上限，超过返回 413。适用于除摄取（ingest）以外的所有 API |
+| `server.max_ingest_body_bytes` | 33554432（32 MiB） | `/api/v1/ingest/` 的请求体上限。超过的批次返回 413，Gate / 代理会**丢弃**该批次；增大 `batch_size` 时请一并调高 |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL 为 `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）

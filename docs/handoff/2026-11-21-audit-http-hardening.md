@@ -7,8 +7,8 @@
 | Issue | 状態 | 内容 | コミット |
 |---|---|---|---|
 | #91 コミットが応答送信後 | 完全 | `DbSession` を `Depends(get_session, scope="function")` に変更（コミットはルート関数の終了後・応答送信前）。`IntegrityError` → 409 の共通ハンドラ（app.py）。応答開始時点で別セッションから DB を見るテストを追加 | c5d9741 |
-| #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | （本コミット） |
-| #57 ボディ・フィールド長上限 | 未着手 | | |
+| #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | ee30db5 |
+| #57 ボディ・フィールド長上限 | 部分（推奨 (1)(2) は完全、(3) トークン単位レート制限・(4) retention 既定有効は未対応） | (1) 純 ASGI の `BodySizeLimitMiddleware`（`api/middleware.py`）: `server.max_body_bytes`（既定 1 MiB）/ `server.max_ingest_body_bytes`（`/api/v1/ingest/`、既定 32 MiB）。Content-Length 申告と実受信バイト（chunked）の両方で 413。(2) `Event` の全文字列（ヘッダ値・ラベル値・リスト要素・ネストしたモデル含む）を 65,536 文字で**切り詰め**（拒否しない）、`raw` は JSON 64 KiB で adapters と同じ `{"_truncated","_bytes","text"}` 形に。切り詰め時はタグ `truncated` とラベル `tokiwa.truncated`（`field:元の長さ`）。wiki（Configuration / Sensors ×4 言語） | （本コミット） |
 | #93 docs / openapi / version 公開・/api/* の SPA 200 | 未着手 | | |
 | #66 セキュリティヘッダ | 未着手 | | |
 
@@ -42,8 +42,32 @@
 - `offset_guard` は「数字だけの値で 1,000,000 超」だけを拒否（桁数で先に判定するので `int()` の桁数上限に当たらない）。
   負数・非数値はルート自身の検証（422）に任せる。`?offset=1&offset=<巨大>` のような重複指定も全値を検査。
 
+## #57 の詳細
+
+- フィールド上限 `EVENT_FIELD_MAX_CHARS = 65_536` の根拠: 系統 A #21（切り詰めによる検知回避）を悪化させないため、検知器の
+  検査長のうち最大の Sigma `MAX_MATCH_CHARS`（65,536）に合わせた（detect-web `max_inspect_chars` 8192、aidetect `MAX_TEXT` 4096
+  より長い）。`tests/core/test_event_limits.py::test_cap_is_not_narrower_than_any_detector_window` がこの関係を固定。
+  `detection.web.max_inspect_chars` をこれより大きく設定すると起動時に warning（app.py）。
+  監査の推奨（UA 1KB、message 16KB 等）より緩いが、検知入力を失わない方を優先した。
+- 切り詰めは `Event` の `model_validator(mode="after")` で行うので、ingest・Gate の in-process 生成・DB 読み出しすべてに効く。
+  冪等（保存済みの切り詰め済み `raw` を再読込で再切り詰めしない）。ラベル/タグは送信者が書けるので「印」は参考情報。
+- 検証時間: 5000 イベントの `IngestBatch` 検証が約 75 ms → 約 140 ms（切り詰め走査 約 12 µs/イベント、うち `raw` の JSON 化
+  約 3 µs）。パイプライン全体（検知・DB 書き込み）に比べれば小さいと判断。
+- ボディ上限の既定値: Gate の最悪ケース（64 ヘッダ × 2 KiB + パス/クエリ/UA 各 2 KiB + ボディ 4 KiB）を `EventBuilder` と同じ
+  形で JSON 化すると 1 イベント約 147 KB → Gate 既定 `batch_size` 100 で約 15 MB。監査推奨の 10 MB では Gate の正当なバッチが
+  413 になり得て、**両 shipper とも 413 のバッチを破棄する**（`gate/shipper.py` は 4xx を drop、`sensors/shipper.py` は 400/413/422 を drop）
+  ＝攻撃者がヘッダを水増ししてテレメトリを落とせる。そのため 32 MiB とした。
+- ボディは FastAPI が依存（認証）より先に読むので、未認証でも ingest には 32 MiB まで送れる（読んで JSON パースしてから 401）。
+  ミドルウェアでのトークン検証は tokens レーンの領域なので未対応。リバースプロキシ側の上限（`client_max_body_size` 等）を推奨。
+- chunked ボディで上限を超えた場合は `receive` から `HTTPException(413)` 派生を送出（インストール済み FastAPI の
+  `routing.py` はボディ読み取り中の `HTTPException` をそのまま再送出し、それ以外は 400 に包むことを確認済み）。
+
 ## 要判断
 
+- （#57）`server.max_ingest_body_bytes` 既定 32 MiB / `server.max_body_bytes` 既定 1 MiB。従来は無制限なので、32 MiB を超える
+  バッチを送っていた利用者（`batch_size` を 5000 近くにして大きなイベントを送る構成）は 413 → バッチ破棄になる。現実的な構成
+  （Gate 100 件、Agent 500 件）は最悪ケースでも収まる見込み。要件次第で下げる（メモリ/DoS 優先）か上げる（取りこぼし優先）か。
+- （#57）フィールド上限 65,536 文字は定数（`schemas/events.py`）。設定化はしていない（スキーマが設定に依存しないように）。
 - （#91）なし。既定動作の変更だが外部仕様（エンドポイント・形式）は変わらない。409 は従来 500 だったケースのみ。
 - （#94）offset 上限 1,000,000（例示値どおり）。これより深いページングが必要な運用があればフィルタで絞る前提。
 
@@ -58,6 +82,11 @@
 ## 他レーンへの依頼
 
 - tokens レーン: `DbSession` の `scope="function"` を維持してください（戻すと #91 が再発し、`test_commit_timing.py` が落ちる）。
+- tokens / ingest レーン（#57 の残り）: トークン単位の events/秒・bytes/秒レート制限と 429。可能なら ingest のトークン検証を
+  ボディ読み取り前に（未認証の 32 MiB 送信を早期 401 に）。
+- Gate / sensors レーン: 413 を受けたバッチを破棄せず二分割して再送する（現在はバッチごと破棄。#57 の既定上限との組み合わせで
+  テレメトリ欠落＝検知回避になり得る）。
+- pipeline / retention 担当: 保存期間・容量ベースの retention を既定で有効化（#57 推奨 (4)）。L12-03（PostgreSQL の列長・NUL）は未対応。
 
 ## 未検証事項
 

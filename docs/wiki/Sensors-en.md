@@ -125,6 +125,9 @@ curl -X POST http://127.0.0.1:8788/api/v1/ingest/events \
 
 - The auth header is `X-Tokiwa-Token: tkw_...` or `Authorization: Bearer tkw_...`. The `ingest` scope is required.
 - Up to **5,000 events** per request. If you omit `timestamp`, the time of receipt is used.
+- The request body is limited to 32 MiB by default (`server.max_ingest_body_bytes`; larger bodies get 413). A string field longer
+  than 65,536 characters is truncated to its beginning, and the event gets the tag `truncated` and the label `tokiwa.truncated`
+  (`field:original length`). The event is not rejected; detection runs on the truncated values.
 - `kind` values include `http` / `port_snapshot` / `connection` / `ids_alert` / `dns` / `process` / `auth` / `deception` /
   `llm_app` / `custom`. For schema details, see the server's API docs (`http://<server>:8788/api/docs`).
 - ⚠️ **The ingest API does not redact anything on the server side** (the Gate and the Agent redact before sending).

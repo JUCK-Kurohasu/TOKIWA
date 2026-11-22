@@ -34,6 +34,11 @@ class ServerSettings(BaseModel):
     # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset.
     secret_key: SecretStr | None = None
     token_ttl_minutes: int = 60 * 12
+    # Request body size limits enforced by the app itself (413), independent of any reverse proxy.
+    # Ingest batches are large by design (Gate: 100 events, agent: 500, server max 5000 per request); a worst-case
+    # Gate batch (64 headers x 2 KiB each per event) is about 15 MB. Shippers DROP a batch answered with 413.
+    max_body_bytes: int = Field(default=1024 * 1024, ge=1024)
+    max_ingest_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
 
 
 class DatabaseSettings(BaseModel):
