@@ -60,6 +60,10 @@ docker compose -f lab/compose.yaml down                                         
 | `human_attacker` | 人間 | 人間のペースで SQLi / XSS を手で試す |
 | `ai_agent` | AI エージェント | ARTEX のような自律エージェント（JS / OpenAPI からの API 発見、エラー後の変異、バーストと思考待ち、カナリアへの追従） |
 | `llm_app_attacker` | 人間 | `/api/chat` へのプロンプトインジェクション・ジェイルブレイク |
+| `api_only_agent` | AI エージェント（保留） | API だけを叩く LLM ツールループ（OpenAPI から開始、HTML・robots・カナリアに触れない、1 ターン 1 リクエスト、汎用 HTTP クライアントの UA） |
+| `slow_rotating_agent` | AI エージェント（保留） | ブラウザ駆動のエージェント（Chrome のヘッダ一式）、中央値約 20 秒の推論待ち、数リクエストごとに送信元 IP が変わる |
+
+**保留（holdout）プロファイル** は検知器の設計・調整に使っていない形で、既定のミックスには入りません。`--profile api_only_agent=2,...` のように明示するか、`--profile all --sessions N` で含めます。評価結果では台本どおりのプロファイルと分けて表示されます。IP の回転が Gate から見えるのは `--spoof-xff` を付けたときだけです。
 
 ```bash
 cd backend

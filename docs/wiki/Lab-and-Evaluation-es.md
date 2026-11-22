@@ -62,6 +62,10 @@ Para ejecutarlo con un LLM real, arránquelo añadiendo variables como `TOKIWA_L
 | `human_attacker` | Humano | Prueba SQLi / XSS a mano, a ritmo humano |
 | `ai_agent` | Agente de IA | Agente autónomo como ARTEX (descubrimiento de API a partir de JS / OpenAPI, mutación tras errores, ráfagas y esperas de razonamiento, obediencia a canarios) |
 | `llm_app_attacker` | Humano | Inyección de prompts y jailbreak contra `/api/chat` |
+| `api_only_agent` | Agente de IA (reservado) | Un bucle de herramientas de LLM que solo llama a la API (empieza por OpenAPI, nunca toca HTML, robots ni canarios, una petición por turno, UA de cliente HTTP genérico) |
+| `slow_rotating_agent` | Agente de IA (reservado) | Un agente que maneja un navegador (cabeceras completas de Chrome), pausas de razonamiento con una mediana de unos 20 segundos, IP de origen que cambia cada pocas peticiones |
+
+Los **perfiles reservados (holdout)** tienen formas que no se usaron para diseñar ni ajustar los detectores, y no están en la mezcla por defecto. Indíquelos explícitamente (`--profile api_only_agent=2,...`) o inclúyalos con `--profile all --sessions N`. Los resultados de la evaluación los muestran aparte de los perfiles guionizados. La rotación de IP solo es visible para el Gate con `--spoof-xff`.
 
 ```bash
 cd backend

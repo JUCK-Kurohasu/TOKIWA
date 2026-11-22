@@ -13,7 +13,7 @@ from tokiwa.detect.context import DetectionContext
 from tokiwa.eval.dataset import Truth, generate_events, read_dataset, split_truth, write_dataset
 from tokiwa.eval.harness import ReplayOptions, RunResults, make_batches
 from tokiwa.eval.metrics import compute_metrics, percentile, roc_auc
-from tokiwa.eval.profiles import PROFILES
+from tokiwa.eval.profiles import TUNED_PROFILES
 from tokiwa.eval.report import compare_runs, run_evaluation
 from tokiwa.schemas.alerts import AlertCategory, AlertDraft
 from tokiwa.schemas.common import Severity
@@ -47,7 +47,8 @@ class _EvalQuoteDetector(Detector):
 @pytest.fixture
 async def small_dataset(tmp_path: Path) -> Path:
     path = tmp_path / "ds.jsonl"
-    write_dataset(path, await generate_events(dict.fromkeys(PROFILES, 1), seed=21), {"seed": 21})
+    # the five scripted profiles only: the holdout ones (#127) are deliberately harder
+    write_dataset(path, await generate_events(dict.fromkeys(TUNED_PROFILES, 1), seed=21), {"seed": 21})
     return path
 
 

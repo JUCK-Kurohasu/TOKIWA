@@ -36,7 +36,7 @@ uv run tokiwa eval info ../eval/datasets/lab-mini.jsonl
 | key | 値 |
 |---|---|
 | `actor` | `benign` / `automated_scanner` / `human` / `ai_agent`（`ActorType`） |
-| `profile` | `benign_browser` / `scanner` / `human_attacker` / `ai_agent` / `llm_app_attacker` / `artex` |
+| `profile` | `benign_browser` / `scanner` / `human_attacker` / `ai_agent` / `llm_app_attacker` / `artex`、保留（holdout）の `api_only_agent` / `slow_rotating_agent` |
 | `session` | 正解セッション ID（例 `ai_agent-01`） |
 | `attack` | `none` / `recon` / `sqli` / `xss` / `path_traversal` / `cmd_injection` / `ssti` / `log4shell` / `idor` / `prompt_injection` / `ai_canary_follow` / `artex` |
 | `phase` | プロファイル内の段階（recon / enumerate / exploit / canary ...） |
@@ -94,6 +94,13 @@ time-to-first-alert は未実装（docs/handoff/2026-11-21-audit-eval-docs.md）
   「NOT COMPARABLE」と差分を表示し、`--fail-on-regression` では終了コード **3** にする（悪化は 1）。
   意図して条件を変えた比較（検知器を 1 つ外した効果を見る等）は `--allow-mismatch` を付ける。
   `comparability` の無い古い `metrics.json` との比較も「比較不能」になるので、ベースラインを取り直す。
+
+## 保留（holdout）プロファイル
+
+`api_only_agent`（API だけを叩く LLM ツールループ）と `slow_rotating_agent`（ブラウザ駆動・長い推論待ち・送信元 IP の回転）は、
+`ai_agent` の台本（JS/robots 偵察・バースト・カナリア追従・自然言語のプローブ値）を **なぞらない** 形で、検知器の設計・調整に
+使っていない。`DEFAULT_MIX` には入れていない（既存の seed の生成結果は変わらない）。`--profile all --sessions N` か名前指定で使う。
+重みや閾値を台本プロファイルで調整したら、保留プロファイルの値（report.md の「By generator」）で汎化を確かめる。
 
 ## 調整できるところ
 

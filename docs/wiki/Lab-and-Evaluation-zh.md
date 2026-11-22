@@ -60,6 +60,10 @@ docker compose -f lab/compose.yaml down                                         
 | `human_attacker` | 人类 | 以人类的节奏手动尝试 SQLi / XSS |
 | `ai_agent` | AI 智能体 | 类似 ARTEX 的自主智能体（从 JS / OpenAPI 发现 API、出错后变异、突发与等待思考、遵循金丝雀） |
 | `llm_app_attacker` | 人类 | 针对 `/api/chat` 的提示注入、越狱 |
+| `api_only_agent` | AI 智能体（保留） | 只调用 API 的 LLM 工具循环（从 OpenAPI 开始，不接触 HTML、robots 和金丝雀，每轮 1 个请求，通用 HTTP 客户端的 UA） |
+| `slow_rotating_agent` | AI 智能体（保留） | 浏览器驱动的智能体（完整的 Chrome 请求头），推理等待中位数约 20 秒，每隔几个请求更换一次源 IP |
+
+**保留（holdout）profile** 的形态未用于检测器的设计和调整，不包含在默认组合中。请显式指定（`--profile api_only_agent=2,...`），或用 `--profile all --sessions N` 包含它们。评估结果中会与按脚本行动的profile 分开显示。只有加上 `--spoof-xff` 时，Gate 才能看到 IP 的轮换。
 
 ```bash
 cd backend

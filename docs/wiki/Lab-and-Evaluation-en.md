@@ -62,6 +62,10 @@ To run with a real LLM, start it with variables such as `TOKIWA_LLM_PROVIDER=aut
 | `human_attacker` | Human | Tries SQLi / XSS by hand at a human pace |
 | `ai_agent` | AI agent | An autonomous agent like ARTEX (API discovery from JS / OpenAPI, mutation after errors, bursts and thinking pauses, following canaries) |
 | `llm_app_attacker` | Human | Prompt injection and jailbreaks against `/api/chat` |
+| `api_only_agent` | AI agent (holdout) | An LLM tool loop that only calls the API (starts from OpenAPI, never touches HTML, robots or canaries, one request per turn, generic HTTP-client UA) |
+| `slow_rotating_agent` | AI agent (holdout) | A browser-driven agent (full Chrome headers), reasoning pauses with a median of about 20 seconds, source IP changing every few requests |
+
+**Holdout profiles** have shapes that were not used to design or tune the detectors, and they are not in the default mix. Name them explicitly (`--profile api_only_agent=2,...`) or include them with `--profile all --sessions N`. Evaluation results report them separately from the scripted profiles. IP rotation is visible to the Gate only with `--spoof-xff`.
 
 ```bash
 cd backend

@@ -30,7 +30,10 @@ app = typer.Typer(
     help="Lab traffic simulator (lab targets only; harmless detection-test payloads)", no_args_is_help=True
 )
 
-_PROFILE_HELP = "Profile(s): name, comma list, name=count list, or 'mixed' (default mix of all five)"
+_PROFILE_HELP = (
+    "Profile(s): name, comma list, name=count list, 'mixed' (default mix of the five tuned profiles) "
+    "or 'all' with --sessions (also the holdout profiles)"
+)
 
 
 def _mix(profile: str, sessions: int | None) -> dict[str, int]:
@@ -44,7 +47,7 @@ def _mix(profile: str, sessions: int | None) -> dict[str, int]:
 def list_profiles() -> None:
     """List available traffic profiles."""
     for p in PROFILES.values():
-        typer.echo(f"{p.name:18s} actor={p.actor:18s} {p.description}")
+        typer.echo(f"{p.name:20s} actor={p.actor:18s} {'[holdout] ' if p.holdout else ''}{p.description}")
 
 
 @app.command("run")
