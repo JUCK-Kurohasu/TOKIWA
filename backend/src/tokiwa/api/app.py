@@ -11,12 +11,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 
 from tokiwa import __version__, runtime
+from tokiwa.api.pagination import offset_guard
 from tokiwa.config import get_settings
 from tokiwa.db.session import create_all, dispose_engine, init_engine
 from tokiwa.plugins import import_submodules
@@ -28,7 +30,24 @@ def _include_routers(app: FastAPI) -> None:
     for module in import_submodules("tokiwa.api.routes"):
         router = getattr(module, "router", None)
         if isinstance(router, APIRouter):
-            app.include_router(router)
+            # offset_guard: bounded ?offset on every list route, also those not using PageParams (#94).
+            app.include_router(router, dependencies=[Depends(offset_guard)])
+
+
+async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:
+    """Unique/foreign-key violations (e.g. two concurrent creates of the same username) are conflicts, not 500s.
+
+    Raised either inside a route or by the commit in ``get_session`` (which runs before the response is sent).
+    Only the first line of the driver message is logged: ``str(exc)`` carries the SQL statement and its bound
+    parameters (password hashes, token hashes ...).
+    """
+    orig = getattr(exc, "orig", None)
+    reason = (str(orig).splitlines() or [""])[0][:200] if orig is not None else type(exc).__name__
+    log.warning("integrity error on %s %s: %s", request.method, request.url.path, reason)
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={"detail": "conflict: the request violates a uniqueness or integrity constraint"},
+    )
 
 
 def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
@@ -80,6 +99,7 @@ def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_exception_handler(IntegrityError, _integrity_error)
     _include_routers(app)
     static_dir = settings.server.static_dir
     if static_dir is None:

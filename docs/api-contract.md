@@ -6,9 +6,11 @@
 
 共通:
 - 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。センサーは `X-Tokiwa-Token: tkw_...`。
-- 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`。
+- 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`（最大 1,000,000。超過は 422）。
   バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
-- 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。
+  独自に `offset` Query を宣言しているルートにも、全ルーターに付く `offset_guard` が同じ上限を課す。
+- 時刻は ISO8601 UTC。エラーは FastAPI 標準 `{detail}`。一意制約などの整合性違反（`IntegrityError`）は 409。
+- 書き込みは応答の送信前にコミットされる（`DbSession` は `scope="function"`）。2xx を受け取った直後の再読込には反映済み。
 - ロール: viewer=閲覧, analyst=アラート/インシデント/対処の操作, admin=ユーザー/トークン/設定。
 
 ## 認証・ユーザー（`routes/auth.py` 実装済, `routes/users.py`, `routes/tokens.py`）

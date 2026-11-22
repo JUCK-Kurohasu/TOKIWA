@@ -100,6 +100,14 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency."""
+    """FastAPI dependency; declare it as ``Depends(get_session, scope="function")`` (``tokiwa.api.deps.DbSession``).
+
+    Why the scope matters: with FastAPI's default ``"request"`` scope the code after ``yield`` (the commit) runs
+    after the response has been sent. A client then gets 204 for "revoke token" while the token still works for
+    a few ms, and a commit that fails (lock, constraint) is silently lost behind a 2xx (audit #91).
+    ``"function"`` scope runs the commit after the route returns and before the response starts, so a failing
+    commit surfaces as an error response (IntegrityError -> 409 in ``tokiwa.api.app``). Verified against the
+    installed FastAPI by ``tests/api/test_commit_timing.py``.
+    """
     async with session_scope() as session:
         yield session
