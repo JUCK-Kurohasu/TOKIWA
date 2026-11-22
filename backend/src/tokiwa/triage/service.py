@@ -57,7 +57,7 @@ from tokiwa.triage.evidence import (
     validate_evidence_ids,
 )
 from tokiwa.triage.fallback import RULES_PROMPT_VERSION, rule_based_triage
-from tokiwa.triage.prompts import RETRY_NOTE, TRIAGE_ALERT, TRIAGE_INCIDENT, build_user_prompt, system_prompt
+from tokiwa.triage.prompts import TRIAGE_ALERT, TRIAGE_INCIDENT, build_user_prompt, system_prompt
 
 log = logging.getLogger(__name__)
 
@@ -374,12 +374,18 @@ class TriageService:
         settings = get_settings()
         gw = get_gateway()
         system = system_prompt(template, settings.llm.output_language)
-        user = build_user_prompt(subject, ctx)
+        # Sized to the gateway's input cap (runtime overlay included) so the cap never cuts envelopes, the trailing
+        # instructions or the retry note (#96).
+        budget = gw.max_input_chars()
+        prompts = (
+            build_user_prompt(subject, ctx, max_chars=budget),
+            build_user_prompt(subject, ctx, max_chars=budget, retry=True),
+        )
         first_tier = LLMTier.DEEP if tier == LLMTier.DEEP else LLMTier.FAST
         rejected: list[str] = []
 
         first = await self._attempt(
-            gw, first_tier, system, user, template, purpose, related, ctx.evidence_ids
+            gw, first_tier, system, prompts, template, purpose, related, ctx.evidence_ids
         )
         rejected += first.rejected
         if first.result is None:
@@ -396,7 +402,7 @@ class TriageService:
         if tier is None and should_escalate(first.result, subject.severity, settings.triage):
             escalated = True
             deep = await self._attempt(
-                gw, LLMTier.DEEP, system, user, template, purpose, related, ctx.evidence_ids
+                gw, LLMTier.DEEP, system, prompts, template, purpose, related, ctx.evidence_ids
             )
             rejected += deep.rejected
             if deep.result is not None:
@@ -425,16 +431,16 @@ class TriageService:
         gw: LLMGateway,
         tier: LLMTier,
         system: str,
-        user: str,
+        prompts: tuple[str, str],
         template: PromptTemplate,
         purpose: LLMPurpose,
         related: dict[str, str],
         allowed_ids: list[str],
     ) -> _Attempt:
-        """One tier: call, validate evidence ids, retry once if none is valid."""
+        """One tier: call, validate evidence ids, retry once (``prompts[1]`` carries the reminder) if none is valid."""
         rejected: list[str] = []
         for attempt in range(2):
-            prompt = user if attempt == 0 else f"{user}\n\n{RETRY_NOTE}"
+            prompt = prompts[attempt]
             res = await gw.structured(
                 StructuredRequest(
                     purpose=purpose,
