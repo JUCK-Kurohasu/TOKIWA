@@ -32,6 +32,7 @@ import { Badge, Button, Dialog, ErrorState, Input, Label, Select, Textarea } fro
 import { dateTimeTitle, formatDateTime, timeAgo } from "@/lib/format";
 import { useLabel, useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { GateReflection } from "./GateStatus";
 import { Notice } from "./OpsKit";
 import {
   actionStatusLabel,
@@ -285,6 +286,7 @@ export function ActionCard({ action, showLinks = true }: { action: ResponseActio
         <p className="mt-2 whitespace-pre-wrap break-words text-sm text-fg/90">{action.reason}</p>
       )}
       <p className="mt-1 text-xs text-muted">{label(labelOf(actionTypeEffect, action.action_type))}</p>
+      <GateReflection action={action} />
 
       {failure && (
         <p className="mt-2 rounded border border-sev-critical/30 bg-sev-critical/10 px-2 py-1 text-xs text-sev-critical">

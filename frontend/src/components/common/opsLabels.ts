@@ -67,21 +67,22 @@ export const actionTypeLabel: Record<ActionType, Localized> = {
 
 /** What the executor will do once a human approves (shown in the approval dialog). */
 export const actionTypeEffect: Record<ActionType, Localized> = {
+  // #145: say exactly what is enforced — only requests through a Gate that has pulled the policy.
   block_ip: {
-    ja: "TOKIWA Gate がこの送信元からのリクエストを 403 で拒否します。",
-    en: "TOKIWA Gate rejects requests from this source with 403.",
+    ja: "ポリシーを取得した TOKIWA Gate を経由するリクエストのみ、この送信元からのものを 403 で拒否します（Gate を通らない経路は遮断されません）。",
+    en: "Only requests through a TOKIWA Gate that has pulled the policy are rejected with 403 for this source (paths that bypass the Gate are not blocked).",
   },
   rate_limit: {
-    ja: "TOKIWA Gate がこの送信元の毎分リクエスト数を制限します。",
-    en: "TOKIWA Gate limits requests per minute from this source.",
+    ja: "ポリシーを取得した TOKIWA Gate を経由するリクエストのみ、この送信元の毎分リクエスト数を制限します。",
+    en: "Limits requests per minute from this source, only for requests through a TOKIWA Gate that has pulled the policy.",
   },
   tarpit: {
-    ja: "TOKIWA Gate がこの送信元への応答に遅延を加え、攻撃を遅らせます。",
-    en: "TOKIWA Gate adds latency to responses for this source.",
+    ja: "ポリシーを取得した TOKIWA Gate を経由するリクエストのみ、この送信元への応答に遅延を加えます。",
+    en: "Adds latency to responses for this source, only for requests through a TOKIWA Gate that has pulled the policy.",
   },
   deceive: {
-    ja: "この送信元からのリクエストをすべて Mirage のデコイで応答します（本番には届きません）。",
-    en: "Every request from this source is answered from Mirage decoys (never reaches upstream).",
+    ja: "ポリシーを取得した TOKIWA Gate を経由するこの送信元のリクエストを、すべて Mirage のデコイで応答します（本番には届きません）。",
+    en: "Requests from this source that pass through a TOKIWA Gate that has pulled the policy are answered from Mirage decoys (never reach upstream).",
   },
   deploy_canary: {
     ja: "ハニートークン / AI カナリアを自組織の資産上に追加で配置します。",

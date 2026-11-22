@@ -36,6 +36,21 @@ proposed（提议）──批准──▶ approved ──执行成功──▶ a
 | `webhook` | — | 向已配置的 Webhook 发送固定格式的 JSON |
 
 与 Gate 相关的处置，会在 Gate 下一次拉取策略时（默认 5 秒以内）生效。
+**即使批准后显示为“Active”（执行中），在 Gate 拉取策略之前也不会被强制执行。** 而且只对经过 Gate 的请求有效，
+不经过 Gate 的路径（只做日志摄取的部署、绕过 Gate 的直接访问）不会被阻断。
+
+Response（处置）页面的每张卡片都会显示该处置在 Gate 上的生效情况。
+
+| 显示 | 含义 |
+|---|---|
+| No Gate to apply it（无可生效的 Gate） | 没有任何 Gate 拉取过策略。该处置未被强制执行 |
+| Approved (not applied yet)（已批准，未生效） | 有 Gate，但批准后尚未拉取策略 |
+| Applied by n Gate(s) (hh:mm)（已在 n 台 Gate 生效） | 批准后拉取了策略的 Gate 数量和最近一次拉取时间 |
+| … none has polled for over N min（超过 N 分钟未拉取） | 已生效，但这些 Gate 已有一段时间未拉取策略（可能已停止） |
+
+“Active” 标签页还会显示 Gate 的整体状况（正在拉取的台数、已停止拉取的 Gate）。超过
+`max(120 秒, gate.policy_refresh_seconds × 12)` 未拉取即视为停止。同样的信息也可以通过 `GET /api/v1/gate/status` 获取。
+Gate 按“令牌 + 来源地址”区分，因此位于同一反向代理之后的多台 Gate 会被算作 1 台。
 
 ## 安全机制
 

@@ -75,6 +75,9 @@ const strings = {
     call: "LLM 呼び出し",
     escalated: "deep へ昇格",
     rulesFallback: "LLM 不在・予算超過・拒否のため、ルールベースで判定しました。",
+    mockBadge: "mock（LLM 未使用）",
+    mockNote:
+      "LLM プロバイダが mock のため、LLM は呼ばれていません。ルールベースの判定です（AI 関与度などは定型値）。",
     disclaimer: "LLM の判定は参考情報です。最終判断は証拠と照合して行ってください。",
     noActions: "推奨対処はありません",
     noSteps: "なし",
@@ -116,6 +119,9 @@ const strings = {
     call: "LLM call",
     escalated: "Escalated to deep",
     rulesFallback: "Rule-based verdict (LLM unavailable, over budget or refused).",
+    mockBadge: "mock (no LLM used)",
+    mockNote:
+      "The LLM provider is mock, so no LLM was called. This is a rule-based verdict (AI likelihood etc. are fixed values).",
     disclaimer: "LLM verdicts are advisory. Verify against the evidence before acting.",
     noActions: "No recommended actions",
     noSteps: "None",
@@ -193,6 +199,11 @@ function RecommendedActionRow({
   );
 }
 
+/** The verdict came from the mock provider: no LLM was called (#151). Older records have no provider. */
+export function isMockTriage(t: TriageRecord | null | undefined): boolean {
+  return t?.provider === "mock";
+}
+
 export interface TriagePanelProps {
   triage: TriageRecord | null;
   /** The parent is currently being triaged (e.g. alert.status === "triaging"). */
@@ -256,6 +267,7 @@ export function TriagePanel({
         <span className="flex items-center gap-1.5">
           <BrainCircuit className="h-4 w-4 text-ai" aria-hidden />
           {L.title}
+          {isMockTriage(triage) && <Badge tone="warn">{L.mockBadge}</Badge>}
         </span>
       }
       actions={controls}
@@ -433,14 +445,18 @@ export function TriagePanel({
         <div className="space-y-2 border-t border-line pt-3">
           <SectionTitle>{L.provenance}</SectionTitle>
           {triage.tier === "rules" && <p className="text-[11px] text-sev-medium">{L.rulesFallback}</p>}
+          {isMockTriage(triage) && <p className="text-[11px] text-sev-medium">{L.mockNote}</p>}
           <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-[11px]">
             <dt className="text-muted">{L.tier}</dt>
             <dd className="flex flex-wrap items-center gap-1">
-              {label(labelOf(tierLabel, triage.tier))}
-              {triage.escalated && <Badge tone="ai">{L.escalated}</Badge>}
+              {/* #151: with the mock provider the configured tier / model never ran; do not show them. */}
+              {isMockTriage(triage) ? L.mockBadge : label(labelOf(tierLabel, triage.tier))}
+              {triage.escalated && !isMockTriage(triage) && <Badge tone="ai">{L.escalated}</Badge>}
             </dd>
             <dt className="text-muted">{L.model}</dt>
-            <dd className="break-all font-mono">{triage.model ?? "-"}</dd>
+            <dd className="break-all font-mono">
+              {isMockTriage(triage) ? L.mockBadge : (triage.model ?? "-")}
+            </dd>
             <dt className="text-muted">{L.prompt}</dt>
             <dd className="break-all font-mono">{triage.prompt_version}</dd>
             {triage.llm_call_id && (

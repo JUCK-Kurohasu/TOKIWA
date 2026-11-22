@@ -36,6 +36,21 @@ Todas las operaciones quedan registradas en el log de auditoría.
 | `webhook` | — | Envía un JSON de formato fijo a un webhook configurado |
 
 Las acciones de respuesta que afectan a Gate se aplican la próxima vez que Gate obtiene la política (en un máximo de 5 segundos por defecto).
+**Una acción aprobada que aparece como «Active» (activa) no se aplica hasta que un Gate obtiene la política.** Además, solo afecta a las peticiones que pasan por un Gate;
+las rutas que no pasan por él (despliegues que solo ingieren registros, acceso directo que esquiva el Gate) no se bloquean.
+
+Cada tarjeta de la pantalla Response (respuesta) muestra si un Gate ha aplicado la acción.
+
+| Indicación | Significado |
+|---|---|
+| No Gate to apply it (ningún Gate que la aplique) | Ningún Gate ha obtenido la política. La acción no se aplica |
+| Approved (not applied yet) (aprobada, aún sin aplicar) | Hay un Gate, pero no ha obtenido la política desde la aprobación |
+| Applied by n Gate(s) (hh:mm) (aplicada por n Gates) | Número de Gates que obtuvieron la política tras la aprobación y hora de la última obtención |
+| … none has polled for over N min (sin consultas desde hace más de N min) | Aplicada, pero esos Gates han dejado de obtener la política (pueden estar detenidos) |
+
+La pestaña «Active» muestra también el estado general de los Gates (cuántos están consultando y cuáles se han detenido). Un Gate se considera detenido tras
+`max(120 s, gate.policy_refresh_seconds × 12)` sin consultar. La misma información está disponible en `GET /api/v1/gate/status`.
+Los Gates se distinguen por «token + dirección de origen», así que varios Gates detrás de un mismo proxy inverso cuentan como uno.
 
 ## Salvaguardas
 

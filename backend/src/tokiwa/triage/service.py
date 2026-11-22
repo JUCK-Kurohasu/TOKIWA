@@ -76,6 +76,14 @@ def wants_llm(severity: Severity | str, cfg: TriageSettings) -> bool:
     return Severity(severity).at_least(cfg.min_severity_for_llm)
 
 
+MOCK_PROVIDER = "mock"
+
+
+def record_is_rule_based(record: TriageRecord) -> bool:
+    """True for the rule verdict and for verdicts produced by the mock provider (no LLM was called)."""
+    return record.tier == TIER_RULES or record.provider == MOCK_PROVIDER
+
+
 def should_escalate(result: TriageResult, subject_severity: Severity | str, cfg: TriageSettings) -> bool:
     """fast -> deep when the fast verdict is unsure or the stakes are high (rule or verdict severity)."""
     if result.confidence < cfg.escalate_confidence_below:
@@ -102,6 +110,7 @@ class _Attempt:
     result: TriageResult | None
     tier: str
     model: str | None = None
+    provider: str | None = None
     call_id: str | None = None
     status: str = "ok"
     rejected: list[str] = field(default_factory=list)
@@ -404,6 +413,7 @@ class TriageService:
             result=chosen.result,
             tier=chosen.tier,
             model=chosen.model,
+            provider=chosen.provider,
             prompt_version=template.ref,
             llm_call_id=chosen.call_id,
             escalated=escalated,
@@ -442,7 +452,7 @@ class TriageService:
             rejected += bad
             if valid:
                 output = res.output.model_copy(update={"evidence_ids": valid})
-                return _Attempt(output, str(tier), res.model, res.call_id, "ok", rejected)
+                return _Attempt(output, str(tier), res.model, res.provider, res.call_id, "ok", rejected)
             log.info("triage: %s tier cited no valid evidence ids (attempt %d)", tier, attempt + 1)
         return _Attempt(None, str(tier), status="no_valid_evidence", rejected=rejected)
 
@@ -454,7 +464,9 @@ class TriageService:
         actions = record.result.recommended_actions
         if not actions:
             return
-        proposer = ActionProposer.RULE if record.tier == TIER_RULES else ActionProposer.LLM
+        # The mock provider answers with the rule-based verdict (triage.fallback), so its proposals are rule
+        # proposals, not LLM ones (#151): the UI must not label them "LLM 提案".
+        proposer = ActionProposer.RULE if record_is_rule_based(record) else ActionProposer.LLM
         seen: set[tuple[str, str]] = set()
         evidence_ips = ctx.source_ips
         for act in actions:

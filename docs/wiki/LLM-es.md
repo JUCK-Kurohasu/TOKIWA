@@ -39,6 +39,11 @@ La clave no se escribe en los logs, en el log de auditoría ni en las entradas a
 Una vez configurada, puede comprobarse con **LLM → Settings → Connection test** (Prueba de conexión) (realiza una llamada estructurada mínima por nivel, fast y deep, que cuenta para el presupuesto y queda auditada).
 Si el **Provider** (Proveedor) del resultado es `mock`, no se llamó a ninguna API real (puede que el proveedor siga en `mock`). «Current status» (Estado actual) muestra el proveedor realmente en uso además del configurado.
 
+Mientras el proveedor realmente en uso sea `mock` (incluido el respaldo de `auto` cuando no hay clave de API) o el proveedor no esté disponible,
+en la parte superior de todas las pantallas se muestra siempre la franja **«No LLM is in use»** (no se usa ningún LLM). Los resultados de triaje devueltos por el mock
+muestran **mock (no LLM used)** (mock, sin LLM) en lugar del nombre del modelo y el nivel en el panel «LLM triage» de alertas / incidentes y en el registro **Calls** (llamadas) de LLM.
+Las propuestas de respuesta creadas a partir de un veredicto del mock se etiquetan como **Rule** (regla) en lugar de **LLM** (las propuestas anteriores a este cambio conservan su etiqueta).
+
 ## Modelos y niveles (tiers)
 
 | Ajuste | Por defecto | Descripción |
