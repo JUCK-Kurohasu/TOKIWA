@@ -167,4 +167,7 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 stream の詳細: 接続直後にコメント `: connected`、15 秒ごとに `: ping` コメント。中継トピックは `alert.*` / `incident.*` /
 `action.*` / `deception.tripped` / `intel.advisory` / `llm.call`（`request_redacted`・`response_text` は除外）/
 `event.ingested`（`{"count": n}` のみ）。`?access_token=` の値は uvicorn アクセスログでマスクされる。
-| GET | /health | public | 実装済 |
+| GET | /health | public | `{"status": "ok"}`。有効なユーザー JWT 付きのときだけ `version` も返す（DB 障害時も 200） |
+
+未定義の `/api/*` は SPA の index.html ではなく JSON の 404（`{"detail": "Not Found"}`）。`/api/docs`・`/api/openapi.json` は
+`server.expose_docs`（既定 true、本番は false 推奨）で無効化できる。ReDoc（旧 `/redoc`）は提供しない。

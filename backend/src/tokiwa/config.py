@@ -39,6 +39,9 @@ class ServerSettings(BaseModel):
     # Gate batch (64 headers x 2 KiB each per event) is about 15 MB. Shippers DROP a batch answered with 413.
     max_body_bytes: int = Field(default=1024 * 1024, ge=1024)
     max_ingest_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
+    # Serve the unauthenticated Swagger UI (/api/docs) and OpenAPI document (/api/openapi.json).
+    # True keeps existing setups and docs working; set false in production (they map the API for scanners).
+    expose_docs: bool = True
 
 
 class DatabaseSettings(BaseModel):

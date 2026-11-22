@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -78,6 +78,11 @@ def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
+        # Unknown API paths get a JSON 404, not the UI shell with 200: API clients and monitors read that as
+        # success, and it hid typos in API paths (audit #93).
+        api_path = full_path.lstrip("/")
+        if api_path == "api" or api_path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
         candidate = (static_dir / full_path).resolve()
         if full_path and candidate.is_file() and static_dir.resolve() in candidate.parents:
             return FileResponse(candidate)
@@ -107,8 +112,14 @@ def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
         version=__version__,
         description="LLM-driven SIEM/XDR against generative-AI-driven cyber attacks",
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        # server.expose_docs (default true for compatibility; false recommended in production, audit #93): the
+        # Swagger UI and the full OpenAPI document are unauthenticated and map the whole API surface for a
+        # scanner. ReDoc is off (it was an undocumented second copy at /redoc that needs Google Fonts + blob
+        # workers in the CSP); the OAuth2 redirect page lives under /api/docs/ with the docs' CSP.
+        docs_url="/api/docs" if settings.server.expose_docs else None,
+        openapi_url="/api/openapi.json" if settings.server.expose_docs else None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
     )
     # Starlette: the middleware added last is the outermost. CORS stays outermost so that 413s etc. still carry
     # CORS headers for the browser.

@@ -58,6 +58,7 @@ deception:
 | `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
 | `server.max_body_bytes` | 1048576 (1 MiB) | Límite del cuerpo de la petición; si se supera, 413. Se aplica a toda la API salvo la ingesta (ingest) |
+| `server.expose_docs` | `true` | Publica la documentación de la API (`/api/docs`, `/api/openapi.json`) sin autenticación. En producción se recomienda `false` |
 | `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Límite del cuerpo para `/api/v1/ingest/`. Un lote mayor recibe 413 y el Gate / agente **descarta** ese lote; súbalo junto con un `batch_size` mayor |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | Para PostgreSQL, `postgresql+asyncpg://user:pass@host/db` |
 

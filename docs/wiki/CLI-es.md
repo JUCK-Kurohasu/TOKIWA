@@ -34,6 +34,9 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | No inicia los trabajos periódicos (sincronización de inteligencia, procesamiento de vencimientos, etc.) |
 
 La documentación de la API está en `http://<server>:8788/api/docs` y la comprobación de estado, en `/api/v1/health`.
+La documentación de la API (`/api/docs`, `/api/openapi.json`) es pública sin autenticación, por lo que en producción se
+recomienda desactivarla con `server.expose_docs: false` (variable de entorno `TOKIWA_SERVER__EXPOSE_DOCS=false`). La
+comprobación de estado no requiere autenticación, pero solo devuelve la versión a un usuario con sesión iniciada.
 
 ## tokiwa user create
 

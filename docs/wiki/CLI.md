@@ -34,6 +34,9 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | 定期ジョブ（インテル同期・期限切れ処理など）を起動しない |
 
 API のドキュメントは `http://<server>:8788/api/docs`、ヘルスチェックは `/api/v1/health` です。
+API ドキュメント（`/api/docs`・`/api/openapi.json`）は認証なしで公開されるため、本番では `server.expose_docs: false`
+（環境変数 `TOKIWA_SERVER__EXPOSE_DOCS=false`）で無効にすることを推奨します。ヘルスチェックは認証不要ですが、
+バージョンはログイン済みのときだけ返します。
 
 ## tokiwa user create
 

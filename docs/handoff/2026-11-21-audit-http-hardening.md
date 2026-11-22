@@ -8,8 +8,8 @@
 |---|---|---|---|
 | #91 コミットが応答送信後 | 完全 | `DbSession` を `Depends(get_session, scope="function")` に変更（コミットはルート関数の終了後・応答送信前）。`IntegrityError` → 409 の共通ハンドラ（app.py）。応答開始時点で別セッションから DB を見るテストを追加 | c5d9741 |
 | #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | ee30db5 |
-| #57 ボディ・フィールド長上限 | 部分（推奨 (1)(2) は完全、(3) トークン単位レート制限・(4) retention 既定有効は未対応） | (1) 純 ASGI の `BodySizeLimitMiddleware`（`api/middleware.py`）: `server.max_body_bytes`（既定 1 MiB）/ `server.max_ingest_body_bytes`（`/api/v1/ingest/`、既定 32 MiB）。Content-Length 申告と実受信バイト（chunked）の両方で 413。(2) `Event` の全文字列（ヘッダ値・ラベル値・リスト要素・ネストしたモデル含む）を 65,536 文字で**切り詰め**（拒否しない）、`raw` は JSON 64 KiB で adapters と同じ `{"_truncated","_bytes","text"}` 形に。切り詰め時はタグ `truncated` とラベル `tokiwa.truncated`（`field:元の長さ`）。wiki（Configuration / Sensors ×4 言語） | （本コミット） |
-| #93 docs / openapi / version 公開・/api/* の SPA 200 | 未着手 | | |
+| #57 ボディ・フィールド長上限 | 部分（推奨 (1)(2) は完全、(3) トークン単位レート制限・(4) retention 既定有効は未対応） | (1) 純 ASGI の `BodySizeLimitMiddleware`（`api/middleware.py`）: `server.max_body_bytes`（既定 1 MiB）/ `server.max_ingest_body_bytes`（`/api/v1/ingest/`、既定 32 MiB）。Content-Length 申告と実受信バイト（chunked）の両方で 413。(2) `Event` の全文字列（ヘッダ値・ラベル値・リスト要素・ネストしたモデル含む）を 65,536 文字で**切り詰め**（拒否しない）、`raw` は JSON 64 KiB で adapters と同じ `{"_truncated","_bytes","text"}` 形に。切り詰め時はタグ `truncated` とラベル `tokiwa.truncated`（`field:元の長さ`）。wiki（Configuration / Sensors ×4 言語） | 9985076 |
+| #93 docs / openapi / version 公開・/api/* の SPA 200 | 部分（本レーン分は完全。`/auth/status` の version と CORS `allow_credentials` は未対応＝auth レーン / 要判断） | SPA フォールバックが `api` / `api/...` を JSON 404 に。`server.expose_docs`（既定 true＝後方互換）で `/api/docs`・`/api/openapi.json` を無効化可能。ReDoc（未記載の `/redoc`）を廃止、OAuth2 redirect を `/api/docs/oauth2-redirect` へ。`/health` は認証不要のまま `{"status":"ok"}`、有効なユーザー JWT があるときだけ `version`。wiki（CLI / Configuration ×4）・api-contract | （本コミット） |
 | #66 セキュリティヘッダ | 未着手 | | |
 
 ## #91 の詳細（事実）
@@ -62,8 +62,26 @@
 - chunked ボディで上限を超えた場合は `receive` から `HTTPException(413)` 派生を送出（インストール済み FastAPI の
   `routing.py` はボディ読み取り中の `HTTPException` をそのまま再送出し、それ以外は 400 に包むことを確認済み）。
 
+## #93 の詳細
+
+- `/health` の利用者を確認した: Docker HEALTHCHECK（`deploy/healthcheck.py`）と `scripts/docker-smoke.sh` はステータスコードだけを見る。
+  フロントの `AppShell.tsx` `SystemStatus` はログイン後に JWT 付きで呼び `v${data.version}` を表示する。→ 認証不要のまま、
+  version だけをログイン済みに限定した（DB 参照は Authorization ヘッダがあるときだけ、例外は握って 200）。
+- 正直な注記: `expose_docs` 既定 true の間は `/api/openapi.json` の `info.version` から未認証でも version が分かる。
+  `/api/v1/auth/status` も version を返す（auth レーンの `routes/auth.py`、本レーンでは触っていない）。`/health` だけ隠しても
+  効果は限定的で、`expose_docs: false` ＋ auth/status 側の対応と組み合わせて意味を持つ。
+- POST など GET 以外の未定義 `/api/*` は従来どおり 405（SPA ルートが GET のみのため）。全メソッドの `/api/{rest}` キャッチオール
+  を足すと実在ルートの 405 まで 404 になるので入れていない。
+- パストラバーサルの防御（`resolve()` + `parents` 判定）は変更なし。テストを追加して維持を確認。
+
 ## 要判断
 
+- （#93）`server.expose_docs` 既定は **true（後方互換）**。AGENTS.md・wiki（CLI / Sensors）が `/api/docs` を案内しているため。
+  **本番では false を推奨**（wiki の CLI / Configuration に記載）。既定 false にする場合は lab/compose・docs の案内も同時に変える。
+- （#93）ReDoc を廃止（`redoc_url=None`）。従来 `/redoc` で公開されていたが文書に記載なし。CSP に Google Fonts と blob ワーカーを
+  足す必要があり、Swagger UI と重複するため。必要なら `/api/redoc` として復活させ、docs 用 CSP を広げる。
+- （#93）CORS `allow_credentials=True` は監査推奨では false（JWT は Authorization ヘッダ運用）だが、本レーンでは変更していない。
+  フロントは Cookie を使っていない（`client.ts` は Authorization ヘッダ）ので false で問題ない見込み。要確認のうえ別途。
 - （#57）`server.max_ingest_body_bytes` 既定 32 MiB / `server.max_body_bytes` 既定 1 MiB。従来は無制限なので、32 MiB を超える
   バッチを送っていた利用者（`batch_size` を 5000 近くにして大きなイベントを送る構成）は 413 → バッチ破棄になる。現実的な構成
   （Gate 100 件、Agent 500 件）は最悪ケースでも収まる見込み。要件次第で下げる（メモリ/DoS 優先）か上げる（取りこぼし優先）か。
@@ -86,6 +104,9 @@
   ボディ読み取り前に（未認証の 32 MiB 送信を早期 401 に）。
 - Gate / sensors レーン: 413 を受けたバッチを破棄せず二分割して再送する（現在はバッチごと破棄。#57 の既定上限との組み合わせで
   テレメトリ欠落＝検知回避になり得る）。
+- auth レーン（#93 の残り）: `GET /api/v1/auth/status` が未認証で `version` を返す。不要なら削除（フロントが使っているか要確認）。
+- frontend レーン: `/health` の `version` は未ログイン時に返らなくなった。`AppShell.tsx` の型を `version?: string` にし、
+  無いときは `v` 表示を省くと堅い（ログイン後にしか表示されないので現状でも実害なし）。
 - pipeline / retention 担当: 保存期間・容量ベースの retention を既定で有効化（#57 推奨 (4)）。L12-03（PostgreSQL の列長・NUL）は未対応。
 
 ## 未検証事項
