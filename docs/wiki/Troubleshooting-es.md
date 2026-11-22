@@ -31,9 +31,13 @@ En un host al que nadie más puede acceder, puede desactivarlo con `TOKIWA_AUTH_
 **No queda ningún administrador (el log de arranque dice "no user has the admin role")**
 Con la misma configuración que el servidor, ejecute `uv run tokiwa user create <nombre> --role admin` (en Docker: `docker compose ... exec tokiwa tokiwa user create ...`).
 
+**El inicio de sesión dice "too many failed attempts" (429)**
+Tras 5 fallos con el mismo usuario e IP de origen (`auth.login_max_failures`), o 30 desde la misma IP (`auth.login_max_failures_per_ip`), se rechazan los inicios de sesión, incluso con la contraseña correcta, hasta que los fallos antiguos salen de la ventana de 15 minutos (`auth.login_lockout_minutes`).
+Espere o inicie sesión desde otro equipo (otra IP de origen). Los fallos y aciertos quedan en el registro de auditoría (**Settings → System**) como `auth.login.failure` / `auth.login.success` (con la IP de origen; nunca se registran contraseñas).
+
 **Ha olvidado la contraseña del administrador**
-Con la misma configuración que el servidor, ejecute `uv run tokiwa user create <nuevo nombre> --role admin` para crear otro administrador
-y cambie la contraseña de la cuenta original con **Reset password** (Restablecer contraseña) en **Settings → Users** (Configuración → Usuarios).
+Con la misma configuración que el servidor, ejecute `uv run tokiwa user reset-password <usuario>` y establezca una contraseña nueva (en Docker: `docker compose ... exec tokiwa tokiwa user reset-password <usuario>`).
+Se cierran las sesiones existentes de ese usuario. Si los inicios de sesión se rechazan (429) tras varios fallos, el bloqueo se levanta en unos 15 minutos.
 
 **La sesión se cerró al reiniciar**
 Es posible que se haya perdido la clave de firma (`data/secret.key`). Compruebe que el directorio de datos sea persistente.

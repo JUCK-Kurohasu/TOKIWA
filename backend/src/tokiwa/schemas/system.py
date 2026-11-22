@@ -32,8 +32,9 @@ class UserCreate(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    # Bounded so an anonymous request cannot make the server hash megabytes (accounts allow <= 64 / 256 chars).
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=1024)
 
 
 class TokenResponse(BaseModel):

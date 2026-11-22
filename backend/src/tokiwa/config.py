@@ -20,8 +20,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+MIN_SECRET_KEY_LENGTH = 32
 
 
 class ServerSettings(BaseModel):
@@ -32,7 +34,9 @@ class ServerSettings(BaseModel):
     # Built frontend (vite build output). Served at "/" when the directory exists.
     static_dir: Path | None = None
     data_dir: Path = Path("./data")
-    # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset.
+    # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset. An empty value
+    # counts as unset; a set value must have at least MIN_SECRET_KEY_LENGTH characters (HS256 keys can be guessed
+    # offline from any issued JWT, and a forged JWT is an admin login).
     secret_key: SecretStr | None = None
     token_ttl_minutes: int = 60 * 12
     # Request body size limits enforced by the app itself (413), independent of any reverse proxy.
@@ -47,6 +51,19 @@ class ServerSettings(BaseModel):
     # if a reverse proxy sets its own policy or a customised UI needs a different CSP.
     security_headers: bool = True
 
+    @field_validator("secret_key", mode="before")
+    @classmethod
+    def _empty_secret_is_unset(cls, value: Any) -> Any:
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return None
+        if isinstance(raw, str) and len(raw.strip()) < MIN_SECRET_KEY_LENGTH:
+            raise ValueError(
+                f"server.secret_key must have at least {MIN_SECRET_KEY_LENGTH} characters "
+                "(e.g. `openssl rand -base64 48`), or leave it unset to use the generated data_dir/secret.key"
+            )
+        return value  # used verbatim (stripping would change existing keys and log everyone out)
+
 
 class AuthSettings(BaseModel):
     """Login and first-run setup protection (owned by tokiwa.auth / routes/auth.py)."""
@@ -55,6 +72,15 @@ class AuthSettings(BaseModel):
     # server writes to data_dir/setup-code and to its log while setup is pending. Disable only on a host that no
     # one else can reach before setup (or create the first admin with `tokiwa user create --role admin`).
     setup_code_required: bool = True
+    # Login throttling (state in the database, shared by all workers). Within a sliding window of
+    # login_lockout_minutes, a user name + source IP pair is refused (429) after login_max_failures failures, and a
+    # source IP after login_max_failures_per_ip failures over any user names (password spraying). 0 disables a limit.
+    login_max_failures: int = Field(default=5, ge=0)
+    login_max_failures_per_ip: int = Field(default=30, ge=0)
+    login_lockout_minutes: float = Field(default=15.0, gt=0)
+    # Password hashing (scrypt, ~16 MiB and tens of ms each) runs in worker threads; at most this many at a time,
+    # so a burst of logins cannot starve ingest / SSE on the event loop or exhaust memory.
+    password_hash_concurrency: int = Field(default=4, ge=1)
 
 
 class DatabaseSettings(BaseModel):

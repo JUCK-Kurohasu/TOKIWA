@@ -46,6 +46,16 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 パスワードは対話的に（入力を隠して 2 回）尋ねられます。ロールの既定は `analyst` です。
+既に同じ名前のユーザーがいる場合は、エラーメッセージを表示して終了します（終了コード 1）。作成は監査ログに `user.create`（操作者 `cli`）として残ります。
+管理者が 1 人もいなくなったときの復旧にも使えます（`--role admin`）。
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+新しいパスワードを対話的に（入力を隠して 2 回）尋ね、設定します。そのユーザーの既存のログインはすべて無効になり、監査ログに `user.password_reset`（操作者 `cli`。パスワードは記録しません）が残ります。管理者のパスワードを忘れたときに使います。
 
 ## tokiwa token create
 

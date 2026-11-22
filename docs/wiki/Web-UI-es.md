@@ -24,6 +24,8 @@ El periodo personalizado de la pantalla Events (eventos) también se interpreta 
 
 El usuario creado inicialmente en la página **/setup** (configuración inicial) es `admin`. Los usuarios se añaden en **Settings → Users** (Configuración → Usuarios).
 
+Un inicio de sesión dura 12 horas por defecto (`server.token_ttl_minutes`). **Log out** (cerrar sesión, arriba a la derecha) cierra las sesiones de ese usuario en **todos los dispositivos**. Cambiar la contraseña o el rol de un usuario también cierra sus sesiones, por lo que debe volver a iniciar sesión. Los administradores pueden cerrar las sesiones de otro usuario en todos los dispositivos con **Revoke sessions** (revocar sesiones) en **Settings → Users** (por ejemplo, si se sospecha que se robaron sus credenciales).
+
 ## Monitor (Monitorización)
 
 ### Dashboard (Panel)

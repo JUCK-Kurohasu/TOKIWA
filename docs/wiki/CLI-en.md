@@ -46,6 +46,16 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 You are prompted for the password interactively (twice, with input hidden). The default role is `analyst`.
+If a user with that name already exists, the command prints an error and exits with code 1. The creation is recorded in the audit log as `user.create` (actor `cli`).
+It is also the recovery path when no admin is left (`--role admin`).
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+Prompts for a new password (twice, with input hidden) and sets it. All existing logins of that user end, and the audit log records `user.password_reset` (actor `cli`; the password is never recorded). Use it when the admin password is lost.
 
 ## tokiwa token create
 

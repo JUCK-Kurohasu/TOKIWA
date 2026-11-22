@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tokiwa.auth.api_tokens import is_expired
-from tokiwa.auth.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token
+from tokiwa.auth.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token, token_version_matches
 from tokiwa.db.models.core import ApiTokenRow, UserRow
 from tokiwa.db.session import get_session
 from tokiwa.schemas.system import ApiToken, Role, User
@@ -55,6 +55,11 @@ async def user_from_token(session: AsyncSession, token: str | None) -> User:
     row = await session.get(UserRow, claims.get("sub"))
     if row is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
+    if not token_version_matches(claims, row.token_version):
+        # Password/role changed, logged out or sessions revoked since this JWT was issued (#34).
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "token revoked", headers={"WWW-Authenticate": "Bearer"}
+        )
     return User.model_validate(row)
 
 

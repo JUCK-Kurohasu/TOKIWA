@@ -26,8 +26,8 @@ make up                  # = docker compose -f deploy/compose.yaml --env-file .e
 3. By default, TOKIWA is exposed only on `127.0.0.1:8788`. To expose it on your LAN, set `TOKIWA_BIND=0.0.0.0` in `.env`, but
    **do not expose it without TLS**; put a reverse proxy (described below) in front of it.
 
-> ⚠️ **Do not enable a setting with an empty value**. For example, `TOKIWA_SERVER__SECRET_KEY=` (empty) ends up being used as
-> "a signing key that is an empty string". Leave settings you don't use commented out. If it is not set, the signing key is generated automatically on first start.
+> ⚠️ **Do not enable a setting with an empty value** (what an empty string means differs per setting). Leave settings you don't use commented out.
+> The signing key `TOKIWA_SERVER__SECRET_KEY` is generated automatically on first start when unset (or empty); a key you set needs at least 32 characters.
 
 ### Running with plain docker
 

@@ -21,6 +21,8 @@ A custom time range on the Events screen is read in the display time zone as wel
 
 The user you create first on the setup page is an `admin`. Add users under **Settings → Users**.
 
+A login lasts 12 hours by default (`server.token_ttl_minutes`). **Log out** (top right) ends that user's logins on **every device**. Changing a user's password or role also ends their existing logins, so they sign in again. Admins can sign another user out everywhere with **Revoke sessions** under **Settings → Users** (for example when a login may have been stolen).
+
 ## Monitor
 
 ### Dashboard

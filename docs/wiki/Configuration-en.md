@@ -21,7 +21,7 @@ With Docker Compose, `.env` is passed to the container as environment variables.
 ### Things to watch when writing settings
 
 - **Write lists and dictionaries as JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **Do not set a value to empty**. `TOKIWA_SERVER__SECRET_KEY=` is treated as "a signing key that is an empty string" (which is not the same as leaving it unset).
+- **Do not set a value to empty** (what an empty string means differs per setting). An empty `TOKIWA_SERVER__SECRET_KEY=` is treated as unset, so the generated key in `data_dir/secret.key` is used. A key you set must have at least 32 characters; a shorter one stops the server from starting.
 - We recommend passing secrets (API keys, passwords) in environment variables rather than in YAML.
 
 ### YAML example
@@ -55,13 +55,17 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | Only when the UI is served from a different origin |
 | `server.static_dir` | None | Built UI (`frontend/dist`). When set, it is served at `/` |
 | `server.data_dir` | `./data` | Where data is stored (signing key, and so on) |
-| `server.secret_key` | Auto-generated | Signing key for logins (JWT). If unset, it is generated and saved to `data_dir/secret.key` |
+| `server.secret_key` | Auto-generated | Signing key for logins (JWT), at least 32 characters. If unset or empty, it is generated and saved to `data_dir/secret.key` (mode 0600) |
 | `server.token_ttl_minutes` | 720 | Login lifetime |
 | `auth.setup_code_required` | `true` | First-run setup (creating the first admin) requires the single-use code printed in the startup log and saved to `data_dir/setup-code` |
 | `server.max_body_bytes` | 1048576 (1 MiB) | Request body limit; larger bodies get 413. Applies to every API except ingest |
 | `server.security_headers` | `true` | Add CSP, `X-Frame-Options: DENY`, `nosniff` and `Referrer-Policy: no-referrer` to every response. Set `false` only if a proxy sets its own policy or a customised UI does not fit the CSP |
 | `server.expose_docs` | `true` | Serve the API docs (`/api/docs`, `/api/openapi.json`) without authentication. `false` is recommended in production |
 | `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Body limit for `/api/v1/ingest/`. A batch above it gets 413 and the Gate / agent **drops** that batch; raise it together with a larger `batch_size` |
+| `auth.login_max_failures` | 5 | After this many failed logins for the same user name + source IP, further attempts are refused for a while (429). 0 disables |
+| `auth.login_max_failures_per_ip` | 30 | Limit on failures from one source IP across all user names (password spraying). 0 disables |
+| `auth.login_lockout_minutes` | 15 | Window (minutes) for both limits above; the lock lifts when old failures leave the window |
+| `auth.password_hash_concurrency` | 4 | Password hashes (scrypt) computed at the same time |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | For PostgreSQL: `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

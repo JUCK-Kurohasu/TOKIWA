@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, String, Text
+from sqlalchemy import JSON, Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from tokiwa.db.base import Base, IdMixin
@@ -19,6 +19,8 @@ class UserRow(IdMixin, Base):
     role: Mapped[str] = mapped_column(String(16), default="analyst")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_login: Mapped[datetime | None] = mapped_column(default=None)
+    # Bumped on password/role change, logout and "revoke sessions"; JWTs carry it as "ver" (#34).
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class ApiTokenRow(IdMixin, Base):

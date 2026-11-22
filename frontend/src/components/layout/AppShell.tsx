@@ -167,8 +167,16 @@ function Topbar() {
         type="button"
         className="rounded-md p-2 text-muted hover:bg-surface-2 hover:text-fg"
         onClick={() => {
-          authStore.logout();
-          navigate("/login");
+          // Server-side logout ends this user's JWTs everywhere (#34). Local state is cleared even if the call
+          // fails (offline, already expired); authStore.logout() itself must not call the API (client.ts calls
+          // it on every 401).
+          void api
+            .post("/auth/logout")
+            .catch(() => undefined)
+            .finally(() => {
+              authStore.logout();
+              navigate("/login");
+            });
         }}
         title={t("common.logout")}
       >

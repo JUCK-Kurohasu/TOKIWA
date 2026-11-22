@@ -21,7 +21,7 @@ Con Docker Compose, `.env` se pasa al contenedor como variables de entorno. Si e
 ### Precauciones de escritura
 
 - **Las listas y los diccionarios se escriben en JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **No defina valores vacíos**. `TOKIWA_SERVER__SECRET_KEY=` se trata como "clave de firma de cadena vacía" (no es lo mismo que no definirla).
+- **No defina valores vacíos** (lo que significa una cadena vacía depende del ajuste). Un `TOKIWA_SERVER__SECRET_KEY=` vacío se trata como no definido y se usa la clave generada en `data_dir/secret.key`. Una clave definida debe tener al menos 32 caracteres; si es más corta, el servidor no arranca.
 - Se recomienda pasar los secretos (claves de API, contraseñas) mediante variables de entorno y no en el YAML.
 
 ### Ejemplo de YAML
@@ -55,13 +55,17 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | Solo si la interfaz se sirve desde otro origen |
 | `server.static_dir` | Ninguno | Interfaz compilada (`frontend/dist`). Si se indica, se sirve en `/` |
 | `server.data_dir` | `./data` | Ubicación de los datos (clave de firma, etc.) |
-| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
+| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT), de al menos 32 caracteres. Si no se define o está vacía, se genera y se guarda en `data_dir/secret.key` (permisos 0600) |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
 | `auth.setup_code_required` | `true` | La configuración inicial (crear el primer administrador) exige el código de un solo uso que aparece en el log de arranque y en `data_dir/setup-code` |
 | `server.max_body_bytes` | 1048576 (1 MiB) | Límite del cuerpo de la petición; si se supera, 413. Se aplica a toda la API salvo la ingesta (ingest) |
 | `server.security_headers` | `true` | Añade CSP, `X-Frame-Options: DENY`, `nosniff` y `Referrer-Policy: no-referrer` a todas las respuestas. Use `false` solo si un proxy aplica su propia política o una UI personalizada no encaja con la CSP |
 | `server.expose_docs` | `true` | Publica la documentación de la API (`/api/docs`, `/api/openapi.json`) sin autenticación. En producción se recomienda `false` |
 | `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Límite del cuerpo para `/api/v1/ingest/`. Un lote mayor recibe 413 y el Gate / agente **descarta** ese lote; súbalo junto con un `batch_size` mayor |
+| `auth.login_max_failures` | 5 | Tras este número de fallos de inicio de sesión para el mismo usuario + IP de origen, se rechazan los intentos durante un tiempo (429). 0 lo desactiva |
+| `auth.login_max_failures_per_ip` | 30 | Límite de fallos desde una IP de origen con cualquier usuario (password spraying). 0 lo desactiva |
+| `auth.login_lockout_minutes` | 15 | Ventana (minutos) de ambos límites; el bloqueo se levanta cuando los fallos antiguos salen de la ventana |
+| `auth.password_hash_concurrency` | 4 | Hashes de contraseña (scrypt) calculados a la vez |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | Para PostgreSQL, `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)

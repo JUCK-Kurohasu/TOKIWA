@@ -5,7 +5,7 @@
 > 「担当」は初期実装の担当モジュール（ルートファイル名）。
 
 共通:
-- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。センサーは `X-Tokiwa-Token: tkw_...`。
+- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。JWT はクレーム `ver` に `users.token_version` を持ち、パスワード・ロール変更／ログアウト／`revoke-sessions` で版数が上がると 401 `token revoked`（`ver` の無い旧 JWT は版数 0 として扱う）。センサーは `X-Tokiwa-Token: tkw_...`。
 - 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`（最大 1,000,000。超過は 422）。
   バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
   独自に `offset` Query を宣言しているルートにも、全ルーターに付く `offset_guard` が同じ上限を課す。
@@ -22,18 +22,20 @@
 |---|---|---|---|
 | GET | /auth/status | public | → `AuthStatus {setup_required, version, setup_code_required}` |
 | POST | /auth/setup | public(初回のみ) | `SetupRequest`（`UserCreate` + `setup_code`。`schemas/auth.py`）→ `TokenResponse`。`auth.setup_code_required`（既定 true）のとき、起動ログと `data_dir/setup-code` に出る 1 回限りのコードが無い・違うと 403。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
-| POST | /auth/login | public | `LoginRequest` → `TokenResponse` |
+| POST | /auth/login | public | `LoginRequest`（username ≤128 / password ≤1024 文字）→ `TokenResponse`。失敗は 401 `invalid credentials`（存在しないユーザーでも同じ時間）。同じユーザー名 × 送信元 IP で `auth.login_max_failures` 回、送信元 IP で `auth.login_max_failures_per_ip` 回失敗すると `auth.login_lockout_minutes` の窓の間 429 + `Retry-After`。成功・失敗を `auth.login.success` / `auth.login.failure` として監査に記録 |
 | GET | /auth/me | user | → `User` |
+| POST | /auth/logout | user | → 204。そのユーザーの **全端末の** JWT を失効（`users.token_version` を上げる）。監査 `auth.logout` |
 | GET | /users | admin | → `User[]` |
 | POST | /users | admin | `UserCreate` → `User`（201。重複 username は 409） |
 | PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
+| POST | /users/{id}/revoke-sessions | admin | → 204。対象ユーザーの JWT をすべて失効（404 = いない）。監査 `user.sessions_revoked` |
 | DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
 | GET | /tokens | admin | → `ApiToken[]` |
 | POST | /tokens | admin | `ApiTokenCreate {name, scopes, allowed_sensor_ids?, allowed_datasets?, expires_in_days?}` → `ApiTokenCreated`（201。平文は一度だけ。scopes 省略時は `[ingest]`（`gate` は明示が必要、監査 #33）、空は 422。`allowed_*` は省略/null=無制限、空配列は 422） |
 | POST | /tokens/{id}/rotate | admin | `ApiTokenRotate {grace_hours=24 (0..720), expires_in_days?}` → `ApiTokenCreated`（201。同じ name/scopes/縛りの新トークン、`rotated_from`=旧 id。旧トークンは grace_hours 後に期限切れ、0 なら即失効。失効済み/期限切れは 409） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |
 
-users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。
+users / tokens の変更はすべて `audit_log` に記録（パスワード・トークン平文は記録しない）。認証イベント: `auth.setup` / `auth.setup.failure`（セットアップコード誤り。送信元 IP 単位で `/auth/login` と同じ 429 制限）/ `auth.login.success` / `auth.login.failure`（details: `client_ip`, `known_user`, `locked`）。
 `ApiToken` は `expires_at`（null=無期限。期限切れは token 認証で 401 `API token expired`）、`created_by`（作成者のユーザー名、CLI は `cli`）、
 `rotated_from` を持つ。CLI `tokiwa token list|revoke|rotate` も同じ処理（`tokiwa.auth.api_tokens`）で監査に actor `cli` を残す。
 

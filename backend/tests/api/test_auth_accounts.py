@@ -121,23 +121,23 @@ async def test_setup_does_not_reopen_when_users_are_gone(
 async def test_concurrent_setup_creates_one_admin(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_hash = auth_routes.hash_password
+    original_hash = auth_routes.hash_password_async
     arrived = 0
     released = asyncio.Event()
 
-    def counting_hash(password: str) -> str:
+    async def counting_hash(password: str) -> str:
         nonlocal arrived
         arrived += 1
         if arrived >= 2:
             released.set()
-        return original_hash(password)
+        return await original_hash(password)
 
     async def gated_lock(session: Any) -> set[str]:
         # Both requests have passed the first "setup done?" check before either takes the lock.
         await asyncio.wait_for(released.wait(), timeout=10)
         return await lock_accounts(session)
 
-    monkeypatch.setattr(auth_routes, "hash_password", counting_hash)
+    monkeypatch.setattr(auth_routes, "hash_password_async", counting_hash)
     monkeypatch.setattr(auth_routes, "lock_accounts", gated_lock)
     code = ensure_setup_code()
     r1, r2 = await asyncio.gather(
