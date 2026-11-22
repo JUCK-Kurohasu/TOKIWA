@@ -4,7 +4,8 @@
 （#133=L03-10, #30=L03-02, #41=L01-06, #65=L09-06, #68=L11-03, #84=L01-07）。
 
 ブランチ `worktree-agent-a7faa5385edeed2b6`（基点 `672f7a5`）。コミット: c218d2d (#133) → a052a36 (#30) → 998950b (#41) →
-cbaf5e4 (#65) → 6553210 (#41 の mypy) → c425ad3 (#68) → 93ffe32 (#84) → 本 NOTES の最終更新。
+cbaf5e4 (#65) → 6553210 (#41 の mypy) → c425ad3 (#68) → 93ffe32 (#84) → 8f85361 (NOTES) → 87dbd14（フロント文言 #133/#84）→
+4608990（シードの正規化・tripped の文書）→ 本 NOTES の最終更新。
 
 ## 対応状況
 
@@ -115,7 +116,7 @@ cbaf5e4 (#65) → 6553210 (#41 の mypy) → c425ad3 (#68) → 93ffe32 (#84) →
 
 ## チェック（最終）
 
-- backend: `uv run pytest` 1544 passed（約 120 秒）、`ruff check` / `ruff format --check` 緑、`mypy src` は既知 4 件のみ
+- backend: `uv run pytest` 1545 passed（約 126 秒）、`ruff check` / `ruff format --check` 緑、`mypy src` は既知 4 件のみ
   （#41 で一度 1 件増やしたが 6553210 で解消）。`python3 scripts/check_wiki.py` OK。
 - frontend（文言のみ変更）: `npm run typecheck`・`npm run lint`・`npx vitest run`（51 passed）・`npm run build` 緑。
 
