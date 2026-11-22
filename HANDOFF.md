@@ -3,11 +3,40 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-11-11（実運用・対 AI 攻撃ツール監査を実施し、指摘を Issue 化。コードは変更していない。第 2 波は未着手のまま）
+最終更新: 2026-11-22（監査の系統 G / I / K を修正。ブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#179（ドラフト、未マージ））
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
+
+## 監査修正 第 1 弾（2026-11-21〜22）— 系統 G API・認証 / I フロントエンド / K 評価・文書
+
+- **何をしたか**: #16 の系統図のうち工数 S の割合が高い 3 系統（36 件）を修正した。**23 件は完全**（PR で Closes）、**13 件は部分**（Refs）、
+  #101 は dependabot の PR JUCK-Kurohasu/TOKIWA#17 に任せて対象外。レーン（ファイル所有で分割）ごとの詳細・要判断・未対応は
+  `docs/handoff/2026-11-21-audit-<レーン>.md`（http-hardening / auth / tokens-roles / frontend / eval-docs）、統合の記録は `…-audit-integration.md`。
+- **完全**: #91 #94 #66 #92 #170 #95 #56 #34 #102 #163 #157（G・I）、#144 #150 #165 #151（I）、#177 #178 #176 #72 #83 #26 #107 #169（K）。
+- **部分（残りは各レーンの NOTES）**: #57（トークン単位レート・保持の既定有効）、#93（`/auth/status` の version・CORS）、#40（protected_cidrs・承認 UI の出所表示）、
+  #33（ポリシーからハニートークン値を外す）、#164（予算の用途別分割）、#167（アラート・インシデントの閲覧記録）、#158（IP 以外の識別子・インシデント要約）、
+  #97（許可ドメインの実行時設定）、#145（遮断後に 2xx が届いたら警告）、#175（NAT/IP 回転・PR 曲線・time-to-first-alert）、#127（残り 3 プロファイル）、
+  #174（感度曲線ほか）、#162（`sync_additive` は列・インデックスの追加だけ。移行機構は未導入）。
+- **共通の土台**: `tokiwa.db.schema_sync.sync_additive`（起動時に既存テーブルへ nullable / server_default 付きの列とインデックスを足す）。
+  既存テーブルに列を足すときは必ず nullable か server_default を付けること。`tests/core/test_schema_upgrade.py` が f993282 時点のスキーマで起動を確かめる。
+- **既定動作の変更（利用者に影響。PR 本文にも列挙）**: 初回セットアップにセットアップコード必須（`auth.setup_code_required`）、ログイン失敗で一時ロック（5 回 / IP 30 回 / 15 分）、
+  `server.secret_key` が 32 文字未満なら起動拒否、`tokiwa token create` の既定スコープが ingest のみ（Gate 用は `--scope ingest --scope gate`）、
+  viewer には生イベントを伏字で返す、Copilot は analyst 以上（`copilot.min_role`）、ボディ上限（API 1 MiB / ingest 32 MiB）と Event の文字列 65,536 文字で切り詰め、
+  CSP などのセキュリティヘッダ、未定義の `/api/*` は JSON 404、未認証の `/health` は version を返さない、Copilot の外部リンクは許可ドメイン以外クリック不可、
+  Sigma の既定パスがパッケージ基準、`eval compare` は比較不能なら終了コード 3。
+- **要判断（ユーザー）**: (1) `server.expose_docs` を本番既定 false にするか（現状 true）。(2) API トークンの既定有効期限（現状無期限。90 日にするなら期限通知とセット）。
+  (3) gate スコープの無いトークンからの `gate.*` を拒否する全体スイッチを作るか（現状は印を付けるだけ）。(4) ログイン失敗ロックはリバースプロキシ配下で
+  `FORWARDED_ALLOW_IPS` 未設定だと全員が同じ IP に見え、他人のアカウントをロックできる（運用での設定が前提）。(5) data-handling レーンが見つけた未登録の問題
+  （`…-audit-integration.md` に列挙。Zeek `username` が伏字にならない等）を Issue 化するか。
+- **チェック**: backend 1459 passed（約 156 秒。「1 分以内」の目標から更に伸びた — `--durations` で遅いテストを洗うこと）、ruff・format 緑、mypy は既知 4 件のみ、
+  frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK。
+- **未検証**: PostgreSQL でのロック（`FOR UPDATE`）、Docker の smoke（`scripts/docker-smoke.sh` の変更は CI で確認）、実 LLM、ARTEX 側の設定名（`TODO(verify)`）。
+- **次の一手（案）**: 残りの系統のうち工数 S が多く高重大度を含むもの — C の #19（未来時刻 1 件で AI 判定が全停止, high/S）、D の #133（カナリア GET 1 回で CRITICAL と遮断提案, high/S）、
+  F の #35（料金表にないモデルで予算が効かない）、E の #63（却下・取り消しが記憶されない）など。系統図（#16）と `docs/audit/2026-11/tools/taxonomy.json` を単位に、
+  ファイル所有でレーンを分ける。**並列 5〜6 体だと利用枠を 1〜2 時間で使い切った（3 回中断）**。各レーンに「Issue ごとにコミット + NOTES 更新」を指示しておけば
+  SendMessage で再開できる。
 
 ## 実運用・対 AI 攻撃ツール監査（2026-11）— 指摘は Issue 化済み
 

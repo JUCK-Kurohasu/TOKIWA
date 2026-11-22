@@ -41,3 +41,14 @@ Issue 化はしていない（要判断: 監査 Issue として追加登録す�
 | 順 | レーン | マージ | 全チェック | 備考 |
 |---|---|---|---|---|
 | 1 | data-handling（#169） | cf788df（ff） | wiki OK | 権限表・保持・本人対応の節に `TODO(integrator)`。#157/#158/#164/#167 の統合後に更新する |
+| 2 | 5 レーンのコミット済み分（途中） | a1548e9 まで | backend 1354 passed / frontend 緑 / CI 緑 | 利用枠の上限で全エージェントが 2 回中断したため、コミット済み分を先に統合。統合で `TokensTab.tsx` が旧 `formatDateTime` を参照（frontend × tokens の意味的衝突）→ `dateTimeTitle` に修正 |
+| 3 | http-hardening / frontend / tokens-roles / eval-docs（完了） | bb12ce6 まで | backend 1432 passed / frontend 緑 | wiki `Configuration*.md` の表の行が衝突 → 両方残す。eval の `parse_mix` に新規 mypy エラー → 修正 |
+| 4 | auth（完了） | 9b21ee4 | backend 1459 passed / ruff・format 緑 / mypy 既知 4 件のみ / frontend 緑 | `api/deps.py`（import）・`cli.py`（typing import と user reset-password / token 作成の並び）・`api-contract.md`・wiki `Configuration*.md` が衝突 → 両方の内容を残して解決 |
+| 5 | Data-Handling ページの `TODO(integrator)` 解消 | 74efb7e | wiki OK | #157（viewer の伏字）・#164・#167（閲覧記録）・#158（data purge/export）・#56（ログイン監査）・#102（ファイル権限）を反映。4 言語 |
+
+## 統合で気づいたこと
+
+- 全体テストの所要時間が 70 秒台から約 2 分 40 秒に伸びた（1459 件。エージェント停止後の単独実行で 156 秒）。AGENTS.md の「1 分以内」を既に超えていたが、
+  さらに伸びた。遅いテストの洗い出し（`pytest --durations=20`）が次の課題。
+- auth レーンからの依頼: SSE の接続中に JWT を失効させても、開いているストリームは切れない（`token_version` の定期再確認が必要。未対応）。
+  TOKIWA 自身への連続ログイン失敗を検知ルールにする件も未対応。
