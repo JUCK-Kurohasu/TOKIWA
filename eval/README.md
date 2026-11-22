@@ -22,7 +22,8 @@ uv run tokiwa eval run --dataset ../eval/datasets/lab-mini.jsonl                
 uv run tokiwa eval run --dataset ... --compare ../eval/runs/<前回> --fail-on-regression
 uv run tokiwa eval run --dataset ... --llm live --budget-usd 0.50                # 実 LLM（費用が発生）
 uv run tokiwa eval compare ../eval/runs/<今回> ../eval/runs/<前回>
-uv run tokiwa eval import-artex <ARTEX traffic> --out ../eval/datasets/artex-x.jsonl --host gate
+uv run tokiwa eval import-artex <ARTEX traffic> --out ../eval/datasets/artex-x.jsonl --host gate \
+    [--since 2026-11-21T09:00:00Z --until 2026-11-21T10:30:00Z] [--split-gap-minutes 30]   # docs/purple-team.md §5
 uv run tokiwa eval info ../eval/datasets/lab-mini.jsonl
 ```
 

@@ -5,6 +5,7 @@
     tokiwa eval compare <run-or-metrics.json> <previous-run-or-metrics.json> [--fail-on-regression]
                         [--allow-mismatch]
     tokiwa eval import-artex <artex traffic> --out eval/datasets/artex-<name>.jsonl [--host gate]
+                             [--since T] [--until T] [--split-gap-minutes 30]
     tokiwa eval info <dataset.jsonl>
 
 ``--llm live`` calls the configured real LLM (cost!). It requires an explicit ``--budget-usd`` which becomes the
@@ -20,11 +21,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
-from tokiwa.eval.artex import DEFAULT_SOURCE_IP, ArtexImportError, import_artex
+from tokiwa.eval.artex import (
+    DEFAULT_SOURCE_IP,
+    ArtexImportError,
+    ImportStats,
+    import_artex,
+    parse_time_bound,
+)
 from tokiwa.eval.dataset import dataset_summary, read_dataset, write_dataset
 from tokiwa.eval.harness import EvalError, ReplayOptions
 from tokiwa.eval.report import (
@@ -202,18 +210,76 @@ def import_artex_cmd(
     source_ip: str = typer.Option(
         DEFAULT_SOURCE_IP, help="Synthetic source IP (ARTEX does not record its own)"
     ),
+    since: str | None = typer.Option(
+        None, help="Keep exchanges at/after this time (unix seconds or ISO 8601; UTC if no offset)"
+    ),
+    until: str | None = typer.Option(None, help="Keep exchanges at/before this time (same formats)"),
+    split_gap_minutes: float | None = typer.Option(
+        None,
+        help="Start a new session (own label #n and source IP) after this many silent minutes, per host. "
+        "ARTEX archives are per host, so separate tasks would otherwise merge into one session",
+    ),
 ) -> None:
     """Convert ARTEX recorded traffic into a labelled dataset (actor=ai_agent) for `tokiwa eval run`."""
+    stats = ImportStats()
     try:
-        events = import_artex(source, source_ip=source_ip, session=session, host=host)
+        events = import_artex(
+            source,
+            source_ip=source_ip,
+            session=session,
+            host=host,
+            since=parse_time_bound(since) if since else None,
+            until=parse_time_bound(until) if until else None,
+            split_gap_seconds=split_gap_minutes * 60 if split_gap_minutes else None,
+            stats=stats,
+        )
     except (ArtexImportError, ValueError, OSError) as exc:
         typer.echo(f"import failed: {exc}", err=True)
         raise typer.Exit(2) from exc
     if not events:
-        typer.echo("no exchanges found", err=True)
+        for line in _empty_import_hints(stats, host):
+            typer.echo(line, err=True)
         raise typer.Exit(1)
-    write_dataset(out, events, {"mode": "artex-import", "source": str(source), "host": host})
-    typer.echo(f"imported {len(events)} exchange(s) -> {out}")
+    meta = {
+        "mode": "artex-import",
+        "source": str(source),
+        "host": host,
+        "since": since,
+        "until": until,
+        "split_gap_minutes": split_gap_minutes,
+        "timing": "approx (1 s resolution, response-completion time)",
+    }
+    write_dataset(out, events, meta)
+    typer.echo(f"imported {len(events)} exchange(s) in {len(stats.sessions)} session(s) -> {out}")
+    for label, count in sorted(stats.sessions.items()):
+        typer.echo(f"  {label}: {count}")
+    typer.echo(
+        "note: ARTEX timestamps are approximate; rhythm (gap/burst) features of this data are importer artefacts"
+    )
+
+
+def _empty_import_hints(stats: ImportStats, host: str | None) -> list[str]:
+    """Different causes need different advice: nothing recorded vs. a filter that removed everything."""
+    if stats.read == 0:
+        return [
+            "no exchanges found in the ARTEX source.",
+            "hint: ARTEX records target traffic only while traffic recording is ON (system setting "
+            "traffic_capture, default OFF; LLM records: llm_record). It may have been OFF during the task — "
+            "enable it before creating the task (docs/purple-team.md §2).",
+        ]
+    if stats.after_host == 0:
+        seen = ", ".join(f"{h} ({n})" for h, n in stats.hosts_seen.most_common(10))
+        return [f"no exchanges for --host {host!r}; hosts in the source: {seen}"]
+    lines = ["no exchanges inside --since/--until"]
+    if stats.first_ts is not None and stats.last_ts is not None:
+        lines.append(f"source covers {_utc(stats.first_ts)} .. {_utc(stats.last_ts)} (UTC, response times)")
+    if stats.no_timestamp:
+        lines.append(f"{stats.no_timestamp} exchange(s) had no timestamp and were dropped by the time filter")
+    return lines
+
+
+def _utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")
 
 
 @app.command("info")

@@ -129,7 +129,8 @@ tokiwa sim ingest   [--server http://localhost:8788] [--token-file PATH] [--prof
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
                 [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
 tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -143,3 +144,5 @@ tokiwa eval info FILE.jsonl
 | `--speed` | 0 = 最快，1 = 实时，10 = 10 倍速 |
 | `--enable-detector` / `--disable-detector` | 强制启用 / 禁用检测器 |
 | `--keep-work` | 保留评估用的临时数据库 |
+| `import-artex --since` / `--until` | 只导入该时间段内的 ARTEX 记录（unix 秒或 ISO 8601；无时区偏移时视为 UTC） |
+| `import-artex --split-gap-minutes` | 按主机，在记录中断 N 分钟以上处拆分为新的会话（使用不同的源 IP）。默认不拆分 |

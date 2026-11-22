@@ -506,6 +506,12 @@ async def run_evaluation(
     clean, truth = split_truth(events)
     work = out_dir / "work"
     results = await replay(clean, work, opts)
+    approx = sum(1 for e in events if e.labels.get("timing") == "approx")
+    if approx:
+        results.notes.append(
+            f"{approx} event(s) have approximate timestamps (ARTEX import: 1 s resolution, response-completion "
+            "time, spread evenly within a second): gap/burst rhythm features on them are importer artefacts"
+        )
     doc: dict[str, Any] = {
         "run": {
             "id": out_dir.name,

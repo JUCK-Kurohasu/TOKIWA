@@ -129,7 +129,8 @@ Setting `--time-scale` below 1 makes the run finish faster, but it changes the r
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
                 [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
 tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -143,3 +144,5 @@ tokiwa eval info FILE.jsonl
 | `--speed` | 0 = as fast as possible, 1 = real time, 10 = 10× speed |
 | `--enable-detector` / `--disable-detector` | Force a detector on / off |
 | `--keep-work` | Keep the temporary DB used for the evaluation |
+| `import-artex --since` / `--until` | Import only ARTEX records in this time window (unix seconds or ISO 8601; UTC if no offset) |
+| `import-artex --split-gap-minutes` | Per host, start a new session (with its own source IP) wherever the recording pauses for N minutes or more. No splitting by default |

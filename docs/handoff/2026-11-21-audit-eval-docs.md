@@ -11,8 +11,8 @@
 | #177 Sigma 既定パス | 完全（/health の degraded 表示のみ他レーン依頼） | `config.default_sigma_rule_dirs()`: パッケージ位置基準の絶対パス（ソース → `<repo>/rules/sigma`、インストール → `<venv>/../rules/sigma` = Docker の `/app/rules/sigma`）。ローダは見つからないディレクトリを ERROR（ストアごとに 1 回）+ `SigmaRuleStore.missing_dirs`。eval: `RunResults/metrics.pipeline.sigma_rules_loaded`・`sigma_rule_dirs_missing`、0 件・欠落時は note。report.md ヘッダに件数。wiki Configuration 4 言語の既定値行 | 9a7c6e4 |
 | #178 compare の比較可能性 | 完全 | metrics.json に `comparability`（dataset sha256・meta の seed/mix/generator_version・llm_mode/provider・detectors_enabled・sigma_rules_loaded・replay バッチ設定・detection/triage/deception 設定値）。`compare_runs` が `comparable`/`mismatches` を返し、CLI は `NOT COMPARABLE` を表示、`--fail-on-regression` で終了コード 3（`--allow-mismatch` で 1/0 判定）。KEY_METRICS に `detection.attack_session_rate_medium_plus`・`alerts.total`（stable, 相対 10%・最低 2）・`alerts.by_detector[<id>]`（stable, 相対 20%・最低 2）。`MetricSpec` NamedTuple 化。report.md に比較不能の明示。CLI wiki 4 言語・eval/README | 7c2a8ba |
 | #176 mock LLM の明示 | 完全（提案 (3)(4) の live 評価・ablation は範囲外） | metrics.llm に `provider`・`measures_llm`・`caveat`、mock 時 `by_tier={"rules(mock)": n}`・`by_tier_requested`。metrics.cost に `estimated_cost_usd`・`estimated_cost_by_model_usd`・`estimated_cost_basis`（`pricing.estimate_cost` × llm.pricing 上書き）。report.md: 要約行に「mock: rule fallback, not LLM quality」、想定費用の別行、LLM 節の見出し・注意書き・モデル別 実費/推定 表。CLI 出力も同様 | 9f14b36 |
-| #175 区間・分母・medium+ | 部分（(1)(2)(3 の件数) 完了。(3) の NAT/IP 回転シミュレーション・(4) PR 曲線・(5) time-to-first-alert・複数シード平均±SD は未着手） | `eval/stats.py`: Clopper–Pearson（log 空間二項 CDF + 二分法）と Wilson を自前実装、閉形式・定義式・対称性・厳密和でテスト。metrics に `intervals.<path>`（x, n, ci_low, ci_high, reference_only=n<30, event 系は clustered）、`detection.attack_session_rate_medium_plus` を主指標、`ai_attribution.fpr`・AUC の正負数、`alerts.attributed_by_ip_fallback`・`per_detector[].ip_fallback`。report.md 要約を「値・x/n・95%CI・参考値」表に、プロファイル別に medium+ と区間。CLI も x/n [CI] と `*`=参考値 | (下記) |
-| #72 / #83 / #26 ARTEX 取り込み | 未着手 | | |
+| #175 区間・分母・medium+ | 部分（(1)(2)(3 の件数) 完了。(3) の NAT/IP 回転シミュレーション・(4) PR 曲線・(5) time-to-first-alert・複数シード平均±SD は未着手） | `eval/stats.py`: Clopper–Pearson（log 空間二項 CDF + 二分法）と Wilson を自前実装、閉形式・定義式・対称性・厳密和でテスト。metrics に `intervals.<path>`（x, n, ci_low, ci_high, reference_only=n<30, event 系は clustered）、`detection.attack_session_rate_medium_plus` を主指標、`ai_attribution.fpr`・AUC の正負数、`alerts.attributed_by_ip_fallback`・`per_detector[].ip_fallback`。report.md 要約を「値・x/n・95%CI・参考値」表に、プロファイル別に medium+ と区間。CLI も x/n [CI] と `*`=参考値 | f1df039 |
+| #72 / #83 / #26 ARTEX 取り込み | #72 完全・#83 完全（enrich の区別は TODO(verify)）・#26 完全（UI 表記は TODO(verify)） | artex.py docstring に「ts=応答完了時刻・1 秒精度」「連番は全タスク・全ホスト共通 mod 10000」「ヘッダ順は Go map 由来で無意味」「アーカイブはホスト単位」「記録は既定 OFF」。全イベントに `labels.timing="approx"`、eval run がその件数を note。同一秒内の 9999→0000 巻き戻りを考慮した並び。`import-artex --since/--until`（unix 秒 / ISO 8601）・`--split-gap-minutes`（ホストごとに無通信 N 分で分割、セッション `#n` と送信元 IP +n）。0 件時は原因別の表示（入力 0 件 → traffic_capture OFF の可能性 / --host → 入力のホスト一覧 / 時間窓 → 入力の時刻範囲）。purple-team.md §2.1（記録 ON の手順と ON/OFF で挙動が変わる注意）・§2.2（演習前のクリア）・§5（新オプション・時刻/連番/ヘッダ順の注意）・§6。CLI wiki 4 言語 | (下記) |
 | #107 ラボ文書 | 未着手 | | |
 | #127 実ツール形プロファイル | 未着手 | | |
 | #174 生成器別の報告 | 未着手 | | |
@@ -67,6 +67,10 @@ mypy: 既知の 4 エラー（detect/context.py:51, db/session.py:39,43, intel/s
   HTTP ステータスを 200 のままにするか 503 にするかは Docker HEALTHCHECK（deploy/healthcheck.py）との兼ね合いで判断を。
 
 ## 未検証事項
+
+- ARTEX 側の記述は監査 findings（L01-01/03/04）の evidence の範囲のみ。ARTEX-JP ソース（`/home/user/artex-jp`）はこの
+  環境に無く、再確認していない。UI 上の設定項目名・「トラフィックのクリア」操作名・設定変更が実行中タスクに効くか・
+  enrich のリクエストを UA で判別できるかは `TODO(verify)` のまま（purple-team.md）。
 
 - #175 time-to-first-alert は未実装。理由: リプレイは時刻を「最後のイベント=現在」へずらし、アラートの created_at は
   処理時刻（壁時計）なので、データ時刻での「攻撃開始→最初の medium+ アラート」には各アラートの起点イベント時刻
