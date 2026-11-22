@@ -455,7 +455,7 @@ function EventsPage() {
             <Table className="table-fixed">
               <THead>
                 <tr>
-                  <TH className="w-[150px]">{L.time}</TH>
+                  <TH className="w-[190px]">{L.time}</TH>
                   <TH className="w-[110px]">{L.kind}</TH>
                   <TH className="w-[150px]">{L.source}</TH>
                   <TH>{L.summary}</TH>

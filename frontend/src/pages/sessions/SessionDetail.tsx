@@ -444,7 +444,7 @@ export function SessionDetailPage() {
               <THead>
                 <tr>
                   <TH className="w-[52px] text-right">#</TH>
-                  <TH className="w-[170px]">{L.time}</TH>
+                  <TH className="w-[190px]">{L.time}</TH>
                   <TH className="w-[96px] text-right">{L.gap}</TH>
                   <TH className="w-[72px]">{L.method}</TH>
                   <TH>{L.path}</TH>
