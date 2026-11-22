@@ -50,7 +50,7 @@ from tokiwa.respond.validate import (
 )
 from tokiwa.runtime import on_startup
 from tokiwa.schemas.common import Page
-from tokiwa.schemas.response import ActionProposal, ActionStatus, ResponseAction
+from tokiwa.schemas.response import ActionProposal, ActionProposer, ActionStatus, ResponseAction
 from tokiwa.schemas.suppressions import SuppressOptions
 from tokiwa.schemas.triage import ActionType
 from tokiwa.util import new_id, utcnow
@@ -62,6 +62,10 @@ EXPIRY_ACTOR = "system:expiry"
 SETTINGS_ACTOR = "system:settings"
 OPEN_STATUSES = (ActionStatus.PROPOSED.value, ActionStatus.APPROVED.value, ActionStatus.ACTIVE.value)
 MAX_REASON_CHARS = 8000
+# Audit #130: later proposals for an approved / active action are kept as notes, never merged into its reason.
+MAX_NOTES = 50
+MAX_NOTE_CHARS = 2000
+MAX_AUDIT_REASON_CHARS = 1000
 
 __all__ = [
     "ActionExecutionError",
@@ -118,6 +122,32 @@ def _append_reason(existing: str, new: str) -> str:
         return existing
     combined = f"{existing}\n---\n{new}" if existing else new
     return combined[:MAX_REASON_CHARS]
+
+
+def _add_note(
+    row: ResponseActionRow, *, reason: str, proposer: str, who: str, v: ValidatedAction, now: datetime
+) -> bool:
+    """Record a later proposal on an approved / active row without touching what was approved (audit #130).
+
+    Bounded (every alert from an attacker merges here): identical reasons are skipped, at most ``MAX_NOTES``
+    (newest kept), each reason capped at ``MAX_NOTE_CHARS``. Returns True when a note was added.
+    """
+    notes = list(row.notes or [])
+    text = reason[:MAX_NOTE_CHARS]
+    if text and (text == row.reason or any(n.get("reason") == text for n in notes)):
+        return False
+    notes.append(
+        {
+            "at": now.isoformat(),
+            "proposed_by": proposer,
+            "by": who[:64],
+            "reason": text,
+            "incident_id": v.incident_id,
+            "alert_id": v.alert_id,
+        }
+    )
+    row.notes = notes[-MAX_NOTES:]
+    return True
 
 
 # ---------------------------------------------------------------- propose
@@ -182,15 +212,22 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
             )
         ).scalar_one_or_none()
         if existing is not None:
-            existing.reason = _append_reason(existing.reason, reason)
-            existing.incident_id = existing.incident_id or v.incident_id
-            existing.alert_id = existing.alert_id or v.alert_id
+            noted = False
+            if existing.status == ActionStatus.PROPOSED.value:
+                existing.reason = _append_reason(existing.reason, reason)
+                existing.incident_id = existing.incident_id or v.incident_id
+                existing.alert_id = existing.alert_id or v.alert_id
+            else:
+                # Approved / active: what the approver saw stays as it was (audit #130).
+                noted = _add_note(
+                    existing, reason=reason, proposer=proposal.proposed_by.value, who=who, v=v, now=now
+                )
             existing.updated_at = now
             await record_audit(
                 who,
                 "response.propose_duplicate",
                 target=existing.id,
-                details={"action_type": v.action_type.value, "target": v.target},
+                details={"action_type": v.action_type.value, "target": v.target, "noted": noted},
                 session=session,
             )
             merged = _schema(existing)
@@ -205,6 +242,10 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
                 params=dict(v.params),
                 reason=reason,
                 proposed_by=proposal.proposed_by.value,
+                # The person behind an API proposal (rule / llm / policy have none). Audit #130.
+                proposed_by_user=actor[:64]
+                if actor and proposal.proposed_by is ActionProposer.USER
+                else None,
                 incident_id=v.incident_id,
                 alert_id=v.alert_id,
                 status=ActionStatus.PROPOSED.value,
@@ -280,9 +321,31 @@ async def approve_action(action_id: str, *, actor: str) -> ResponseAction:
             if row is None:
                 raise ActionNotFound(action_id)
             raise ActionStateError(f"action is {row.status}; only proposed actions can be approved")
-        await record_audit(actor, "response.approve", target=action_id, session=session)
         row = await session.get(ResponseActionRow, action_id, populate_existing=True)
         assert row is not None
+        # Audit #130: freeze what was approved (later proposals become notes, but keep a copy regardless).
+        snapshot = {
+            "action_type": row.action_type,
+            "target": row.target,
+            "params": dict(row.params or {}),
+            "ttl_minutes": row.ttl_minutes,
+            "reason": row.reason,
+            "incident_id": row.incident_id,
+            "alert_id": row.alert_id,
+            "proposed_by": row.proposed_by,
+            "proposed_by_user": row.proposed_by_user,
+            "approved_by": actor[:64],
+            "approved_at": now.isoformat(),
+            "self_approval": bool(row.proposed_by_user) and row.proposed_by_user == actor[:64],
+        }
+        row.result = {**(row.result or {}), "approval_snapshot": snapshot}
+        await record_audit(
+            actor,
+            "response.approve",
+            target=action_id,
+            details={**snapshot, "reason": (row.reason or "")[:MAX_AUDIT_REASON_CHARS]},
+            session=session,
+        )
         approved = _schema(row)
     await bus.publish("action.updated", approved)
     return await _execute(action_id)

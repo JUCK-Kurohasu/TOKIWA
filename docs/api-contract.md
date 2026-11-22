@@ -117,7 +117,7 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 
 ## 対処（`routes/response.py`）・Gate ポリシー（`routes/gate.py`）
 | GET | /response/actions | user | `?status&incident_id&limit&offset` → `Page[ResponseAction]` |
-| GET | /response/actions/{id} | user | → `ResponseAction` |
+| GET | /response/actions/{id} | user | → `ResponseAction`（#130: `proposed_by_user`＝API 提案者、`notes`＝承認後に来た提案、`result.approval_snapshot`） |
 | POST | /response/actions | analyst | `ActionProposal` → `ResponseAction`（status=proposed。重複は既存を返す。検証エラー 422） |
 | POST | /response/actions/{id}/approve | analyst | → `ResponseAction` |
 | POST | /response/actions/{id}/reject | analyst | `{reason?, suppress_hours?, suppress_permanent?}` → `ResponseAction`。抑止（#63）を記録: 指定時は `suppress`、無指定でも `manual_only`（`response.auto_approve_cooldown_minutes`） |

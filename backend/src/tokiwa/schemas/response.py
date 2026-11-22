@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tokiwa.schemas.common import ORMModel, Severity
 from tokiwa.schemas.triage import ActionType
@@ -60,6 +60,15 @@ class ResponseAction(ORMModel):
     expires_at: datetime | None
     reverted_at: datetime | None
     result: dict[str, Any]
+    # Audit #130: who proposed it through the API (None for rule / llm / policy), and later proposals made after
+    # approval (kept apart from ``reason``, which stays what the approver saw).
+    proposed_by_user: str | None = None
+    notes: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def _notes(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 class DecoyRoute(BaseModel):

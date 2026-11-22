@@ -25,7 +25,13 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
   auto_approve_suppressed / approve / execute / execute_failed / reject / revert / revert_failed / expire / suppress /
   suppression_lift`）。
 - バス: 新規提案で `action.proposed`、以降の変化（重複マージ含む）は `action.updated`。
-- 重複: 同一 `(action_type, 正規化 target)` が `proposed / approved / active` なら新規作成せず、理由を追記して既存を返す。
+- 重複: 同一 `(action_type, 正規化 target)` が `proposed / approved / active` なら新規作成せず既存を返す。`proposed` なら理由を追記
+  （incident_id / alert_id が空なら補完）。**`approved` / `active` の行の `reason` は書き換えない**（監査 #130）: 後続の提案は
+  `notes`（`[{at, proposed_by, by, reason, incident_id, alert_id}]`、同文は積まない、最新 50 件・各 2000 文字まで）に積む。
+- 承認時に `result.approval_snapshot`（type・target・params・TTL・reason・incident/alert ID・提案元・`proposed_by_user`・承認者・時刻・
+  `self_approval`）を保存し、監査 `response.approve` の details にも同じ内容（reason は 1000 文字まで）を残す。
+- API からの提案は行の `proposed_by_user` に提案者のユーザー名を残す（rule / llm / policy は null）。承認者と同じなら
+  UI に「自己承認」と表示する（二人承認の強制はまだ無い）。
 - 起動時、`approved` のまま `executed_at` が無い行（実行中にプロセス停止）は `failed` にする（**自動再実行しない**）。
 - 却下・取り消しは **抑止**（下記 1.1）を記録する。抑止中の対象は再提案されない／自動承認されない。
 - 実行直前に現在の設定で **再検証** する（提案後に protected_cidrs を追加した場合などは `failed`）。
@@ -236,7 +242,8 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 
 ## 9. 既知の制約・今後
 
-- 二人承認（提案者と別人の承認）は未実装。必要なら `approve_action` で `actor != 提案者` を強制する。
+- 二人承認（提案者と別人の承認）は未実装。自己承認は `proposed_by_user == approved_by`（UI のバッジ・
+  `approval_snapshot.self_approval`）で見えるようにした（#130）。強制するなら `approve_action` で `actor != proposed_by_user` を拒否する。
 - deception の `create_asset` / `delete_asset` の正式な関数名は deception モジュールと要合意（現状はダックタイピング）。
 - 通知の重複抑制・インシデント重大度の記憶はプロセス内メモリ（複数プロセス構成では共有されない）。
 - `action.proposed` の承認依頼に提案理由（LLM 由来の可能性あり）を含めるのは `notify.include_summary=true` のときだけ。
