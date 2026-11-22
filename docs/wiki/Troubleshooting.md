@@ -10,7 +10,7 @@ UI がビルドされていないか、配信先が設定されていません�
 Docker イメージでは `TOKIWA_SERVER__STATIC_DIR` を上書きしていないか確認してください（既定 `/app/frontend/dist`）。
 
 **初回なのに管理者登録画面ではなくログイン画面が出る**
-初回の管理者登録画面（/setup）は、サーバーの DB にユーザーが 1 人もいないときだけ表示されます。まず状態を確認します。
+初回の管理者登録画面（/setup）は、そのサーバーで一度もセットアップしていないときだけ表示されます（一度セットアップすると、ユーザーが全員いなくなっても再表示されません）。まず状態を確認します。
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -22,6 +22,14 @@ curl -s http://localhost:8788/api/v1/auth/status
   `/login` を直接開くとセットアップが必要でもログイン画面のままでした（現在は /setup に転送されます）。
 - 接続できない → サーバーが動いていません（`cd backend && uv run tokiwa serve`）。古いバージョンの UI は、
   API に繋がらないときもログイン画面を表示していました（現在は「サーバーに接続できません」と表示されます）。
+
+**セットアップ画面で「missing or wrong setup code」になる**
+最初の管理者を作るには、サーバーが起動時にログと `data/setup-code`（Docker では `/data/setup-code`）に出す 1 回限りのコードが必要です。
+ログの `TOKIWA is not set up yet ...` の行にある URL を開くか、ファイルの内容を「セットアップコード」欄に入力します。ファイルが無い場合は、セットアップを試すと作り直されてログに出ます。
+誰も他に接続できないホストでは `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` で無効にもできます（[設定リファレンス](Configuration)）。
+
+**管理者が 1 人もいなくなった（起動ログに「no user has the admin role」）**
+サーバーと同じ設定で `uv run tokiwa user create <名前> --role admin` を実行して管理者を作ります（Docker では `docker compose ... exec tokiwa tokiwa user create ...`）。
 
 **管理者のパスワードを忘れた**
 サーバーと同じ設定で `uv run tokiwa user create <新しい名前> --role admin` を実行して別の管理者を作り、

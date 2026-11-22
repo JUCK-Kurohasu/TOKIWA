@@ -30,7 +30,7 @@ Es el procedimiento de "3. Montar un minilaboratorio y lanzar ataques" de [Inici
 
 ```bash
 docker compose -f lab/compose.yaml up --build -d            # tokiwa + gate + victim
-# Abra http://localhost:8788 y, la primera vez, cree el administrador
+# Abra http://localhost:8788 y, la primera vez, cree el administrador (código: docker compose -f lab/compose.yaml logs tokiwa)
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # Mezcla por defecto
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # Solo agentes de IA

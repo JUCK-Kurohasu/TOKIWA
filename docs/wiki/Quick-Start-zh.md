@@ -36,7 +36,13 @@ cd backend && uv sync                                   # 安装后端依赖
 TOKIWA_SERVER__STATIC_DIR=../frontend/dist uv run tokiwa serve
 ```
 
-在浏览器中打开 <http://localhost:8788>。首次访问会进入 **初始设置页面（/setup）**，在此创建第一个管理员。
+首次启动时，服务器日志中会出现类似下面的一行：
+
+> `TOKIWA is not set up yet. Create the first admin at http://localhost:8788/setup#code=ABCD-EFGH-JKLM-NPQR ...`
+
+在浏览器中打开该 URL，会进入已填好 **Setup code**（设置码）的 **初始设置页面（/setup）**，在此创建第一个管理员。
+如果打开的是 <http://localhost:8788>，请将日志中的设置码（也保存在 `backend/data/setup-code`）填入 **Setup code** 栏。
+设置码只能使用一次，完成设置后即被删除（防止同一网络中的第三者抢先创建管理员）。
 
 - 用户名：3～64 个字符（英文字母、数字以及 `_` `.` `-`）
 - 密码：10 个字符以上

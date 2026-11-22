@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tokiwa.auth.setup_code import ensure_setup_code
 from tokiwa.detect.base import Detector, register_detector, registered_detectors
 from tokiwa.detect.context import DetectionContext
 from tokiwa.detect.engine import get_detection_engine
@@ -28,7 +29,8 @@ async def test_health(client: httpx.AsyncClient) -> None:
 async def test_setup_login_me(client: httpx.AsyncClient) -> None:
     assert (await client.get("/api/v1/auth/status")).json()["setup_required"] is True
     r = await client.post(
-        "/api/v1/auth/setup", json={"username": "admin", "password": "correct-horse-battery"}
+        "/api/v1/auth/setup",
+        json={"username": "admin", "password": "correct-horse-battery", "setup_code": ensure_setup_code()},
     )
     assert r.status_code == 200
     assert (await client.get("/api/v1/auth/status")).json()["setup_required"] is False

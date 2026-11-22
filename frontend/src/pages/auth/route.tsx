@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { ApiError, api } from "@/api/client";
 import { BrandMark } from "@/components/common/BrandMark";
@@ -45,6 +45,8 @@ const strings = {
     password: "パスワード",
     passwordHint: "10文字以上",
     createAdmin: "管理者を作成",
+    setupCode: "セットアップコード",
+    setupCodeHint: "サーバーの起動ログ、またはデータディレクトリの setup-code ファイルに書かれています",
   },
   en: {
     login: "Sign in",
@@ -55,28 +57,49 @@ const strings = {
     password: "Password",
     passwordHint: "At least 10 characters",
     createAdmin: "Create admin",
+    setupCode: "Setup code",
+    setupCodeHint:
+      "Printed in the server log at startup and stored in the setup-code file in the data directory",
   },
 };
 
-function CredentialsForm({ mode }: { mode: "login" | "setup" }) {
+/** The setup URL printed by the server carries the code in the fragment (never sent to the server / logs). */
+function codeFromHash(hash: string): string {
+  return new URLSearchParams(hash.replace(/^#/, "")).get("code") ?? "";
+}
+
+function CredentialsForm({ mode, needsCode = false }: { mode: "login" | "setup"; needsCode?: boolean }) {
   const L = useLocal(strings);
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
   const [username, setUsername] = useState(mode === "setup" ? "admin" : "");
   const [password, setPassword] = useState("");
+  const [setupCode, setSetupCode] = useState(() => (mode === "setup" ? codeFromHash(location.hash) : ""));
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+
+  // Drop #code=... from the address bar (history) once it has been read.
+  useEffect(() => {
+    if (mode === "setup" && location.hash) {
+      navigate(
+        { pathname: location.pathname, search: location.search },
+        { replace: true, state: location.state },
+      );
+    }
+  }, [mode, location.hash, location.pathname, location.search, location.state, navigate]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post<TokenResponse>(mode === "login" ? "/auth/login" : "/auth/setup", {
-        username,
-        password,
-      });
+      const res = await api.post<TokenResponse>(
+        mode === "login" ? "/auth/login" : "/auth/setup",
+        mode === "setup"
+          ? { username, password, setup_code: setupCode || undefined }
+          : { username, password },
+      );
       authStore.login(res.access_token, res.user);
       await qc.invalidateQueries({ queryKey: ["auth", "status"] });
       const from = (location.state as { from?: string } | null)?.from;
@@ -110,8 +133,26 @@ function CredentialsForm({ mode }: { mode: "login" | "setup" }) {
           placeholder={mode === "setup" ? L.passwordHint : undefined}
         />
       </div>
+      {mode === "setup" && needsCode ? (
+        <div>
+          <Label htmlFor="setup-code">{L.setupCode}</Label>
+          <Input
+            id="setup-code"
+            value={setupCode}
+            onChange={(e) => setSetupCode(e.target.value)}
+            autoComplete="one-time-code"
+            spellCheck={false}
+            placeholder="XXXX-XXXX-XXXX-XXXX"
+          />
+          <p className="mt-1 text-xs text-muted">{L.setupCodeHint}</p>
+        </div>
+      ) : null}
       {error ? <ErrorState error={error} /> : null}
-      <Button type="submit" className="w-full" disabled={busy || !username || !password}>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={busy || !username || !password || (mode === "setup" && needsCode && !setupCode)}
+      >
         {mode === "login" ? L.login : L.createAdmin}
       </Button>
     </form>
@@ -147,12 +188,13 @@ function LoginPage() {
 
 function SetupPage() {
   const L = useLocal(strings);
+  const status = useAuthStatus();
   const { pending, to } = useAuthPageRedirect("setup");
   if (pending) return <PendingFrame />;
   if (to) return <Navigate to={to} replace />;
   return (
     <AuthFrame title={L.setup} subtitle={L.setupHint}>
-      <CredentialsForm mode="setup" />
+      <CredentialsForm mode="setup" needsCode={status.data?.setup_code_required ?? true} />
     </AuthFrame>
   );
 }

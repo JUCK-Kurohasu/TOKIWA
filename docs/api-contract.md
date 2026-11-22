@@ -16,14 +16,14 @@
 ## 認証・ユーザー（`routes/auth.py` 実装済, `routes/users.py`, `routes/tokens.py`）
 | Method | Path | 権限 | 入出力 |
 |---|---|---|---|
-| GET | /auth/status | public | → `AuthStatus` |
-| POST | /auth/setup | public(初回のみ) | `UserCreate` → `TokenResponse` |
+| GET | /auth/status | public | → `AuthStatus {setup_required, version, setup_code_required}` |
+| POST | /auth/setup | public(初回のみ) | `SetupRequest`（`UserCreate` + `setup_code`。`schemas/auth.py`）→ `TokenResponse`。`auth.setup_code_required`（既定 true）のとき、起動ログと `data_dir/setup-code` に出る 1 回限りのコードが無い・違うと 403。一度セットアップしたら（ユーザーが 0 人になっても）再開しない（409）。同時実行でも作られる管理者は 1 人 |
 | POST | /auth/login | public | `LoginRequest` → `TokenResponse` |
 | GET | /auth/me | user | → `User` |
 | GET | /users | admin | → `User[]` |
 | POST | /users | admin | `UserCreate` → `User`（201。重複 username は 409） |
-| PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409） |
-| DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409） |
+| PATCH | /users/{id} | admin | `UserUpdate {role?, password?}`（`schemas/users.py`）→ `User`。最後の admin は降格不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
+| DELETE | /users/{id} | admin | → 204。自分自身は削除不可（400）、最後の admin は削除不可（409。同時実行でも直列化）。待っている間に自分が降格・削除されていたら 403 |
 | GET | /tokens | admin | → `ApiToken[]` |
 | POST | /tokens | admin | `ApiTokenCreate` → `ApiTokenCreated`（201。平文は一度だけ。scopes 空は 422） |
 | DELETE | /tokens/{id} | admin | revoke → 204（冪等。行は監査のため残す） |

@@ -30,7 +30,7 @@ TOKIWA 附带用于试验检测的 **实验环境**、**攻击流量模拟器** 
 
 ```bash
 docker compose -f lab/compose.yaml up --build -d            # tokiwa + gate + victim
-# 打开 http://localhost:8788，首次访问时创建管理员
+# 打开 http://localhost:8788，首次访问时创建管理员（设置码: docker compose -f lab/compose.yaml logs tokiwa）
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # 默认混合流量
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # 仅 AI 智能体

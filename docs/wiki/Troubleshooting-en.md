@@ -10,7 +10,7 @@ start the server with `TOKIWA_SERVER__STATIC_DIR=../frontend/dist`. During devel
 In the Docker image, check that you haven't overridden `TOKIWA_SERVER__STATIC_DIR` (default `/app/frontend/dist`).
 
 **The login screen appears instead of the admin setup screen on first start**
-The first-time admin setup screen (/setup) is shown only while the server's database has no users at all. Check the state first.
+The first-time admin setup screen (/setup) is shown only until that server has been set up once (after that, it does not come back even if every user is deleted). Check the state first.
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -22,6 +22,14 @@ curl -s http://localhost:8788/api/v1/auth/status
   when `/login` was opened directly, even when setup was needed (it now redirects to /setup).
 - No connection → the server is not running (`cd backend && uv run tokiwa serve`). Older versions of the UI also showed the login screen
   when the API was unreachable (it now shows "Cannot reach the server").
+
+**The setup screen says "missing or wrong setup code"**
+Creating the first admin needs the single-use code that the server writes at startup to its log and to `data/setup-code` (`/data/setup-code` in Docker).
+Open the URL in the `TOKIWA is not set up yet ...` log line, or type the file's content into the **Setup code** field. If the file is missing, a setup attempt creates a new one and logs it.
+On a host nobody else can reach, you can turn it off with `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` ([Configuration reference](Configuration-en)).
+
+**No admin is left (startup log says "no user has the admin role")**
+With the same configuration as the server, run `uv run tokiwa user create <name> --role admin` (in Docker: `docker compose ... exec tokiwa tokiwa user create ...`).
 
 **I forgot the admin password**
 With the same configuration as the server, run `uv run tokiwa user create <new name> --role admin` to create another admin,

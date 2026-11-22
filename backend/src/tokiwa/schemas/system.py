@@ -46,6 +46,8 @@ class TokenResponse(BaseModel):
 class AuthStatus(BaseModel):
     setup_required: bool
     version: str
+    # True while setup is pending and POST /auth/setup needs the one-time code from the server log.
+    setup_code_required: bool = False
 
 
 class ApiTokenScope(StrEnum):

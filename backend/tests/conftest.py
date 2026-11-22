@@ -89,8 +89,11 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 @pytest.fixture
 async def admin_headers(client: httpx.AsyncClient) -> dict[str, str]:
+    from tokiwa.auth.setup_code import ensure_setup_code
+
     r = await client.post(
-        "/api/v1/auth/setup", json={"username": "admin", "password": "correct-horse-battery"}
+        "/api/v1/auth/setup",
+        json={"username": "admin", "password": "correct-horse-battery", "setup_code": ensure_setup_code()},
     )
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
