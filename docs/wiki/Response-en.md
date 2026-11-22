@@ -15,7 +15,7 @@ proposed ──approve──▶ approved ──execution succeeds──▶ activ
 
 | Operation | Who | Notes |
 |---|---|---|
-| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, the reason is appended to it instead of creating a new one |
+| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, no new one is created. While it awaits approval the reason is appended; after approval the reason is left as approved and the new proposal is recorded separately ("proposals received after approval") |
 | Approve / reject | `analyst` or higher | Approving executes the action immediately |
 | Revert | `analyst` or higher | Actions that are `active` and revertible |
 | Expire | Automatic (checked every 30 seconds) | Lifted once the TTL has passed |
@@ -85,7 +85,7 @@ response:
 
 The approver of an auto-approved response action is recorded as `policy`. Think carefully before auto-approving blocks (`block_ip`), because false positives have a large impact.
 
-> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase).
+> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase). An action approved by the same user who proposed it in the UI is labelled "Self-approved", and what was approved (reason, target, TTL, etc.) is kept in the audit log and in the action's record.
 
 ## Reject, revert and suppression (stopping re-proposals)
 

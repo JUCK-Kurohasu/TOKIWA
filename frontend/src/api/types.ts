@@ -285,6 +285,19 @@ export interface ResponseAction {
   expires_at: string | null;
   reverted_at: string | null;
   result: Record<string, unknown>;
+  /** Audit #130: username behind an API proposal (null for rule / llm / policy). */
+  proposed_by_user?: string | null;
+  /** Audit #130: proposals that arrived after approval (the reason stays what the approver saw). */
+  notes?: ActionNote[];
+}
+
+export interface ActionNote {
+  at: string;
+  proposed_by: "rule" | "llm" | "user" | "policy";
+  by: string;
+  reason: string;
+  incident_id: string | null;
+  alert_id: string | null;
 }
 
 export type DeceptionKind = "honeytoken" | "decoy_path" | "ai_canary" | "labyrinth";

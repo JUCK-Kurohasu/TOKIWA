@@ -15,7 +15,7 @@ proposed (propuesta) ──aprobar──▶ approved ──ejecución correcta�
 
 | Operación | Quién | Observaciones |
 |---|---|---|
-| Proponer | LLM (triaje) / reglas / usuario | Si ya existe una propuesta del mismo tipo y para el mismo objetivo, no se crea otra: se añade el motivo a la existente |
+| Proponer | LLM (triaje) / reglas / usuario | Si ya existe una propuesta del mismo tipo y para el mismo objetivo, no se crea otra. Mientras espera aprobación se añade el motivo; tras la aprobación el motivo queda como se aprobó y la nueva propuesta se registra aparte ("propuestas recibidas tras la aprobación") |
 | Aprobar / rechazar | `analyst` o superior | Al aprobarla, se ejecuta de inmediato |
 | Revertir | `analyst` o superior | Acciones en estado `active` que admiten reversión |
 | Vencimiento | Automático (comprobación cada 30 segundos) | Se levanta al superar el TTL |
@@ -85,7 +85,7 @@ response:
 
 En las acciones de respuesta aprobadas automáticamente, el aprobador se registra como `policy`. La aprobación automática de bloqueos (`block_ip`) debe decidirse con cautela, porque un falso positivo tiene un impacto grande.
 
-> La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo).
+> La "aprobación por dos personas", en la que el proponente y el aprobador deben ser personas distintas, todavía no se exige en v0.1 (está previsto añadirla como opción de configuración en la próxima fase de desarrollo). Una acción aprobada por el mismo usuario que la propuso en la interfaz se marca como "Autoaprobada", y lo aprobado (motivo, objetivo, TTL, etc.) queda en el registro de auditoría y en el registro de la acción.
 
 ## Rechazo, reversión y supresión (detener nuevas propuestas)
 
