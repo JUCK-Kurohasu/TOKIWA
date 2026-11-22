@@ -14,7 +14,7 @@
 | #157 | 完全 | viewer にはイベントを伏字済み射影で返す（403 ではなく射影なので viewer の画面は壊れない）。`tokiwa/api/visibility.py`。対象: events 一覧/詳細、sessions 詳細の events、alerts 詳細の evidence、deception trips（バイパス経路も塞いだ）。伏字: query・request_body・ヘッダ値（UA/host/content-type/accept/content-length 以外）・referrer のクエリ・raw・Gate 以外の message・cmdline・llm_app.prompt・deception.token。フロントの body 整形は JSON.parse 失敗時に原文表示なので崩れない（確認済み）。wiki Web-UI ×4 にロール表を追記 | 0cd2e99 |
 | #164 | 部分 | `copilot.min_role`（既定 analyst、viewer/admin に変更可）未満は会話作成・送信が 403（既存会話の閲覧は可）。ユーザー別（user.id キー）の送信レート `copilot.messages_per_minute`（既定 6/分、0=無制限）超過で 429 + Retry-After（ストリーム開始前に判定、409 等の拒否は枠を消費しない）。UI は既存の ApiErrorState で 403/429 を表示（送信時に会話作成→403 を `sendError` で表示することをコード上で確認） | 1b995b5 |
 | #167 | 部分 | 新テーブル `access_log`（`db/models/access.py`）と `tokiwa/access_log.py`。events 一覧/詳細・sessions 一覧/詳細・LLM 呼び出し詳細・Copilot ツール実行を actor/role/route/target/filter/件数で記録。同一 actor(id)+route+target+filter は 5 分窓で 1 行（最初だけ INSERT、以降メモリ加算→窓切替・閲覧前に UPDATE で書き戻し）。開いている窓は 5000 キーで上限。管理者向け `GET /api/v1/audit/access` | d333ddd |
-| #158 | 部分 | `tokiwa data purge [--ip] [--session] [--before] [--yes]`（既定 dry run）/ `tokiwa data export ... [--out]`（JSONL、600）。新ファイル `tokiwa/data_cli.py`、cli.py には登録 1 行。events / actor_sessions / deception_trips は削除、alerts は details を消去（行は残す）、llm_calls は本文（request_redacted / response_text）のみ NULL（費用は残す）。LLM 本文の照合は語境界つき正規表現（10.0.0.1≠10.0.0.15）＋ related.alert_id。dry run を含め監査 `data.purge(.dry_run)` / `data.export`（actor cli） | (このコミット) |
+| #158 | 部分 | `tokiwa data purge [--ip] [--session] [--before] [--yes]`（既定 dry run）/ `tokiwa data export ... [--out]`（JSONL、600）。新ファイル `tokiwa/data_cli.py`、cli.py には登録 1 行。events / actor_sessions / deception_trips は削除、alerts は details を消去（行は残す）、llm_calls は本文（request_redacted / response_text）のみ NULL（費用は残す）。LLM 本文の照合は語境界つき正規表現（10.0.0.1≠10.0.0.15）＋ related.alert_id。dry run を含め監査 `data.purge(.dry_run)` / `data.export`（actor cli） | bc1531d |
 
 ### #40 で残したもの（部分の理由）
 - (2) 後半「低信頼ソースのみで構成されたインシデントからは block 提案を作らない」: 提案は `triage/service.py`（frontend
@@ -126,7 +126,16 @@
   の入力欄（任意）。
 - triage/respond: 上記「低信頼のみのインシデントから block を提案しない」。
 
+## 検証結果（最終）
+
+- backend: `uv run pytest -q` 全件成功（exit 0、約 94 秒。新規テストの合計は数秒）、`ruff check` / `ruff format --check` OK、
+  `mypy src` は既知の 4 エラーのみ（新規なし）。
+- frontend: `npm run typecheck` / `lint` / `build` / `npx vitest run`（24 件）OK。
+- wiki: `python3 scripts/check_wiki.py` OK。
+
 ## 未検証事項
 
+- ラボ（docker compose）での Gate のトークンファイル再読込は実機未確認（単体テストのみ）。
+- PostgreSQL での `access_log` / `data purge` は未確認（SQLite のみ）。
 - 実 LLM のトリアージが `ingest.trust=low` ラベルを見て提案を控えるかは未検証（ラベルは evidence に含まれるが、
   プロンプトで意味付けしていない）。
