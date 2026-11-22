@@ -39,6 +39,11 @@ The key is never written to logs, the audit log, or LLM input.
 After setting it, you can check it with **LLM → Settings → Connection test** (it makes one minimal structured call per tier, fast and deep, which counts against the budget and is audited).
 If the result's **Provider** is `mock`, no real API was called (the provider setting may still be `mock`). "Current status" shows the provider actually in use as well as the configured one.
 
+While the provider actually in use is `mock` (including the fallback of `auto` when no API key is set) or the provider is unavailable,
+a **"No LLM is in use"** strip is always shown at the top of every screen. Triage results returned by the mock show **mock (no LLM used)**
+instead of a model name and tier in the alert / incident "LLM triage" panel and in the LLM **Calls** log. Response proposals made from a mock verdict
+are labelled **Rule** instead of **LLM** (proposals created before this change keep their label).
+
 ## Models and tiers
 
 | Setting | Default | Description |

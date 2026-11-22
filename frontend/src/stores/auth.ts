@@ -55,6 +55,7 @@ export const authStore = {
 };
 
 export function useAuth(): State & { isAuthenticated: boolean } {
-  const s = useSyncExternalStore(authStore.subscribe, authStore.snapshot);
+  // Third argument: server snapshot, so components using auth can be rendered in tests (renderToStaticMarkup).
+  const s = useSyncExternalStore(authStore.subscribe, authStore.snapshot, authStore.snapshot);
   return { ...s, isAuthenticated: !!s.token };
 }

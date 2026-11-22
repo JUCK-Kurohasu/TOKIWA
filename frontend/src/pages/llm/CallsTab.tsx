@@ -33,6 +33,8 @@ const strings = {
     detail: "LLM 呼び出しの詳細",
     adminOnly: "入力・出力の詳細は管理者のみ閲覧できます。",
     provider: "プロバイダ",
+    mock: "mock（LLM 未使用）",
+    mockRequested: "mock が応答（LLM 未使用）。設定上のモデル: {model}",
     promptVersion: "プロンプト版",
     cache: "キャッシュ（読込 / 書込）",
     webSearch: "Web 検索回数",
@@ -56,6 +58,8 @@ const strings = {
     detail: "LLM call detail",
     adminOnly: "Request/response details are visible to administrators only.",
     provider: "Provider",
+    mock: "mock (no LLM used)",
+    mockRequested: "Answered by mock (no LLM used). Configured model: {model}",
     promptVersion: "Prompt version",
     cache: "Cache (read / write)",
     webSearch: "Web searches",
@@ -179,11 +183,21 @@ function CallDetailDialog({ id, row, onClose }: { id: string; row?: LLMCall; onC
                 [L.provider, c.provider],
                 [
                   L.model,
-                  <span key="m" className="font-mono text-xs">
-                    {c.model}
-                  </span>,
+                  c.provider === "mock" ? (
+                    <span
+                      key="m"
+                      className="text-xs text-sev-medium"
+                      title={L.mockRequested.replace("{model}", c.model)}
+                    >
+                      {L.mock}
+                    </span>
+                  ) : (
+                    <span key="m" className="font-mono text-xs">
+                      {c.model}
+                    </span>
+                  ),
                 ],
-                [L.tier, c.tier],
+                [L.tier, c.provider === "mock" ? "-" : c.tier],
                 [
                   L.promptVersion,
                   <span key="p" className="font-mono text-xs">
@@ -318,10 +332,24 @@ export function CallsTab() {
                         </button>
                       </TD>
                       <TD className="text-xs">{c.purpose}</TD>
+                      {/* #151: a mock answer must not read as "deep / <real model> / ok". */}
                       <TD>
-                        <Badge tone={c.tier === "deep" ? "ai" : "neutral"}>{c.tier}</Badge>
+                        {c.provider === "mock" ? (
+                          <Badge tone="warn">mock</Badge>
+                        ) : (
+                          <Badge tone={c.tier === "deep" ? "ai" : "neutral"}>{c.tier}</Badge>
+                        )}
                       </TD>
-                      <TD className="font-mono text-[11px]">{c.model}</TD>
+                      {c.provider === "mock" ? (
+                        <TD
+                          className="text-[11px] text-sev-medium"
+                          title={L.mockRequested.replace("{model}", c.model)}
+                        >
+                          {L.mock}
+                        </TD>
+                      ) : (
+                        <TD className="font-mono text-[11px]">{c.model}</TD>
+                      )}
                       <TD>
                         <CallStatusBadge status={c.status} />
                       </TD>

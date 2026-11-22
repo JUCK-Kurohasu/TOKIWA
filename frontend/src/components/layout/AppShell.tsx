@@ -9,6 +9,7 @@ import { zoneName } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
 import { appRoutes, SECTION_ORDER } from "@/routes";
 import { authStore, useAuth } from "@/stores/auth";
+import { LlmModeBanner } from "./LlmModeBanner";
 
 function useTheme(): [boolean, () => void] {
   const [dark, setDark] = useState(() => {
@@ -183,6 +184,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <LlmModeBanner />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

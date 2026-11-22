@@ -39,6 +39,11 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 设置完成后，可以通过 **LLM → Settings → Connection test**（连接测试）进行检查（对 fast / deep 每个 tier 各进行 1 次最小的结构化调用，计入预算和审计）。
 如果结果中的 **Provider**（提供方）为 `mock`，说明没有调用真实 API（提供方设置可能仍为 `mock`）。“Current status”（当前状态）除了设置值，还会显示实际在用的提供方。
 
+当实际在用的提供方为 `mock`（包括 `auto` 在没有 API 密钥时的回退）或提供方不可用时，
+所有页面顶部都会一直显示 **“No LLM is in use”**（未使用 LLM）提示条。mock 返回的分诊结果在告警 / 安全事件的 “LLM triage” 面板和 LLM 的 **Calls**（调用记录）中，
+会显示为 **mock (no LLM used)**（mock，未使用 LLM），而不是模型名称和层级。根据 mock 判定生成的处置提议会标记为 **Rule**（规则），而不是 **LLM**
+（此变更之前创建的提议保持原标记）。
+
 ## 模型与层级
 
 | 设置 | 默认 | 说明 |

@@ -10,8 +10,8 @@
 | #144 | 完全（b770d18） | `safeHref` を `linkPolicy.ts` に移し、内部リンクは「単一の `/` で始まり、バックスラッシュ・空白（タブ/NBSP 含む）・制御/書式文字なし、URL パーサで解決した origin がページと一致、パスが既知ルートの許可リスト」のときだけ。ルーターにはパース後のパスを渡す。`/\x.example` `/\/x.example` `/\t/x.example` `\\x.example` 等のテスト、許可リストが実ルートと一致するテスト | (1) |
 | #97 | 部分 | (1) 外部リンクは表示名の横に実ホスト名（punycode）を常時表示、URL 形の表示名とリンク先のホストが違えば警告。(2) https かつ許可ドメイン（NVD/MITRE/CISA/JVN/OSV/FIRST）以外はクリック不可のテキスト＋ホスト名＋「リンク無効」（既定 ON、`externalLinks="any"` で解除）。(3) Copilot システムプロンプトに「ツール結果由来の URL を出力しない・データを URL に埋め込まない・リンクは TOKIWA 相対パスと既知参照のみ」を追加（`copilot.chat@2026-11-21.1`）。**残り**: finding の (3) 後半「出力後処理で tool_result 内に出現した URL を含むリンクを無効化」はサーバー側の後処理で未実装（フロントの許可リストで実害はほぼ塞がるが、許可ドメイン上の URL が tool_result 由来かは区別していない） | b770d18 |
 | #150 | 完全（フロント部分） | `components/common/invisible.ts`（判定・分割・文字列エスケープ・JSON の `\uXXXX` 化・オブジェクト走査）と `SafeText.tsx`（`<SafeText>`: Cc/Cf/Cs/Zl/Zp + ハングルフィラーを警告色の `⟨U+XXXX⟩` に置換し `unicode-bidi: plaintext` のクラスで包む、`<InvisibleCharsBadge>`: 「不可視/双方向制御文字を含む」）。適用先: EventDetail（要約行・バッジ・リクエスト行・ヘッダ・ボディ・KV・プロンプト・メッセージ）、EventInspector（概要・HTTP・ドロワー見出し・バッジ）、イベント一覧の概要列（バッジ付き）、アラート詳細（タイトル・説明・証拠=EventDetail）、アラート/インシデント一覧と詳細のタイトル（検知器がパス等をタイトルに入れるため）、ライブフィード、セッション一覧/詳細（UA・リクエスト表）、Copilot（回答本文・コード・ツール入力/要約）、`JsonView`（全画面の生 JSON を `\u202E` 形式で表示、JSON として有効なまま）。表示だけを置換し、絞り込み・検索の値は元の文字列。サーバー側の検知シグナル追加は系統 B（下記） | b5aad92 |
-| #165 | 完全 | `lib/timezone.ts`（表示 TZ = local/utc、localStorage は try/catch、`zoneName`）。`formatDateTime` は常にゾーン名付き（`timeZoneName: "short"`、`hourCycle: "h23"`）で表示 TZ に従う。`formatClock` / `formatTick`（グラフ軸。`getMonth()` 等のローカル依存を Intl に置換）も表示 TZ に従う。`<Time>`（`components/common/Time.tsx`）と `dateTimeTitle()` でツールチップに ISO UTC を併記し、`{formatDateTime(x)}` / `title={formatDateTime(x)}` の 40 か所余りを一括置換。ヘッダに TZ 切替ボタン（現在のゾーン名を表示）。TZ は言語コンテキストに載せたので `useLocal` を使う画面は切替で再描画される。イベント画面のカスタム期間入力は表示 TZ で解釈しラベルにゾーン名。報告用コピー（インシデント要約のエクスポート）は UI に存在しないため対象なし | (3) |
-| #151 | 未着手 | | |
+| #165 | 完全 | `lib/timezone.ts`（表示 TZ = local/utc、localStorage は try/catch、`zoneName`）。`formatDateTime` は常にゾーン名付き（`timeZoneName: "short"`、`hourCycle: "h23"`）で表示 TZ に従う。`formatClock` / `formatTick`（グラフ軸。`getMonth()` 等のローカル依存を Intl に置換）も表示 TZ に従う。`<Time>`（`components/common/Time.tsx`）と `dateTimeTitle()` でツールチップに ISO UTC を併記し、`{formatDateTime(x)}` / `title={formatDateTime(x)}` の 40 か所余りを一括置換。ヘッダに TZ 切替ボタン（現在のゾーン名を表示）。TZ は言語コンテキストに載せたので `useLocal` を使う画面は切替で再描画される。イベント画面のカスタム期間入力は表示 TZ で解釈しラベルにゾーン名。報告用コピー（インシデント要約のエクスポート）は UI に存在しないため対象なし | 5b522f5 |
+| #151 | 完全 | llm_calls には既に `provider` 列があり実際のプロバイダ名（`self.provider.name`）が入っていたので DB 列追加は不要と判断。`TriageRecord` に `provider: str \| None = None`（JSON 保存なので列追加なし。旧データは None）を追加し、`_Attempt` 経由で `StructuredResult.provider` を保存。対処提案の `proposed_by` は `tier == rules` **または provider == mock** のとき `rule`（`record_is_rule_based()`）。UI: TriagePanel は provider=mock のとき見出しに「mock（LLM 未使用）」バッジ、ティア・モデル欄も同表示（設定上のモデル名は出さない）、注記。LLM 呼び出し一覧/詳細は provider=mock の行でティアを `mock`、モデルを「mock（LLM 未使用）」（設定上のモデル名はツールチップ）。AppShell に常設バナー `LlmModeBanner`（`/llm/config` の `active_provider == mock`、または `available == false`。provider=mock 設定と auto のフォールバックで文言を分ける。キャッシュ 5 分・LLM 設定保存で無効化） | (4) |
 | #145 | 未着手 | | |
 | #101 | 対象外 | dependabot の PR JUCK-Kurohasu/TOKIWA#17 が vitest/tinypool を上げているため、このレーンではやらない | — |
 
@@ -23,6 +23,13 @@
   ベンダーのアドバイザリ等をクリックしたい運用なら `EXTERNAL_LINK_ALLOWLIST`（`frontend/src/components/common/linkPolicy.ts`）に
   ドメインを追加する。実行時設定（管理画面）にはしていない（要ビルド）。github.com は誰でもページを置けるので意図的に外した。
 - 内部リンク許可リストから `/login` `/setup` を外した（Copilot が誘導する理由がない）。
+- **#151 `proposed_by`**: mock の判定から作られる提案は `rule` になる（以前は `llm`）。自動承認は `proposed_by` を見ていない
+  （`respond/policy.auto_approve_allowed` は action_type のみ）ので挙動の変化は表示と監査ログの actor だけ。既に DB にある mock 由来の
+  `llm` 提案は書き換えていない（必要なら `llm_calls.provider='mock'` と突き合わせて手動で）。
+- **#151 インシデントの actor_type**: `triage/service.py` は `tier != rules` のとき LLM 判定の actor_type をインシデントに反映する。
+  mock の判定（中身はルール判定）でも反映され続ける。既存テスト（`test_triage_integration`）が mock 経由の反映に依存しているため変更していない。
+  mock をルールと同じ扱いにするかは要判断。
+- **#165 表示 TZ の既定はローカル**（従来どおり）。ゾーン名が常に付くので取り違えは防げる。UTC を既定にしたい組織は要判断。
 
 ## 失敗した試み
 
@@ -33,7 +40,11 @@
 
 ## 担当外の変更
 
-- なし（`copilot/prompts.py` はレーン所有）。
+- `backend/src/tokiwa/schemas/triage.py`（共有 schemas の既存モデル）: `TriageRecord.provider`（default None）を追加。
+  `frontend/src/api/types.ts` の `TriageRecord` も更新。
+- `frontend/src/stores/auth.ts`: `useSyncExternalStore` に server snapshot（第 3 引数）を追加（テストで `renderToStaticMarkup` するため。
+  ブラウザでの挙動は不変）。
+- それ以外（`copilot/prompts.py`、`triage/service.py` の proposer 部分、frontend/src）はレーン所有。
 
 ## 他レーンへの依頼
 

@@ -154,6 +154,8 @@ export interface TriageRecord {
   result: TriageResult;
   tier: string;
   model?: string | null;
+  /** Provider that actually answered; "mock" = no LLM was called. Null for rules / older records. */
+  provider?: string | null;
   prompt_version: string;
   llm_call_id?: string | null;
   escalated: boolean;

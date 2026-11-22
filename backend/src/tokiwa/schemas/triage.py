@@ -81,6 +81,9 @@ class TriageRecord(BaseModel):
     result: TriageResult
     tier: str  # fast | deep | rules
     model: str | None = None
+    # Provider that actually answered ("anthropic", "openai_compat", "mock"); None for the rule verdict and for
+    # records stored before this field existed. "mock" means no LLM was called (#151).
+    provider: str | None = None
     prompt_version: str
     llm_call_id: str | None = None
     escalated: bool = False
