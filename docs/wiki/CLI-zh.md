@@ -34,6 +34,8 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | 不启动定时作业（情报同步、过期处理等） |
 
 API 文档位于 `http://<server>:8788/api/docs`，健康检查为 `/api/v1/health`。
+API 文档（`/api/docs`、`/api/openapi.json`）无需认证即可访问，生产环境建议通过 `server.expose_docs: false`
+（环境变量 `TOKIWA_SERVER__EXPOSE_DOCS=false`）将其关闭。健康检查无需认证，但只有已登录时才返回版本号。
 
 ## tokiwa user create
 

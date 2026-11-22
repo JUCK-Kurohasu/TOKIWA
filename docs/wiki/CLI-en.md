@@ -34,6 +34,9 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | Do not start periodic jobs (intel sync, expiry processing, and so on) |
 
 The API docs are at `http://<server>:8788/api/docs`, and the health check is at `/api/v1/health`.
+The API docs (`/api/docs`, `/api/openapi.json`) are public without authentication, so in production we recommend turning them
+off with `server.expose_docs: false` (environment variable `TOKIWA_SERVER__EXPOSE_DOCS=false`). The health check needs no
+authentication, but it returns the version only to a signed-in user.
 
 ## tokiwa user create
 

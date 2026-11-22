@@ -11,19 +11,36 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from tokiwa import __version__, runtime
+from tokiwa.api.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from tokiwa.api.pagination import offset_guard
-from tokiwa.config import get_settings
+from tokiwa.config import Settings, get_settings
 from tokiwa.db.session import create_all, dispose_engine, init_engine
 from tokiwa.plugins import import_submodules
+from tokiwa.schemas.events import EVENT_FIELD_MAX_CHARS
 
 log = logging.getLogger(__name__)
+
+# Sensor/agent/Gate batches: these get server.max_ingest_body_bytes, everything else server.max_body_bytes.
+INGEST_PATH_PREFIX = "/api/v1/ingest/"
+
+
+def _warn_on_narrow_event_cap(settings: Settings) -> None:
+    """Event strings are cut at EVENT_FIELD_MAX_CHARS; a wider detector window would never see the cut part."""
+    inspect = settings.detection.web.max_inspect_chars
+    if inspect > EVENT_FIELD_MAX_CHARS:
+        log.warning(
+            "detection.web.max_inspect_chars=%d exceeds the event field cap (%d chars): longer fields are "
+            "truncated at ingest, so the extra inspection window is never used",
+            inspect,
+            EVENT_FIELD_MAX_CHARS,
+        )
 
 
 def _include_routers(app: FastAPI) -> None:
@@ -61,14 +78,26 @@ def _mount_frontend(app: FastAPI, static_dir: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
+        # Unknown API paths get a JSON 404, not the UI shell with 200: API clients and monitors read that as
+        # success, and it hid typos in API paths (audit #93).
+        api_path = full_path.lstrip("/")
+        if api_path == "api" or api_path.startswith("api/"):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
         candidate = (static_dir / full_path).resolve()
-        if full_path and candidate.is_file() and static_dir.resolve() in candidate.parents:
+        if (
+            full_path
+            and candidate.is_file()
+            and static_dir.resolve() in candidate.parents
+            and candidate != index.resolve()
+        ):
             return FileResponse(candidate)
-        return FileResponse(index)
+        # The shell names the current hashed bundles: never cache it, or a deploy keeps serving stale JS (#66).
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
 
 
 def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
     settings = get_settings()
+    _warn_on_narrow_event_cap(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -89,9 +118,24 @@ def create_app(*, run_jobs: bool = True, init_db: bool = True) -> FastAPI:
         version=__version__,
         description="LLM-driven SIEM/XDR against generative-AI-driven cyber attacks",
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        # server.expose_docs (default true for compatibility; false recommended in production, audit #93): the
+        # Swagger UI and the full OpenAPI document are unauthenticated and map the whole API surface for a
+        # scanner. ReDoc is off (it was an undocumented second copy at /redoc that needs Google Fonts + blob
+        # workers in the CSP); the OAuth2 redirect page lives under /api/docs/ with the docs' CSP.
+        docs_url="/api/docs" if settings.server.expose_docs else None,
+        openapi_url="/api/openapi.json" if settings.server.expose_docs else None,
+        redoc_url=None,
+        swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
     )
+    # Starlette: the middleware added last is the outermost. CORS stays outermost so that 413s etc. still carry
+    # CORS headers for the browser.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        default_limit=settings.server.max_body_bytes,
+        prefix_limits=[(INGEST_PATH_PREFIX, settings.server.max_ingest_body_bytes)],
+    )
+    if settings.server.security_headers:
+        app.add_middleware(SecurityHeadersMiddleware)  # outside the body limit: 413s get the headers too
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.server.cors_origins,

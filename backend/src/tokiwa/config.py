@@ -35,6 +35,17 @@ class ServerSettings(BaseModel):
     # JWT signing secret. Generated and persisted to data_dir/secret.key on first boot when unset.
     secret_key: SecretStr | None = None
     token_ttl_minutes: int = 60 * 12
+    # Request body size limits enforced by the app itself (413), independent of any reverse proxy.
+    # Ingest batches are large by design (Gate: 100 events, agent: 500, server max 5000 per request); a worst-case
+    # Gate batch (64 headers x 2 KiB each per event) is about 15 MB. Shippers DROP a batch answered with 413.
+    max_body_bytes: int = Field(default=1024 * 1024, ge=1024)
+    max_ingest_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
+    # Serve the unauthenticated Swagger UI (/api/docs) and OpenAPI document (/api/openapi.json).
+    # True keeps existing setups and docs working; set false in production (they map the API for scanners).
+    expose_docs: bool = True
+    # CSP / X-Frame-Options / nosniff / Referrer-Policy on every response (tokiwa.api.middleware). Turn off only
+    # if a reverse proxy sets its own policy or a customised UI needs a different CSP.
+    security_headers: bool = True
 
 
 class AuthSettings(BaseModel):
