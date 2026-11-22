@@ -35,6 +35,7 @@ from tokiwa.config import TriageSettings, get_settings
 from tokiwa.correlate import scoring
 from tokiwa.correlate.service import correlation_lock
 from tokiwa.db.models.detection import AlertRow, IncidentRow
+from tokiwa.db.models.telemetry import ActorSessionRow
 from tokiwa.db.session import session_scope
 from tokiwa.llm.base import LLMPurpose, LLMTier, StructuredRequest
 from tokiwa.llm.gateway import LLMGateway, get_gateway
@@ -45,6 +46,7 @@ from tokiwa.schemas.alerts import Alert, AlertStatus, Incident, IncidentStatus
 from tokiwa.schemas.common import ActorType, Severity
 from tokiwa.schemas.response import ActionProposal, ActionProposer
 from tokiwa.schemas.triage import TriageRecord, TriageResult
+from tokiwa.triage.attribution import is_rule_based, llm_actor_tiebreak, previous_llm_verdict
 from tokiwa.triage.evidence import (
     TriageContext,
     TriageSubject,
@@ -52,12 +54,13 @@ from tokiwa.triage.evidence import (
     incident_subject,
     load_context,
     normalize_action_target,
+    rule_actor_type,
     select_alert_evidence,
     select_incident_evidence,
     validate_evidence_ids,
 )
 from tokiwa.triage.fallback import RULES_PROMPT_VERSION, rule_based_triage
-from tokiwa.triage.prompts import RETRY_NOTE, TRIAGE_ALERT, TRIAGE_INCIDENT, build_user_prompt, system_prompt
+from tokiwa.triage.prompts import TRIAGE_ALERT, TRIAGE_INCIDENT, build_user_prompt, system_prompt
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +84,7 @@ MOCK_PROVIDER = "mock"
 
 def record_is_rule_based(record: TriageRecord) -> bool:
     """True for the rule verdict and for verdicts produced by the mock provider (no LLM was called)."""
-    return record.tier == TIER_RULES or record.provider == MOCK_PROVIDER
+    return is_rule_based(record)
 
 
 def should_escalate(result: TriageResult, subject_severity: Severity | str, cfg: TriageSettings) -> bool:
@@ -289,10 +292,23 @@ class TriageService:
                 .scalars()
                 .all()
             )
-            subject = incident_subject(row, alerts)
+            # Rule attribution only: row.actor_type may hold an earlier LLM tie-break (#62).
+            classes = (
+                await session.execute(
+                    select(ActorSessionRow.classification).where(ActorSessionRow.incident_id == incident_id)
+                )
+            ).scalars()
+            rule_actor = rule_actor_type(
+                alerts,
+                ai_score=row.ai_score,
+                ai_threshold=get_settings().detection.ai_agent_threshold,
+                session_classifications=[str(c) for c in classes if c],
+            )
+            subject = incident_subject(row, alerts, rule_actor=rule_actor)
             ctx = await load_context(
                 session, subject, select_incident_evidence(alerts, cfg.max_evidence_events)
             )
+            ctx.previous_verdict = previous_llm_verdict(row.triage)
             use_llm = force or wants_llm(subject.severity, cfg)
 
         record = await self._verdict(
@@ -312,12 +328,10 @@ class TriageService:
                 return None
             row.triage = record.model_dump(mode="json")
             row.summary = record.result.summary[:4000]
-            if (
-                row.actor_type == ActorType.UNKNOWN
-                and record.tier != TIER_RULES
-                and record.result.actor_type != ActorType.UNKNOWN
-            ):
-                row.actor_type = record.result.actor_type
+            # The LLM only breaks an "unknown" tie, and only towards ai_agent / automated_scanner (#62).
+            llm_actor = llm_actor_tiebreak(record) if row.actor_type == ActorType.UNKNOWN else None
+            if llm_actor is not None:
+                row.actor_type = llm_actor
             await session.flush()
             incident = Incident.model_validate(row)
         self._remember_signature(key, sig)
@@ -374,12 +388,18 @@ class TriageService:
         settings = get_settings()
         gw = get_gateway()
         system = system_prompt(template, settings.llm.output_language)
-        user = build_user_prompt(subject, ctx)
+        # Sized to the gateway's input cap (runtime overlay included) so the cap never cuts envelopes, the trailing
+        # instructions or the retry note (#96).
+        budget = gw.max_input_chars()
+        prompts = (
+            build_user_prompt(subject, ctx, max_chars=budget),
+            build_user_prompt(subject, ctx, max_chars=budget, retry=True),
+        )
         first_tier = LLMTier.DEEP if tier == LLMTier.DEEP else LLMTier.FAST
         rejected: list[str] = []
 
         first = await self._attempt(
-            gw, first_tier, system, user, template, purpose, related, ctx.evidence_ids
+            gw, first_tier, system, prompts, template, purpose, related, ctx.evidence_ids
         )
         rejected += first.rejected
         if first.result is None:
@@ -396,7 +416,7 @@ class TriageService:
         if tier is None and should_escalate(first.result, subject.severity, settings.triage):
             escalated = True
             deep = await self._attempt(
-                gw, LLMTier.DEEP, system, user, template, purpose, related, ctx.evidence_ids
+                gw, LLMTier.DEEP, system, prompts, template, purpose, related, ctx.evidence_ids
             )
             rejected += deep.rejected
             if deep.result is not None:
@@ -425,16 +445,16 @@ class TriageService:
         gw: LLMGateway,
         tier: LLMTier,
         system: str,
-        user: str,
+        prompts: tuple[str, str],
         template: PromptTemplate,
         purpose: LLMPurpose,
         related: dict[str, str],
         allowed_ids: list[str],
     ) -> _Attempt:
-        """One tier: call, validate evidence ids, retry once if none is valid."""
+        """One tier: call, validate evidence ids, retry once (``prompts[1]`` carries the reminder) if none is valid."""
         rejected: list[str] = []
         for attempt in range(2):
-            prompt = user if attempt == 0 else f"{user}\n\n{RETRY_NOTE}"
+            prompt = prompts[attempt]
             res = await gw.structured(
                 StructuredRequest(
                     purpose=purpose,

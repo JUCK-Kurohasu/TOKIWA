@@ -23,7 +23,14 @@ from tokiwa.llm.mock import register_mock_responder
 from tokiwa.llm.models import ModelListing
 from tokiwa.llm.pricing import CostBasis
 from tokiwa.llm.prompting import UNTRUSTED_DATA_POLICY
-from tokiwa.llm.settings import LLMConfigOut, LLMConfigUpdate, config_view, update_config
+from tokiwa.llm.settings import (
+    LLMConfigOut,
+    LLMConfigUpdate,
+    UIOverrideLockedError,
+    config_view,
+    reset_overrides,
+    update_config,
+)
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.system import LLMCall, LLMCallDetail, LLMCallStatus
 from tokiwa.util import ensure_utc, utcnow
@@ -85,9 +92,20 @@ async def get_config(_: CurrentUser) -> LLMConfigOut:
 
 @router.put("/config", response_model=LLMConfigOut)
 async def put_config(body: LLMConfigUpdate, user: AdminUser) -> LLMConfigOut:
-    gateway, changes = await update_config(body)
+    try:
+        gateway, changes = await update_config(body)
+    except UIOverrideLockedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     # changes never contains secret values (only "set"/"cleared").
     await record_audit(user.username, "llm.config.update", "llm.config", {"changes": changes})
+    return await config_view(gateway)
+
+
+@router.delete("/config", response_model=LLMConfigOut)
+async def reset_config(user: AdminUser) -> LLMConfigOut:
+    """Remove every override saved from the UI; the gateway goes back to env / tokiwa.yaml / defaults (#172)."""
+    gateway, cleared = await reset_overrides()
+    await record_audit(user.username, "llm.config.reset", "llm.config", {"cleared": cleared})
     return await config_view(gateway)
 
 

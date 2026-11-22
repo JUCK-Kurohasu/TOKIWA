@@ -23,7 +23,7 @@ from tokiwa.schemas.common import Severity
 from tokiwa.schemas.response import ActionProposal
 from tokiwa.schemas.triage import TriageRecord, TriageResult
 from tokiwa.triage.fallback import mock_triage_responder, parse_untrusted_blocks
-from tokiwa.triage.prompts import RETRY_NOTE
+from tokiwa.triage.prompts import RETRY_NOTE, TRIAGE_ALERT
 from tokiwa.triage.service import (
     get_triage_service,
     incident_signature,
@@ -112,7 +112,7 @@ async def test_fast_tier_verdict(mock_llm: MockProvider, add_alert, add_events, 
     status, rec = await _stored(a.id)
     assert status == "triaged"
     assert rec.tier == "fast" and rec.model == FAST and not rec.escalated
-    assert rec.prompt_version == "triage.alert@1" and rec.llm_call_id
+    assert rec.prompt_version == TRIAGE_ALERT.ref and rec.llm_call_id
     assert set(rec.result.evidence_ids) <= set(a.evidence_event_ids)
 
 

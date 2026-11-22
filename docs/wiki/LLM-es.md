@@ -36,6 +36,15 @@ También puede introducirse en **LLM → Settings** (LLM → Configuración) de 
 **se guarda en texto plano en la base de datos**. Tenga cuidado con el manejo de las copias de seguridad de la base de datos y, si es posible, use una variable de entorno.
 La clave no se escribe en los logs, en el log de auditoría ni en las entradas al LLM.
 
+**Límites al cambiar la URL del endpoint (`llm.anthropic_base_url` / `llm.openai_base_url`) desde la UI o la API**: se requiere
+`https://`; `http://` solo se permite para `localhost` / `127.0.0.1` / `::1`. Se rechazan las direcciones link-local
+(`169.254.0.0/16`, `fe80::/10`) y los endpoints de metadatos de la nube (`169.254.169.254`, `metadata.google.internal`, …,
+incluidas las formas decimales y hexadecimales). **La clave de API queda vinculada al endpoint para el que se introdujo**: al
+cambiar la URL en la UI, la clave guardada deja de ser válida y no se envía ninguna clave (ni siquiera la de la variable de entorno)
+hasta que introduzca la clave para el nuevo endpoint. Puede introducir la URL y la clave en el mismo guardado. Para usar HTTP sin
+cifrar con un host distinto de localhost (p. ej. `http://ollama:11434/v1`), configúrelo con una variable de entorno o en
+`tokiwa.yaml` (la configuración estática no tiene estas restricciones).
+
 Una vez configurada, puede comprobarse con **LLM → Settings → Connection test** (Prueba de conexión) (realiza una llamada estructurada mínima por nivel, fast y deep, que cuenta para el presupuesto y queda auditada).
 Si el **Provider** (Proveedor) del resultado es `mock`, no se llamó a ninguna API real (puede que el proveedor siga en `mock`). «Current status» (Estado actual) muestra el proveedor realmente en uso además del configurado.
 

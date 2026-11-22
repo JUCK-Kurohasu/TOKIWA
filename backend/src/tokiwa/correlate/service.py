@@ -41,7 +41,7 @@ from tokiwa.runtime import on_startup
 from tokiwa.schemas.alerts import Alert, AlertCategory, AlertStatus, Incident, IncidentStatus
 from tokiwa.schemas.common import ActorType, Severity
 from tokiwa.schemas.events import EventKind
-from tokiwa.schemas.triage import TriageRecord
+from tokiwa.triage.attribution import llm_actor_tiebreak
 from tokiwa.util import new_id, utcnow
 
 log = logging.getLogger(__name__)
@@ -483,13 +483,9 @@ async def _recompute(session: AsyncSession, inc: IncidentRow) -> None:
         facts, ai_score=ai_score, ai_threshold=threshold, session_classifications=[str(c) for c in classes]
     )
     if actor == ActorType.UNKNOWN and inc.triage:
-        # Rules could not attribute: accept a (non-rule) LLM verdict as the tie-breaker (requirements §6-8).
-        try:
-            record = TriageRecord.model_validate(inc.triage)
-        except ValueError:
-            record = None
-        if record is not None and record.tier != "rules":
-            actor = ActorType(record.result.actor_type)
+        # Rules could not attribute: an LLM verdict may break the tie (requirements §6-8), but only towards ai_agent /
+        # automated_scanner - never benign / human (#62, tokiwa.triage.attribution).
+        actor = llm_actor_tiebreak(inc.triage) or actor
 
     ordered = sorted(rows, key=lambda r: r.first_seen)
     top = sorted(active, key=lambda r: (-Severity(r.severity).rank, r.first_seen))[0]

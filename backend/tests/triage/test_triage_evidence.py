@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from tokiwa.llm.prompting import UNTRUSTED_DATA_POLICY
+from tokiwa.llm.prompting import LOOKALIKE_MARKER, UNTRUSTED_DATA_POLICY
 from tokiwa.schemas.common import Severity
 from tokiwa.triage.evidence import (
     BODY_HEAD_CHARS,
@@ -100,8 +100,10 @@ def test_prompt_wraps_everything_untrusted(make_http_event) -> None:
     blocks = parse_untrusted_blocks(user)
     assert blocks["evidence_ids"] == [ev.id]
     assert blocks["subject"]["id"] == "a1"
-    assert attack in blocks["subject"]["title"]  # preserved as data, decoded only by a JSON parser
-    assert blocks["evidence_events"][0]["http"]["headers"]["user-agent"] == attack
+    # Preserved as data (decoded only by a JSON parser), with the tag word itself neutralized (#96).
+    neutral = attack.replace("untrusted_data", LOOKALIKE_MARKER)
+    assert neutral in blocks["subject"]["title"]
+    assert blocks["evidence_events"][0]["http"]["headers"]["user-agent"] == neutral
 
     for tpl in (TRIAGE_ALERT, TRIAGE_INCIDENT):
         system = system_prompt(tpl, "ja")

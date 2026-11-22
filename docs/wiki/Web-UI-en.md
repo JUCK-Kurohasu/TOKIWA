@@ -76,6 +76,8 @@ The allowed sites are set in `EXTERNAL_LINK_ALLOWLIST` in `frontend/src/componen
 Related alerts grouped by source, session, and entity.
 
 - List: severity, status, **Actor attribution** (AI agent / human / scanner, and so on), AI score
+  (attribution comes from rules and behaviour. Only when the rules cannot attribute is the LLM verdict used, and only to raise it to
+  AI agent / scanner; an LLM verdict of "human" or "benign" does not change it)
 - Detail: attack stage (kill chain: reconnaissance → initial access → …), LLM triage (summary, rationale, recommended response actions),
   the "evidence of AI involvement" cited by the LLM, and related alerts. You can set the assignee and update the status.
 

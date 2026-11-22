@@ -130,9 +130,14 @@ class LLMSettings(BaseModel):
     prompt_cache: bool = True
     output_language: Literal["ja", "en"] = "ja"
     request_timeout_seconds: float = 120.0
-    # USD per 1M tokens, overrides/extends the built-in table: {"model": {"input": x, "output": y}}
+    # USD per 1M tokens, overrides/extends the built-in table: {"model": {"input": x, "output": y}}. A model missing
+    # here and from the built-in table is charged at the highest known rates (#35); give free local models 0.
     pricing: dict[str, dict[str, float]] = Field(default_factory=dict)
     redaction: RedactionSettings = Field(default_factory=RedactionSettings)
+    # Settings saved from the UI (settings_kv "llm.config") override env / YAML. False ignores them entirely and makes
+    # PUT /llm/config return 409, so e.g. TOKIWA_LLM__PROVIDER=mock really pins "nothing leaves this host" (#172).
+    # Only settable from env / YAML (never from the UI).
+    allow_ui_override: bool = True
 
 
 class WebDetectionSettings(BaseModel):

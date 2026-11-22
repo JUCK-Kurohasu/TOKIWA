@@ -34,6 +34,7 @@ from tokiwa.llm.base import (
 from tokiwa.llm.mock import MockProvider
 from tokiwa.llm.models import ModelListCache, ModelListing, builtin_listing
 from tokiwa.llm.pricing import CostBasis, estimate, is_priced
+from tokiwa.llm.prompting import cap_prompt
 from tokiwa.schemas.system import LLMCall, LLMCallStatus
 from tokiwa.util import new_id, utcnow
 
@@ -151,11 +152,14 @@ class LLMGateway:
         if await self.spent_today_usd() >= self.llm.daily_budget_usd:
             raise BudgetExceededError(f"daily LLM budget of ${self.llm.daily_budget_usd:.2f} reached")
 
+    def max_input_chars(self) -> int:
+        """Character budget for a structured call's user prompt (prompt builders size their blocks to fit it)."""
+        return int(self.llm.max_input_tokens_per_call * _CHARS_PER_TOKEN)
+
     def _cap_input(self, text: str) -> str:
-        max_chars = int(self.llm.max_input_tokens_per_call * _CHARS_PER_TOKEN)
-        if len(text) <= max_chars:
-            return text
-        return text[:max_chars] + "\n[input truncated by TOKIWA to respect max_input_tokens_per_call]"
+        # Keeps head + tail and re-balances <untrusted_data> envelopes around the cut (#96): a blind text[:n] used to
+        # leave an envelope open (attacker text "outside" the data) and drop closing tags and trailing instructions.
+        return cap_prompt(text, self.max_input_chars())
 
     async def structured(self, req: StructuredRequest, schema: type[T]) -> StructuredResult[T]:
         model = self.model_for(req.tier)
