@@ -15,6 +15,14 @@ In addition, the following two can be **overridden at runtime from the Web UI**,
 - LLM settings (**LLM → Settings**): provider, models, budget, output language, API key, and so on
 - Enabling / disabling detectors (**Rules → Detectors**)
 
+**A value saved in the UI takes precedence over the environment and YAML for that field** (the DB value wins). It survives restarts
+and database restores. At startup the names of LLM fields that differ from the static configuration are logged as a WARNING
+(values are not logged). Under LLM → Settings, "Overrides saved here" shows which fields come from the DB, and
+**Reset all overrides** (`DELETE /api/v1/llm/config`, admin only, audited) goes back to the static configuration. To pin the LLM
+settings from the environment / YAML (e.g. to force `TOKIWA_LLM__PROVIDER=mock` so that nothing is ever sent to an external LLM), set
+`TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (`llm.allow_ui_override`, default true). DB overrides are then ignored and changes from the UI
+(`PUT /api/v1/llm/config`) return 409. This setting itself cannot be changed from the UI.
+
 With Docker Compose, `.env` is passed to the container as environment variables. When you run `tokiwa serve` directly on your machine,
 `.env` is not loaded automatically.
 

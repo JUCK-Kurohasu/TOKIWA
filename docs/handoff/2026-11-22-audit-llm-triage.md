@@ -9,8 +9,8 @@
 |---|---|---|---|
 | #35 | 完全 | (1) 単価表にないモデルは **最も高い既知単価**（トークン種別ごとの最大。`llm.pricing` の上書きも含む）で見積もる fail-closed（`llm/pricing.py::price_for` / `unpriced_rates`）。(2) モデル名の正規化 `normalize_model`: 小文字化、Bedrock 形式の接頭辞（`anthropic.` / `us.anthropic.` / `global.anthropic.`）と `anthropic/`、スナップショット形の接尾辞（`-YYYYMMDD` / `@YYYYMMDD` / `-vN[:N]` / `-latest`）だけを除く。汎用の前方一致はしない（`claude-opus-5-9` を兄弟モデルの単価で推測しない＝未知扱い）。(3) 各呼び出しに `llm_calls.cost_basis`（nullable 列。`table` / `snapshot` / `unpriced` / NULL=課金なし）を書き込み時に記録（structured・chat の両経路。サーバー側フォールバックの served model も正規化）。トークン 0（予算超過・エラー）は NULL で「料金不明の呼び出し」に数えない。(4) `/llm/usage` に日別 `unpriced_calls` と期間の `unpriced_models`、`/llm/config` に `unpriced_models`（設定中のモデルで単価なし。mock は空）、`LLMCall.cost_basis`。使用量タブに警告文、設定タブの予算メーター下に警告、呼び出し履歴の費用に `*`（見積もり）。ゲートウェイ生成時と見積もり時に WARNING。(5) 整合テスト: `BUILTIN_ANTHROPIC_MODELS` と既定モデルが全部 `table` で引けること、表のキーが正規形であること。表に `claude-fable-5` / `claude-opus-4-6` / `claude-sonnet-4-6` を追加（出典は claude-api リファレンスのモデル表＝キャッシュ 2026-11-03、`TODO(verify)`）。wiki LLM ×4、api-contract | 68e8ea8 |
 | #96 | 部分（ノンス以外は完全） | `llm/prompting.py` を書き直し。(1) `max_chars` を **エスケープ後** の長さで判定。超えたら長い文字列を 4096→1024→256→64 文字に段階的に切り詰め（JSON は有効なまま・全イベントが残る）、それでも超えるときだけ `\uXXXX` やサロゲート対を分断しない位置で切る（`fit_json` / `_hard_cut`）。(2) ゲートウェイの `_cap_input` を `cap_prompt()` に置換: 先頭と末尾（最大 8,000 文字）を残し、切れ目の前後で封筒を閉じ直す / `name="truncated"` で開き直す（データが封筒の外に出ない・閉じタグと末尾の指示が残る・タグを分断しない）。triage は `LLMGateway.max_input_chars()`（実行時オーバーレイ込み）に合わせてブロック予算を比例配分し（`build_user_prompt(..., max_chars=)`）、通常はゲートウェイで切られない。データの **後** にも指示を置き（trailer）、再試行の注意書き（RETRY_NOTE）は末尾の指示に含めた（追記ではない）。プロンプト版 `triage.alert@2` / `triage.incident@2`。(3) NFKC + 不可視文字除去後に `untrusted[_- 空白]*data` を含む文字列（値・キー）の語を `[TOKIWA:envelope-tag-lookalike]` に置換。Cc / Cf / Cs / Co / Zl / Zp・ハングルのフィラー・異体字セレクタを `\u` エスケープ（可逆。孤立サロゲートで UTF-8 送信が落ちる問題も解消。フロントの invisible.ts と同じ集合 + 異体字セレクタ + 私用領域）。封筒名の不正文字も `_` に置換。テスト `tests/llm/test_llm_prompting.py`（110 件。PoC の Variant B・Unicode 版を回帰テスト化、切断位置を総当たり）。docs/security/llm-safety.md | 4551664 |
-| #98 | 部分（(1)(2) は完全。(3) 通知・(4) 暗号化・DNS 解決先の検査は未） | 新規 `llm/endpoints.py::validate_runtime_base_url`: 実行時に設定する base_url は https 必須（http は `localhost` / 127.0.0.0/8 / `::1` のみ）、リンクローカル・メタデータ（169.254.169.254・`fd00:ec2::254`・100.100.100.200・`metadata.google.internal` 等）・0.0.0.0/8・マルチキャスト・ブロードキャストを拒否。数値の別表記（`2852039166`・`0xa9.0xfe.0xa9.0xfe`・8 進・`169.254.43518`・`::ffff:169.254.169.254`）は `socket.inet_aton` / IPv4 射影で正規化して判定。`LLMConfigUpdate` の検証と、保存済みの行を読むとき（`clean_overlay`）の両方で適用。**キーと宛先の束縛**: URL を変えるとそのプロバイダの保存済みキーを破棄（同じ更新で新キーが来たら新キーを束縛）、overlay の `_key_bound_to` に「どの URL 用に入力されたキーか」を保存し、実行時 URL があるときは束縛が一致するキーだけを使う。キーが無ければ空キー（`SecretStr("")`）で上書きし、静的キー・`ANTHROPIC_API_KEY` も送らない（Anthropic SDK には `api_key` を明示して渡しているので SDK 側の環境変数チェーンも働かない。キーが無ければクライアント自体を作らない）。`GET /llm/config` に `api_key_rebind_required`、設定画面に警告と URL 欄の説明。テスト `tests/llm/test_llm_endpoint_binding.py`（監査シナリオ: env にキー → URL だけ攻撃者ホストへ → 接続テストでクライアントが作られないこと）。wiki LLM ×4・llm-safety・api-contract | (この行のコミット) |
-| #172 | 未着手 | | |
+| #98 | 部分（(1)(2) は完全。(3) 通知・(4) 暗号化・DNS 解決先の検査は未） | 新規 `llm/endpoints.py::validate_runtime_base_url`: 実行時に設定する base_url は https 必須（http は `localhost` / 127.0.0.0/8 / `::1` のみ）、リンクローカル・メタデータ（169.254.169.254・`fd00:ec2::254`・100.100.100.200・`metadata.google.internal` 等）・0.0.0.0/8・マルチキャスト・ブロードキャストを拒否。数値の別表記（`2852039166`・`0xa9.0xfe.0xa9.0xfe`・8 進・`169.254.43518`・`::ffff:169.254.169.254`）は `socket.inet_aton` / IPv4 射影で正規化して判定。`LLMConfigUpdate` の検証と、保存済みの行を読むとき（`clean_overlay`）の両方で適用。**キーと宛先の束縛**: URL を変えるとそのプロバイダの保存済みキーを破棄（同じ更新で新キーが来たら新キーを束縛）、overlay の `_key_bound_to` に「どの URL 用に入力されたキーか」を保存し、実行時 URL があるときは束縛が一致するキーだけを使う。キーが無ければ空キー（`SecretStr("")`）で上書きし、静的キー・`ANTHROPIC_API_KEY` も送らない（Anthropic SDK には `api_key` を明示して渡しているので SDK 側の環境変数チェーンも働かない。キーが無ければクライアント自体を作らない）。`GET /llm/config` に `api_key_rebind_required`、設定画面に警告と URL 欄の説明。テスト `tests/llm/test_llm_endpoint_binding.py`（監査シナリオ: env にキー → URL だけ攻撃者ホストへ → 接続テストでクライアントが作られないこと）。wiki LLM ×4・llm-safety・api-contract | bf3316c |
+| #172 | 完全（(c) の CLI は API + 画面ボタンで代替。下記） | (a) `llm.allow_ui_override`（`LLMSettings`、**既定 true＝後方互換**、env / YAML のみで設定可・画面や DB の行からは変えられない）。false のとき `apply_overlay` が DB の上書きを無視（起動時・再構築時とも）、`PUT /llm/config` は 409、`GET /llm/config` に `ui_override_allowed=false` と `ignored_overrides`。(b) 起動時に、DB の上書きのうち静的設定と値が異なる項目名を WARNING（値・URL・キーは出さない）。固定中は「無視した項目名」を WARNING。設定画面の状態カードに「画面での上書き」（DB 上書き中バッジ・項目名一覧）。(c) `DELETE /api/v1/llm/config`（admin、監査 `llm.config.reset` に項目名のみ）と画面の「上書きをすべてリセット」（2 段階確認）。固定中でもリセットは可能。テスト `tests/llm/test_llm_override_lock.py`（監査の再現手順: env=mock + UI で openai_compat を保存 → 再起動で mock に戻らない（既定）/ 固定すると mock）。wiki Configuration ×4（優先順位の明記）・api-contract・llm-safety | (この行のコミット) |
 | #62 | 未着手 | | |
 
 ## 要判断
@@ -19,6 +19,12 @@
   経路は塞いだ。ノンスはタグ名を呼び出しごとに変えるため、コパイロット / intel のプロンプト文言（`<untrusted_data>` を名指し）、
   mock / ルールフォールバックの封筒パーサ（`triage/fallback.py::_BLOCK_RE`）、監査ログの見た目に波及し、実 LLM での効果確認
   （needs-live-llm）も要る。入れるなら `untrusted_block` に `nonce` 引数を足し、`UNTRUSTED_DATA_POLICY` を「untrusted_data で始まる要素」に変える。
+- **#172 既定は後方互換（`allow_ui_override: true`＝DB の上書きが環境変数に勝つ）にした**。「環境変数 / YAML で明示された項目は常に DB より優先」
+  案は採らなかった: ラボ（`lab/compose.yaml` が `TOKIWA_LLM__PROVIDER` を常に渡す）とテストの共通フィクスチャ（同じく provider=mock を env で指定）
+  では、画面でプロバイダを切り替える操作が黙って効かなくなるため。代わりに優先順位を wiki に明記し、起動時 WARNING と画面表示で気づけるようにした。
+  安全側に倒したい組織は `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` を設定する。既定を false にするか、項目単位の固定（pin）を作るかはユーザー判断。
+- **#172 CLI（`tokiwa config reset-overrides`）は作っていない**（`cli.py` は共有ファイル）。シェル側の非常手段は
+  `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` + 再起動（DB の行は残るが無視される）、または管理者で `DELETE /api/v1/llm/config`。
 - **#98 束縛情報の無い旧形式の行は fail-closed**: アップグレード前に UI で「base_url + API キー」を保存していた環境では、そのキーは
   無視され、設定画面で再入力が必要（`api_key_rebind_required` に出る）。base_url を UI で変えていない（キーだけ保存）環境は従来どおり動く。
   旧形式の行を「信頼して束縛済みとみなす」移行も可能だが、攻撃者が既に書き換えた行を正規化してしまうので採らなかった。
@@ -34,6 +40,7 @@
 ## 既定動作の変更
 
 - #35: 単価表に無いモデルの費用が $0 → 最も高い既知単価の見積もり（上記）。既存の DB の行は `cost_basis` が NULL のまま（遡って再計算しない）。
+- #172: なし（新設定 `llm.allow_ui_override` の既定 true は従来どおりの挙動）。起動ログに WARNING が増える（DB の上書きが静的設定と異なるとき）。
 - #98: 実行時の base_url の検証（上記）。保存済みの行に禁止 URL があると、その項目は無視して静的設定で起動する（WARNING）。
 - #96: `untrusted_block` を使う全プロンプト（triage・コパイロットのツール結果と会話文脈・intel の脆弱性 / 資産 / Web リサーチ）で、
   `untrusted_data` に正規化される文字列が置換され、不可視文字が `\u` エスケープになる。大きいデータは末尾切断の前に文字列の切り詰めが入る
@@ -42,6 +49,8 @@
 ## 失敗した試み
 
 ## 担当外の変更
+
+- `backend/src/tokiwa/config.py::LLMSettings`（自レーンのセクション）: `allow_ui_override` を追加、`pricing` のコメント更新。
 
 - `backend/src/tokiwa/db/models/llm.py`（llm モジュール所有と判断）: `LLMCallRow.cost_basis`（nullable、`sync_additive` で既存 DB に追加）。
 - `backend/src/tokiwa/schemas/system.py::LLMCall`: `cost_basis: str | None = None`（互換の追加）。`frontend/src/api/types.ts` も更新。

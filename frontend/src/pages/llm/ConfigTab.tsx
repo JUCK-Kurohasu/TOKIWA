@@ -17,6 +17,7 @@ import {
   type LLMProviderName,
   type LLMTestResult,
 } from "@/api/types-intel";
+import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { InlineNotice, useFlash } from "@/components/common/InlineNotice";
 import { ApiErrorState, LoadingRows } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
@@ -43,6 +44,17 @@ const strings = {
     settings: "設定",
     settingsDesc: "保存すると LLM ゲートウェイが再構築され、以降の呼び出しに反映されます。",
     adminOnly: "設定の変更は管理者のみ可能です。",
+    pinned:
+      "LLM の設定は環境変数 / tokiwa.yaml で固定されています（llm.allow_ui_override=false）。画面からは変更できません。",
+    overrides: "画面での上書き",
+    overridesActive: "DB 上書き中",
+    overridesHint:
+      "次の項目は画面で保存した値（DB）が環境変数 / tokiwa.yaml より優先されています。リセットすると静的な設定に戻ります。",
+    overridesIgnored:
+      "画面で保存した次の値は llm.allow_ui_override=false のため無視されています（DB には残っています）。",
+    overridesNone: "なし（環境変数 / tokiwa.yaml / 既定値で動作中）",
+    resetOverrides: "上書きをすべてリセット",
+    resetDone: "上書きをリセットしました",
     providerAuto: "auto（API キーがあれば Anthropic、なければ mock）",
     providerAnthropic: "Anthropic（Claude）",
     providerOpenai: "OpenAI 互換（Ollama / vLLM などローカル LLM）",
@@ -105,6 +117,17 @@ const strings = {
     settings: "Settings",
     settingsDesc: "Saving rebuilds the LLM gateway; subsequent calls use the new settings.",
     adminOnly: "Only administrators can change settings.",
+    pinned:
+      "LLM settings are pinned by the environment / tokiwa.yaml (llm.allow_ui_override=false) and cannot be changed here.",
+    overrides: "Overrides saved here",
+    overridesActive: "Database overrides active",
+    overridesHint:
+      "These fields use the values saved on this page (database) instead of the environment / tokiwa.yaml. Reset to go back to the static configuration.",
+    overridesIgnored:
+      "These values saved on this page are ignored because llm.allow_ui_override=false (they are still in the database).",
+    overridesNone: "None (running on the environment / tokiwa.yaml / defaults)",
+    resetOverrides: "Reset all overrides",
+    resetDone: "Overrides reset",
     providerAuto: "auto (Anthropic if an API key is set, otherwise mock)",
     providerAnthropic: "Anthropic (Claude)",
     providerOpenai: "OpenAI-compatible (local LLM: Ollama / vLLM …)",
@@ -270,7 +293,8 @@ function ConfigForm({ config }: { config: LLMConfig }) {
   const [openaiKey, setOpenaiKey] = useState("");
   const [openaiUrl, setOpenaiUrl] = useState("");
   const [notice, flash] = useFlash();
-  const readOnly = !can.admin;
+  const pinned = config.ui_override_allowed === false;
+  const readOnly = !can.admin || pinned;
   // Dropdown only when requests actually go to Anthropic ("auto" resolves to the server's active provider).
   const useAnthropicModels =
     (form.provider === "auto" ? config.active_provider : form.provider) === "anthropic";
@@ -328,7 +352,10 @@ function ConfigForm({ config }: { config: LLMConfig }) {
 
   return (
     <Card>
-      <CardHeader title={L.settings} description={readOnly ? L.adminOnly : L.settingsDesc} />
+      <CardHeader
+        title={L.settings}
+        description={pinned ? L.pinned : readOnly ? L.adminOnly : L.settingsDesc}
+      />
       <form onSubmit={submit} autoComplete="off">
         <fieldset disabled={readOnly || save.isPending}>
           <CardBody className="space-y-5">
@@ -558,6 +585,57 @@ function ConfigForm({ config }: { config: LLMConfig }) {
   );
 }
 
+/** Which fields come from the database (saved here) rather than env / YAML, with a reset (#172). */
+function OverridesStatus({ config }: { config: LLMConfig }) {
+  const L = useLocal(strings);
+  const can = useCan();
+  const qc = useQueryClient();
+  const [notice, flash] = useFlash();
+  const active = config.overridden ?? [];
+  const ignored = config.ignored_overrides ?? [];
+  const reset = useMutation({
+    mutationFn: () => api.delete<LLMConfig>("/llm/config"),
+    onSuccess: () => {
+      flash(L.resetDone);
+      qc.invalidateQueries({ queryKey: LLM_CONFIG_KEY });
+      qc.invalidateQueries({ queryKey: ["llm", "models"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
+    },
+  });
+  const fields = active.length > 0 ? active : ignored;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
+        {L.overrides}
+        {active.length > 0 && <Badge tone="warn">{L.overridesActive}</Badge>}
+      </div>
+      {fields.length === 0 ? (
+        <p className="text-[11px] text-muted">{L.overridesNone}</p>
+      ) : (
+        <>
+          <p className="text-[11px] text-muted">{active.length > 0 ? L.overridesHint : L.overridesIgnored}</p>
+          <ul className="flex flex-wrap gap-1">
+            {fields.map((f) => (
+              <li key={f} className="rounded border border-line px-1.5 py-0.5 font-mono text-[11px]">
+                {f}
+              </li>
+            ))}
+          </ul>
+          {can.admin && (
+            <div className="flex items-center gap-2">
+              <ConfirmButton variant="outline" busy={reset.isPending} onConfirm={() => reset.mutate()}>
+                {L.resetOverrides}
+              </ConfirmButton>
+              {notice && <InlineNotice tone={notice.tone}>{notice.text}</InlineNotice>}
+            </div>
+          )}
+          {reset.error ? <ApiErrorState error={reset.error} /> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 const TEST_TIERS = ["fast", "deep"] as const;
 
 function ConnectionTest() {
@@ -657,6 +735,7 @@ export function ConfigTab() {
           c.anthropic_api_key_set,
           c.openai_api_key_set,
           c.openai_base_url,
+          c.ui_override_allowed,
         ])}
         config={c}
       />
@@ -703,6 +782,7 @@ export function ConfigTab() {
                 </p>
               )}
             </div>
+            <OverridesStatus config={c} />
           </CardBody>
         </Card>
         <ConnectionTest />

@@ -15,6 +15,15 @@ Además, los dos elementos siguientes pueden **sobrescribirse en tiempo de ejecu
 - Configuración del LLM (**LLM → Settings** (LLM → Configuración)): proveedor, modelos, presupuesto, idioma de salida, clave de API, etc.
 - Activación / desactivación de detectores (**Rules → Detectors** (Reglas de detección → Detectores))
 
+**Un valor guardado en la interfaz tiene prioridad sobre las variables de entorno y el YAML para ese campo** (gana el valor de la
+base de datos). Se mantiene tras reinicios y restauraciones de la base de datos. Al arrancar, los nombres de los campos del LLM que
+difieren de la configuración estática se registran como WARNING (sin los valores). En LLM → Settings, «Sobrescrituras guardadas aquí»
+muestra qué campos vienen de la base de datos, y **Restablecer todas las sobrescrituras** (`DELETE /api/v1/llm/config`, solo
+administradores, queda en la auditoría) vuelve a la configuración estática. Para fijar la configuración del LLM desde el entorno / YAML
+(p. ej. forzar `TOKIWA_LLM__PROVIDER=mock` para que nunca se envíe nada a un LLM externo), establezca
+`TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (`llm.allow_ui_override`, por defecto true). Las sobrescrituras de la base de datos se ignoran y
+los cambios desde la interfaz (`PUT /api/v1/llm/config`) devuelven 409. Este ajuste no puede cambiarse desde la interfaz.
+
 Con Docker Compose, `.env` se pasa al contenedor como variables de entorno. Si ejecuta `tokiwa serve` directamente en local,
 `.env` no se carga automáticamente.
 

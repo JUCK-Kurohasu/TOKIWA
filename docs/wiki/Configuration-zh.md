@@ -15,6 +15,13 @@
 - LLM 设置（**LLM → Settings**（LLM → 设置））：提供商、模型、预算、输出语言、API 密钥等
 - 检测器的启用 / 禁用（**Rules → Detectors**（检测规则 → 检测器））
 
+**在界面中保存的值，对该项优先于环境变量和 YAML**（数据库中的值优先）。重启或恢复数据库后仍然有效。
+启动时，与静态设置不同的 LLM 项的名称会以 WARNING 记录到日志（不记录值）。在 LLM → Settings 的“在此保存的覆盖”中
+可以确认哪些项来自数据库，通过 **重置所有覆盖**（`DELETE /api/v1/llm/config`，仅管理员，记录审计）可以恢复为静态设置。
+如需通过环境变量 / YAML 固定 LLM 设置（例如强制 `TOKIWA_LLM__PROVIDER=mock`，使任何内容都不发送到外部 LLM），请设置
+`TOKIWA_LLM__ALLOW_UI_OVERRIDE=false`（`llm.allow_ui_override`，默认 true）。此时数据库中的覆盖会被忽略，来自界面的更改
+（`PUT /api/v1/llm/config`）返回 409。该设置本身无法在界面中更改。
+
 在 Docker Compose 中，`.env` 会作为环境变量传入容器。在本地直接运行 `tokiwa serve` 时，
 不会自动读取 `.env`。
 

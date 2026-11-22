@@ -18,6 +18,11 @@ on the static settings to build the process-wide :class:`~tokiwa.llm.gateway.LLM
   hijacked admin session cannot make TOKIWA send an existing key to a host of its choosing. The binding is kept in
   the overlay under ``_key_bound_to`` (key field -> URL it was entered for, ``""`` = the static endpoint). Rows from
   before this rule (a runtime URL + key without a binding) are treated fail-closed: the key is ignored until re-entered.
+- **Precedence (#172).** Overrides saved from the UI win over env / YAML for the fields they set. With
+  ``llm.allow_ui_override: false`` (env / YAML only) they are ignored entirely and ``PUT /llm/config`` is refused, so a
+  pinned ``TOKIWA_LLM__PROVIDER=mock`` cannot be undone from the UI or by restoring an old database. Startup logs a
+  WARNING listing every stored field that differs from the static value; :func:`reset_overrides` (``DELETE
+  /llm/config``) removes all of them.
 """
 
 from __future__ import annotations
@@ -112,6 +117,10 @@ class LLMConfigUpdate(BaseModel):
         return validate_runtime_base_url(v)
 
 
+class UIOverrideLockedError(RuntimeError):
+    """``llm.allow_ui_override`` is false: LLM settings are pinned by env / YAML."""
+
+
 class LLMConfigOut(BaseModel):
     """``GET /llm/config``. Never contains API keys - only whether one is configured."""
 
@@ -135,6 +144,10 @@ class LLMConfigOut(BaseModel):
     anthropic_api_key_set: bool = False
     openai_api_key_set: bool = False
     overridden: list[str] = Field(default_factory=list)  # fields currently set by the runtime overlay
+    # False when llm.allow_ui_override is false: the UI cannot change LLM settings and stored overrides are ignored.
+    ui_override_allowed: bool = True
+    # Fields stored in the database but not applied because UI overrides are disabled (#172).
+    ignored_overrides: list[str] = Field(default_factory=list)
     # Providers whose endpoint was changed at runtime but have no key entered for that endpoint (#98): the key must be
     # entered again (static / env keys are never sent to a runtime-set endpoint).
     api_key_rebind_required: list[str] = Field(default_factory=list)
@@ -214,11 +227,32 @@ def rebind_required(clean: dict[str, Any]) -> list[str]:
 
 
 def apply_overlay(base: Settings, overlay: dict[str, Any]) -> Settings:
-    """Static settings + runtime overlay -> effective settings (pure function)."""
+    """Static settings + runtime overlay -> effective settings (pure function).
+
+    With ``llm.allow_ui_override`` false the overlay is ignored (#172).
+    """
+    if not base.llm.allow_ui_override:
+        return base
     clean = clean_overlay(base.llm, overlay)
     if not clean:
         return base
     return base.model_copy(update={"llm": _validate_with(base.llm, _effective_overlay(clean))})
+
+
+def overridden_differences(base: LLMSettings, overlay: dict[str, Any]) -> list[str]:
+    """Names of stored override fields whose value differs from the static (env / YAML / default) value.
+
+    Secrets are compared by value but only ever reported by name.
+    """
+    clean = clean_overlay(base, overlay)
+    differ: list[str] = []
+    for key, value in sorted(clean.items()):
+        static = getattr(base, key, None)
+        if isinstance(static, SecretStr):
+            static = static.get_secret_value()
+        if static != value:
+            differ.append(key)
+    return differ
 
 
 async def load_overlay() -> dict[str, Any]:
@@ -245,7 +279,12 @@ async def update_config(update: LLMConfigUpdate) -> tuple[LLMGateway, dict[str, 
     """Merge ``update`` into the stored overlay, persist it and rebuild the gateway.
 
     Returns the new gateway and an audit-safe summary of the change (secrets reported as "set"/"cleared").
+    Raises :class:`UIOverrideLockedError` when ``llm.allow_ui_override`` is false.
     """
+    if not get_settings().llm.allow_ui_override:
+        raise UIOverrideLockedError(
+            "LLM settings are pinned by the environment / tokiwa.yaml (llm.allow_ui_override=false)"
+        )
     overlay = await load_overlay()
     before = dict(overlay)
     raw_bindings = overlay.pop(KEY_BINDINGS, None)
@@ -287,10 +326,24 @@ async def update_config(update: LLMConfigUpdate) -> tuple[LLMGateway, dict[str, 
     return await rebuild_gateway(), changes
 
 
+async def reset_overrides() -> tuple[LLMGateway, list[str]]:
+    """Remove every UI override (and key binding) and rebuild the gateway from env / YAML. Returns the field names.
+
+    Allowed even when ``llm.allow_ui_override`` is false (clearing stored rows only ever moves towards the static
+    configuration).
+    """
+    stored = await load_overlay()
+    cleared = sorted(k for k in stored if k != KEY_BINDINGS)
+    await set_setting(LLM_CONFIG_KEY, {})
+    return await rebuild_gateway(), cleared
+
+
 async def config_view(gateway: LLMGateway | None = None) -> LLMConfigOut:
     gw = gateway or get_gateway()
     llm = gw.llm
-    overlay = clean_overlay(get_settings().llm, await load_overlay())
+    static = get_settings().llm
+    stored = clean_overlay(static, await load_overlay())
+    overlay = stored if static.allow_ui_override else {}
     try:
         spent = await gw.spent_today_usd()
     except Exception:
@@ -318,6 +371,8 @@ async def config_view(gateway: LLMGateway | None = None) -> LLMConfigOut:
         anthropic_api_key_set=anthropic_api_key(gw.settings) is not None,
         openai_api_key_set=bool(openai_key is not None and openai_key.get_secret_value()),
         overridden=sorted(overlay),
+        ui_override_allowed=static.allow_ui_override,
+        ignored_overrides=[] if static.allow_ui_override else sorted(stored),
         api_key_rebind_required=rebind_required(overlay),
         unpriced_models=gw.unpriced_models(),
     )
@@ -335,5 +390,25 @@ async def apply_stored_config() -> None:
     except Exception:
         log.exception("could not read %s; using static LLM settings", LLM_CONFIG_KEY)
         return
-    if overlay:
-        await rebuild_gateway()
+    if not overlay:
+        return
+    static = get_settings().llm
+    if not static.allow_ui_override:
+        stored = sorted(clean_overlay(static, overlay))
+        if stored:
+            log.warning(
+                "llm.allow_ui_override=false: ignoring LLM settings saved from the UI for: %s "
+                "(clear them with DELETE /api/v1/llm/config or the reset button on the LLM settings page)",
+                ", ".join(stored),
+            )
+        return
+    differ = overridden_differences(static, overlay)
+    if differ:
+        # Names only: values may be secrets or attacker-chosen URLs (#172).
+        log.warning(
+            "LLM settings saved from the UI override the environment / tokiwa.yaml for: %s. To pin the static "
+            "configuration set llm.allow_ui_override=false; to clear them use DELETE /api/v1/llm/config or the reset "
+            "button on the LLM settings page",
+            ", ".join(differ),
+        )
+    await rebuild_gateway()

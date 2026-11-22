@@ -149,6 +149,10 @@ OpenAI 互換（ローカル LLM）は Web 検索不可 → エラーとして�
 - **API レスポンスで決して返さない**: `GET/PUT /llm/config` は `anthropic_api_key_set` / `openai_api_key_set`
   の真偽のみ。base URL は `user:pass@` をマスクして返す。テスト: `tests/llm/test_llm_settings_routes.py`。
 - 監査ログ（`audit_log`, action=`llm.config.update`）にはキーの値を書かず `"set"` / `"cleared"` のみ。
+- **画面の上書きと静的設定（#172）**: settings_kv の `llm.config` は既定で env / YAML より優先される（後方互換）。
+  `llm.allow_ui_override=false`（env / YAML のみ）で DB の上書きを無視し `PUT /llm/config` を 409 にできる
+  （`TOKIWA_LLM__PROVIDER=mock` で「外部 LLM に送らない」を固定する、DB の復元で旧プロバイダ・旧 base_url・旧キーが復活しない）。
+  起動時に静的設定と異なる項目名を WARNING（値は出さない）。`DELETE /llm/config`（監査 `llm.config.reset`）で全削除。
 - **キーと接続先の束縛（#98）**: 実行時（UI / `PUT /llm/config`）の `*_base_url` は `llm/endpoints.py::validate_runtime_base_url`
   を通す（https 必須・http は loopback のみ・リンクローカル / メタデータ / 0.0.0.0/8 / マルチキャストを拒否。`2852039166` や
   `0xa9.0xfe.0xa9.0xfe`、`::ffff:169.254.169.254` のような数値表記も正規化して判定）。保存済みの行も読み込み時に同じ規則で再検査する。
