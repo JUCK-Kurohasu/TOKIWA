@@ -148,21 +148,17 @@ export TOKIWA_COPILOT__ENABLED=false           # 停用 Copilot
 
 ## 保留期限
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
-
-- **自动删除（保留期限设置 / 清理）尚未实现**。事件、告警、安全事件、LLM 调用记录等会无限期保留，
-  直到手动删除（[#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80)、
-  [#158](https://github.com/JUCK-Kurohasu/TOKIWA/issues/158)、[#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)）。
-- 通过界面或 API 能删除的只有用户、API 令牌、规则、资产、欺骗防御资产、Copilot 对话、端口基线和通知渠道。
-  没有删除事件、告警、安全事件、AI 会话、LLM 调用记录或审计日志的功能。
-- 删除 Copilot 对话后，该对话中进行的 LLM 调用记录（`llm_calls`）仍会保留。删除欺骗防御资产后，触发记录仍会保留。
-- 无法连接服务器期间，Gate 和 Agent 会把事件缓存在 **内存** 中（默认 Gate 最多 10,000 条，Agent 最多 50,000 条；不写入磁盘）。
-- 数据保存在 `database.url` 指定的数据库中（默认 `./data/tokiwa.db`）。TOKIWA 不设置数据库文件的权限
-  （遵循 OS 的 umask；只有登录用签名密钥 `secret.key` 以 0600 创建）。数据库的备份也包含相同的数据。
+- **尚未实现自动删除（保留期限设置或定期清理）**。事件、告警、事件单（incident）、LLM 调用记录等在被手动删除前会一直保留
+  （[#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80)、
+  [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)）。
+- 特定 IP 地址、AI 会话或某一时间点之前的数据，可用 CLI `tokiwa data purge` 删除（见下文“应对数据主体的请求”）。
+- 界面和 API 只能删除用户、API 令牌、规则、资产、欺骗资产、Copilot 对话、端口基线和通知渠道。
+- 删除 Copilot 对话后，该对话中产生的 LLM 调用记录（`llm_calls`）仍会保留。删除欺骗资产后，触发记录仍会保留。
+- 无法连接服务器期间，Gate 和 Agent 会把事件暂存在 **内存** 中（Gate 默认最多 10,000 条，Agent 最多 50,000 条；不写入磁盘）。
+- 数据保存在 `database.url` 指定的数据库中（默认 `./data/tokiwa.db`）。TOKIWA 新建的 SQLite 文件和数据目录仅所有者可访问（0600 / 0700），
+  登录签名密钥 `secret.key` 也是 0600（已存在的文件和目录的权限不会更改）。数据库备份中也包含同样的数据。
 
 ## 谁能查看
-
-<!-- TODO(integrator): #157/#164/#167/#158 の統合後に更新 -->
 
 ### 按角色（API 权限）
 
@@ -171,19 +167,27 @@ export TOKIWA_COPILOT__ENABLED=false           # 停用 Copilot
 
 | 数据 | `viewer` | `analyst` | `admin` |
 |---|:-:|:-:|:-:|
-| 原始事件（包括请求体、查询、请求头、`raw`，以及主机进程的命令行和 OS 用户名） | ✅ | ✅ | ✅ |
-| AI 会话（来源 IP、User-Agent） | ✅ | ✅ | ✅ |
-| 告警（包括 `details` 中的匹配片段）、安全事件（摘要、分诊结果） | ✅ | ✅ | ✅ |
-| 欺骗防御的触发记录、处置列表（目标 IP、理由） | ✅ | ✅ | ✅ |
-| LLM 调用列表（用途、费用、状态；不含输入和应答正文） | ✅ | ✅ | ✅ |
-| 使用 Copilot（可通过工具搜索事件等） | ✅ | ✅ | ✅ |
-| LLM 调用的输入和应答正文 | — | — | ✅ |
-| 其他用户的 Copilot 对话 | — | — | ✅ |
+| 原始事件（请求体、查询、头部值、`raw`、主机进程的命令行） | 打码¹ | ✅ | ✅ |
+| 事件的来源、目标、方法、主机、路径、状态码、User-Agent | ✅ | ✅ | ✅ |
+| AI 会话（来源 IP、User-Agent；会话内的事件按第一行处理） | ✅ | ✅ | ✅ |
+| 告警（含 `details` 中的匹配内容；证据事件按第一行处理）、事件单（摘要、分诊结果） | ✅ | ✅ | ✅ |
+| 欺骗触发记录（令牌值对 viewer 打码）、处置列表（目标 IP、理由） | ✅ | ✅ | ✅ |
+| LLM 调用列表（用途、费用、状态；不含输入和响应正文²） | ✅ | ✅ | ✅ |
+| 使用 Copilot（其工具可搜索事件等） | —³ | ✅ | ✅ |
+| LLM 调用的输入和响应正文 | — | — | ✅ |
+| 其他用户的 Copilot 对话、读取访问记录（`GET /api/v1/audit/access`） | — | — | ✅ |
 | 审计日志、用户列表、通知渠道设置 | — | — | ✅ |
 
-- 实时推送（`GET /api/v1/stream`）会向所有已登录用户发送告警（包括 `details`）、安全事件和处置的内容，
-  以及欺骗防御的触发（来源 IP）。事件只发送数量，不发送 LLM 调用的输入和应答。
-- **不会记录查看行为**。审计日志只记录变更操作，查看或搜索事件、使用 Copilot、成功登录都不会被记录。
+- ¹ 对 `viewer`，查询、请求体、头部值（User-Agent、Host、Content-Type、Accept、Content-Length 以外）、Referrer 的查询部分、
+  `raw`、Gate 以外传感器的日志行、命令行和 LLM 应用的提示词会被替换为 `[redacted: analyst role required]`。
+  路径仍然可见（如果应用会把个人数据放进路径，请注意）。
+- ² 对被拒绝的对话，列表的 `error` 字段会包含模型输出的前 500 个字符。
+- ³ 默认 `copilot.min_role: analyst`；改为 `viewer` 后 viewer 也可使用。每个用户每分钟最多发送 `copilot.messages_per_minute` 条（默认 6）。
+- 实时推送（`GET /api/v1/stream`）会向所有已登录用户发送告警（含 `details`）、事件单和处置的内容，
+  以及欺骗触发（来源 IP）。事件只发送数量，不发送 LLM 调用的输入和响应。
+- **读取访问记录**：事件和 AI 会话的列表与详情、LLM 调用详情、Copilot 工具执行会记录到 `access_log`
+  （谁、哪个视图、什么条件、多少条；同一用户以同一条件的重复读取每 5 分钟合并为一行）。
+  登录成功与失败、登出以及首次设置会记入审计日志。查看告警和事件单不会被记录。
 
 ### TOKIWA 之外能查看的人
 
@@ -194,15 +198,19 @@ export TOKIWA_COPILOT__ENABLED=false           # 停用 Copilot
 
 ## 应对数据主体的请求
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
+特定 IP 地址、AI 会话或时间范围的数据，可在服务器主机上用 CLI 导出和删除（界面和 API 中没有此功能）。
 
-**没有** 一次性 **检索、导出或删除** 与特定人员（IP 地址、登录 ID 等）相关的数据的功能。
-
-- **查找**：事件可以按来源 IP（`GET /api/v1/events?source_ip=...`）或路径、User-Agent 的部分匹配（`q=`）筛选。
-  没有按请求体或查询内容检索的 API。
-- **导出或删除**：只能直接操作数据库。请检查上文“服务器内数据被复制的位置”中的所有表。
-  特别是，同一份证据会在告警和安全事件的分诊中被反复复制到 `llm_calls` 保存的输入里。
-  直接编辑数据库前，请先停止服务器并做好备份。
+- **查找**：事件可按来源 IP（`GET /api/v1/events?source_ip=...`）或路径、User-Agent 的部分匹配（`q=`）筛选。
+  没有按请求体或查询内容搜索的 API。
+- **导出**：`tokiwa data export --ip 203.0.113.7 --out subject.jsonl`（也可用 `--session` / `--before` 缩小范围；输出文件为 0600）。
+- **删除**：`tokiwa data purge --ip 203.0.113.7` 只显示将删除多少条（dry run）。加上 `--yes` 才会实际删除。
+  - 事件、AI 会话和欺骗触发记录按行删除。
+  - 告警保留行，只清除 `details`。
+  - `llm_calls` 保留费用记录，只清除输入和响应正文（正文中以独立词形式出现该 IP 的行，以及相关告警的行）。
+  - 导出和删除（包括 dry run）会以 `data.export` / `data.purge` 记入审计日志。
+- **无法以此删除的内容**：不能按 IP 以外的标识（如登录 ID）搜索或删除。事件单摘要、通知发送记录、
+  数据库备份以及用户另行保存的内容不在范围内。必要时请直接检查数据库（见上文“服务器内数据被复制的位置”），
+  手动编辑数据库前请先停止服务器并备份。
 - **已发送到外部的内容**：发送给 LLM 提供商或通知目标的内容无法从 TOKIWA 撤回。
 
 ## 运维人员应确认的要点

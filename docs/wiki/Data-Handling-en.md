@@ -148,42 +148,47 @@ export TOKIWA_COPILOT__ENABLED=false           # turn off the Copilot
 
 ## Retention
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
-
-- **Automatic deletion (retention settings / purging) is not implemented**. Events, alerts, incidents, LLM call records and so on
-  remain indefinitely until deleted by hand ([#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80),
-  [#158](https://github.com/JUCK-Kurohasu/TOKIWA/issues/158), [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)).
-- The UI and API can delete only users, API tokens, rules, assets, deception assets, Copilot conversations, port baselines and
-  notification channels. There is no way to delete events, alerts, incidents, AI sessions, LLM call records or the audit log.
-- Deleting a Copilot conversation leaves the records of the LLM calls made in it (`llm_calls`). Deleting a deception asset leaves its trip records.
-- While they cannot reach the server, the Gate and the Agent buffer events **in memory** (by default up to 10,000 events for the Gate and 50,000 for the Agent; nothing is written to disk).
-- Data goes into the DB at `database.url` (default `./data/tokiwa.db`). TOKIWA does not set permissions on the DB file
-  (they follow the OS umask; only the login signing key `secret.key` is created with 0600). DB backups contain the same data.
+- **Automatic deletion (a retention period or scheduled purge) is not implemented.** Events, alerts, incidents, LLM call
+  records and the like stay until someone deletes them ([#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80),
+  [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)).
+- Data for a given IP address, AI session or everything before a given time can be deleted with the CLI `tokiwa data purge` (see "Handling requests from data subjects" below).
+- The UI and API can delete only users, API tokens, rules, assets, deception assets, copilot conversations, port
+  baselines and notification channels.
+- Deleting a copilot conversation leaves the LLM call records (`llm_calls`) made in it. Deleting a deception asset leaves its trip records.
+- While they cannot reach the server, the Gate and Agent queue events **in memory** (Gate up to 10,000 by default, Agent up to 50,000; nothing is written to disk).
+- Data lives in the DB at `database.url` (default `./data/tokiwa.db`). New SQLite files and data directories that TOKIWA creates are
+  owner-only (0600 / 0700), as is the login signing key `secret.key`; existing files and directories are left as they are. DB backups contain the same data.
 
 ## Who can see it
-
-<!-- TODO(integrator): #157/#164/#167/#158 の統合後に更新 -->
 
 ### By role (API permissions)
 
 The role table in the [Web UI guide](Web-UI-en) describes which operations each role can perform. Which data each role can read is
-determined by the API permissions as follows (items not shown in the UI can still be retrieved through the API).
+decided by the API permissions below (items the UI does not show can still be fetched through the API).
 
 | Data | `viewer` | `analyst` | `admin` |
 |---|:-:|:-:|:-:|
-| Raw events (including bodies, queries, headers, `raw`, and host process command lines and OS user names) | ✅ | ✅ | ✅ |
-| AI sessions (source IP, User-Agent) | ✅ | ✅ | ✅ |
-| Alerts (including the matched fragments in `details`), incidents (summary, triage result) | ✅ | ✅ | ✅ |
-| Deception trip records, the list of response actions (target IP, reason) | ✅ | ✅ | ✅ |
-| The list of LLM calls (purpose, cost, status; without the input and response text) | ✅ | ✅ | ✅ |
-| Using the Copilot (its tools can search events and more) | ✅ | ✅ | ✅ |
-| Input and response text of LLM calls | — | — | ✅ |
-| Other users' Copilot conversations | — | — | ✅ |
+| Raw events (body, query, header values, `raw`, host process command lines) | masked¹ | ✅ | ✅ |
+| Event source, destination, method, host, path, status, User-Agent | ✅ | ✅ | ✅ |
+| AI sessions (source IP, User-Agent; events inside follow the first row) | ✅ | ✅ | ✅ |
+| Alerts (including the matched text in `details`; evidence events follow the first row), incidents (summary, triage result) | ✅ | ✅ | ✅ |
+| Deception trip records (token value masked for viewers), response actions (target IP, reason) | ✅ | ✅ | ✅ |
+| LLM call list (purpose, cost, status; no prompt or response text²) | ✅ | ✅ | ✅ |
+| Using the copilot (its tools can search events and more) | —³ | ✅ | ✅ |
+| LLM call prompt and response text | — | — | ✅ |
+| Other users' copilot conversations, read access log (`GET /api/v1/audit/access`) | — | — | ✅ |
 | Audit log, user list, notification channel settings | — | — | ✅ |
 
-- The live stream (`GET /api/v1/stream`) sends every logged-in user the content of alerts (including `details`), incidents and
-  response actions, and deception trips (source IP). Events are sent only as counts; the input and response of LLM calls are not sent.
-- **Reads are not recorded**. The audit log records only changes; viewing or searching events, using the Copilot and successful logins are not recorded.
+- ¹ For `viewer`, the query, body, header values (other than User-Agent, Host, Content-Type, Accept, Content-Length), the query part of
+  the Referrer, `raw`, log lines from sensors other than the Gate, command lines and LLM-app prompts are replaced with
+  `[redacted: analyst role required]`. Paths stay visible (take care if your application puts personal data in paths).
+- ² For a refused chat, the list's `error` field holds the first 500 characters of the model output.
+- ³ The default is `copilot.min_role: analyst`; set it to `viewer` to let viewers use it. Each user can send up to `copilot.messages_per_minute` messages per minute (default 6).
+- The live stream (`GET /api/v1/stream`) sends every signed-in user the content of alerts (including `details`), incidents and response actions,
+  and deception trips (source IP). Events are sent only as counts; LLM prompts and responses are not sent.
+- **Read access log**: event and AI-session lists and details, LLM call details and copilot tool runs are recorded in `access_log`
+  (who, which view, which filter, how many rows; repeated reads by the same user with the same filter are folded into one row per 5 minutes).
+  Login success and failure, logout and first-run setup go to the audit log. Viewing alerts and incidents is not recorded.
 
 ### Who can see it outside TOKIWA
 
@@ -194,16 +199,20 @@ determined by the API permissions as follows (items not shown in the UI can stil
 
 ## Handling requests from data subjects
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
+Data for a given IP address, AI session or time range can be exported and deleted with the CLI on the server host (there is no UI or API for it).
 
-There is **no feature to search, export or delete all the data about a specific person** (an IP address, a login ID, etc.) at once.
-
-- **Finding it**: Events can be filtered by source IP (`GET /api/v1/events?source_ip=...`) or by a substring of the path or User-Agent (`q=`).
-  There is no API to search the content of bodies or queries.
-- **Exporting or deleting it**: The only way is to work on the DB directly. Check every table in "Where data is copied inside the server" above.
-  In particular, the same evidence is copied repeatedly into the input stored in `llm_calls` by alert and incident triage.
-  Stop the server and take a backup before editing the DB directly.
-- **What was sent outside**: Content sent to the LLM provider or notification destinations cannot be recalled from TOKIWA.
+- **Find**: events can be filtered by source IP (`GET /api/v1/events?source_ip=...`) or by a substring of the path or User-Agent (`q=`).
+  No API searches inside bodies or queries.
+- **Export**: `tokiwa data export --ip 203.0.113.7 --out subject.jsonl` (`--session` / `--before` also narrow it; the output file is 0600).
+- **Delete**: `tokiwa data purge --ip 203.0.113.7` only shows how many rows would go (dry run). Add `--yes` to delete.
+  - Events, AI sessions and deception trip records are deleted row by row.
+  - Alerts keep their row; only `details` is cleared.
+  - `llm_calls` keep the cost record; only the prompt and response text are cleared (rows whose text contains the IP as a word, and rows of related alerts).
+  - Export and purge (including dry runs) are written to the audit log as `data.export` / `data.purge`.
+- **What this does not remove**: there is no search or deletion by identifiers other than IP (such as login IDs). Incident summaries,
+  notification history, DB backups and anything users saved elsewhere are out of scope. Check the DB directly if needed (see "Where data is
+  copied inside the server" above), and stop the server and take a backup before editing the DB by hand.
+- **What was sent outside**: content sent to the LLM provider or notification destinations cannot be recalled from TOKIWA.
 
 ## Points for operators to check
 

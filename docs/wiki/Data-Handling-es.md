@@ -148,42 +148,49 @@ export TOKIWA_COPILOT__ENABLED=false           # desactivar el Copilot
 
 ## Conservación
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
-
-- **El borrado automático (configuración de conservación / purga) no está implementado**. Los eventos, alertas, incidentes, registros de
-  llamadas al LLM, etc. se conservan indefinidamente hasta que se borren a mano ([#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80),
-  [#158](https://github.com/JUCK-Kurohasu/TOKIWA/issues/158), [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)).
-- Desde la interfaz o la API solo se pueden borrar usuarios, tokens de API, reglas, activos, activos de engaño, conversaciones del Copilot,
-  líneas base de puertos y canales de notificación. No hay forma de borrar eventos, alertas, incidentes, sesiones de IA, registros de llamadas al LLM ni el log de auditoría.
-- Al borrar una conversación del Copilot se conservan los registros de las llamadas al LLM hechas en ella (`llm_calls`). Al borrar un activo de engaño se conservan sus registros de activación.
-- Mientras no pueden contactar con el servidor, Gate y Agent acumulan los eventos **en memoria** (por defecto hasta 10.000 en Gate y 50.000 en Agent; no se escribe nada en disco).
-- Los datos se guardan en la base de datos de `database.url` (por defecto `./data/tokiwa.db`). TOKIWA no fija los permisos del archivo
-  de la base de datos (siguen la umask del SO; solo la clave de firma de inicio de sesión `secret.key` se crea con 0600). Las copias de seguridad de la base de datos contienen los mismos datos.
+- **La eliminación automática (un periodo de conservación o una purga programada) no está implementada.** Los eventos, alertas,
+  incidentes, registros de llamadas al LLM, etc. permanecen hasta que alguien los borra
+  ([#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80), [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)).
+- Los datos de una dirección IP, una sesión de IA o todo lo anterior a una fecha se pueden borrar con la CLI `tokiwa data purge` (ver «Atención de solicitudes de los interesados» más abajo).
+- Desde la UI y la API solo se pueden borrar usuarios, tokens de API, reglas, activos, activos de engaño, conversaciones del copiloto,
+  líneas base de puertos y canales de notificación.
+- Al borrar una conversación del copiloto se conservan los registros de llamadas al LLM (`llm_calls`) hechas en ella. Al borrar un activo de engaño se conservan sus registros de activación.
+- Mientras no pueden llegar al servidor, Gate y Agent acumulan eventos **en memoria** (Gate hasta 10.000 por defecto, Agent hasta 50.000; no se escribe nada en disco).
+- Los datos están en la base de datos de `database.url` (por defecto `./data/tokiwa.db`). Los archivos SQLite y directorios de datos nuevos que crea
+  TOKIWA son solo del propietario (0600 / 0700), igual que la clave de firma de inicio de sesión `secret.key`; los archivos y directorios
+  existentes no se modifican. Las copias de seguridad de la base de datos contienen los mismos datos.
 
 ## Quién puede verlo
 
-<!-- TODO(integrator): #157/#164/#167/#158 の統合後に更新 -->
-
 ### Por rol (permisos de la API)
 
-La tabla de roles de la [Guía de la interfaz web](Web-UI-es) describe qué operaciones puede realizar cada rol. Qué datos puede leer
-cada rol lo determinan los permisos de la API, como sigue (los elementos que no se muestran en la interfaz pueden obtenerse igualmente por la API).
+La tabla de roles de la [guía de la interfaz web](Web-UI-es) describe qué operaciones puede hacer cada rol. Qué datos puede leer cada rol
+lo deciden los permisos de la API indicados abajo (lo que la UI no muestra también se puede obtener por la API).
 
 | Datos | `viewer` | `analyst` | `admin` |
 |---|:-:|:-:|:-:|
-| Eventos en bruto (incluidos cuerpos, consultas, encabezados, `raw`, y líneas de comandos y usuarios del SO de los procesos del host) | ✅ | ✅ | ✅ |
-| Sesiones de IA (IP de origen, User-Agent) | ✅ | ✅ | ✅ |
-| Alertas (incluidos los fragmentos coincidentes de `details`), incidentes (resumen, resultado del triaje) | ✅ | ✅ | ✅ |
-| Registros de activación del engaño, lista de acciones de respuesta (IP objetivo, motivo) | ✅ | ✅ | ✅ |
-| Lista de llamadas al LLM (finalidad, costo, estado; sin el texto de la entrada ni de la respuesta) | ✅ | ✅ | ✅ |
-| Uso del Copilot (sus herramientas pueden buscar eventos y más) | ✅ | ✅ | ✅ |
-| Texto de la entrada y de la respuesta de las llamadas al LLM | — | — | ✅ |
-| Conversaciones del Copilot de otros usuarios | — | — | ✅ |
-| Log de auditoría, lista de usuarios, configuración de canales de notificación | — | — | ✅ |
+| Eventos en bruto (cuerpo, query, valores de cabeceras, `raw`, líneas de comando de procesos del host) | enmascarado¹ | ✅ | ✅ |
+| Origen, destino, método, host, ruta, estado y User-Agent del evento | ✅ | ✅ | ✅ |
+| Sesiones de IA (IP de origen, User-Agent; sus eventos siguen la primera fila) | ✅ | ✅ | ✅ |
+| Alertas (incluido el texto coincidente de `details`; los eventos de evidencia siguen la primera fila), incidentes (resumen, resultado del triaje) | ✅ | ✅ | ✅ |
+| Registros de activación de engaño (valor del token enmascarado para viewer), acciones de respuesta (IP objetivo, motivo) | ✅ | ✅ | ✅ |
+| Lista de llamadas al LLM (uso, coste, estado; sin el texto de entrada ni de respuesta²) | ✅ | ✅ | ✅ |
+| Usar el copiloto (sus herramientas pueden buscar eventos, etc.) | —³ | ✅ | ✅ |
+| Texto de entrada y respuesta de las llamadas al LLM | — | — | ✅ |
+| Conversaciones del copiloto de otros usuarios, registro de lecturas (`GET /api/v1/audit/access`) | — | — | ✅ |
+| Registro de auditoría, lista de usuarios, configuración de canales de notificación | — | — | ✅ |
 
-- La transmisión en vivo (`GET /api/v1/stream`) envía a todos los usuarios con sesión iniciada el contenido de las alertas (incluido `details`),
-  incidentes y acciones de respuesta, y las activaciones del engaño (IP de origen). Los eventos solo se envían como recuentos; la entrada y la respuesta de las llamadas al LLM no se envían.
-- **Las lecturas no se registran**. El log de auditoría solo registra cambios; ver o buscar eventos, usar el Copilot y los inicios de sesión correctos no se registran.
+- ¹ Para `viewer`, la query, el cuerpo, los valores de cabeceras (salvo User-Agent, Host, Content-Type, Accept y Content-Length), la parte
+  de query del Referrer, `raw`, las líneas de log de sensores distintos de Gate, las líneas de comando y los prompts de aplicaciones LLM se
+  sustituyen por `[redacted: analyst role required]`. Las rutas siguen visibles (cuidado si la aplicación pone datos personales en las rutas).
+- ² En un chat rechazado, el campo `error` de la lista contiene los primeros 500 caracteres de la salida del modelo.
+- ³ Por defecto `copilot.min_role: analyst`; con `viewer` también pueden usarlo los viewers. Cada usuario puede enviar hasta `copilot.messages_per_minute` mensajes por minuto (6 por defecto).
+- El flujo en directo (`GET /api/v1/stream`) envía a todos los usuarios con sesión iniciada el contenido de alertas (incluido `details`),
+  incidentes y acciones de respuesta, y las activaciones de engaño (IP de origen). De los eventos solo se envía el número; no se envían entradas ni respuestas del LLM.
+- **Registro de lecturas**: las listas y detalles de eventos y sesiones de IA, los detalles de llamadas al LLM y las ejecuciones de herramientas
+  del copiloto se registran en `access_log` (quién, qué vista, qué filtro, cuántas filas; las lecturas repetidas del mismo usuario con el mismo
+  filtro se agrupan en una fila cada 5 minutos). Los inicios de sesión correctos y fallidos, los cierres de sesión y la configuración inicial
+  van al registro de auditoría. La consulta de alertas e incidentes no se registra.
 
 ### Quién puede verlo fuera de TOKIWA
 
@@ -194,16 +201,21 @@ cada rol lo determinan los permisos de la API, como sigue (los elementos que no 
 
 ## Atención de solicitudes de los interesados
 
-<!-- TODO(integrator): #158 の統合後に更新 -->
+Los datos de una dirección IP, una sesión de IA o un intervalo de tiempo se pueden exportar y borrar con la CLI en el host del servidor (no hay UI ni API para ello).
 
-**No hay ninguna función para buscar, exportar o borrar de una vez todos los datos sobre una persona concreta** (una dirección IP, un ID de inicio de sesión, etc.).
-
-- **Encontrarlos**: los eventos se pueden filtrar por IP de origen (`GET /api/v1/events?source_ip=...`) o por una subcadena de la ruta o del User-Agent (`q=`).
-  No hay API para buscar en el contenido de los cuerpos ni de las consultas.
-- **Exportarlos o borrarlos**: la única forma es trabajar directamente sobre la base de datos. Revise todas las tablas de "Dónde se copian los datos dentro del servidor".
-  En particular, la misma evidencia se copia repetidamente en la entrada guardada en `llm_calls` por el triaje de alertas e incidentes.
-  Detenga el servidor y haga una copia de seguridad antes de editar la base de datos directamente.
-- **Lo enviado al exterior**: lo que se envió al proveedor del LLM o a los destinos de notificación no se puede recuperar desde TOKIWA.
+- **Buscar**: los eventos se filtran por IP de origen (`GET /api/v1/events?source_ip=...`) o por una subcadena de la ruta o el User-Agent (`q=`).
+  Ninguna API busca dentro de cuerpos o queries.
+- **Exportar**: `tokiwa data export --ip 203.0.113.7 --out subject.jsonl` (`--session` / `--before` también acotan; el archivo de salida es 0600).
+- **Borrar**: `tokiwa data purge --ip 203.0.113.7` solo muestra cuántas filas se borrarían (dry run). Añada `--yes` para borrar.
+  - Los eventos, las sesiones de IA y los registros de activación de engaño se borran fila a fila.
+  - Las alertas conservan la fila; solo se vacía `details`.
+  - `llm_calls` conserva el registro de coste; solo se vacían los textos de entrada y respuesta (filas cuyo texto contiene la IP como palabra y filas de alertas relacionadas).
+  - La exportación y la purga (incluido el dry run) quedan en el registro de auditoría como `data.export` / `data.purge`.
+- **Lo que esto no elimina**: no hay búsqueda ni borrado por identificadores distintos de la IP (como IDs de inicio de sesión). Los resúmenes de
+  incidentes, el historial de notificaciones, las copias de seguridad de la base de datos y lo que los usuarios hayan guardado por su cuenta quedan
+  fuera. Si hace falta, revise la base de datos directamente (ver «Dónde se copian los datos dentro del servidor» arriba), y detenga el servidor y
+  haga una copia de seguridad antes de editarla a mano.
+- **Lo enviado al exterior**: lo enviado al proveedor del LLM o a los destinos de notificación no se puede recuperar desde TOKIWA.
 
 ## Aspectos que el operador debe revisar
 
