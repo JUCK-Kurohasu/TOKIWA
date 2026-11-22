@@ -375,6 +375,12 @@ class NotifySettings(BaseModel):
     dedup_minutes: int = 10
     # Send approval requests for new response proposals (action.proposed).
     notify_action_proposals: bool = True
+    # Audit #128 / #168: include free text written by the LLM (incident summary, proposal reason) in messages to
+    # external channels. Off: it is steerable through the telemetry (fake links in approval requests) and may
+    # quote personal data from the evidence into a third-party service; the UI link still leads to it.
+    include_summary: bool = False
+    # Include source IPs and IP / CIDR action targets (off where IP addresses count as personal data).
+    include_source_ip: bool = True
     # Allowed destination hosts for webhook/slack/discord ("example.com" exact, ".example.com" suffix).
     # Empty = any host.
     allowed_hosts: list[str] = Field(default_factory=list)

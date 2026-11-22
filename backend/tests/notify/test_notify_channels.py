@@ -56,7 +56,7 @@ def test_webhook_payload_shape() -> None:
 
 def test_slack_payload_shape_and_escaping() -> None:
     p = slack_payload(_n())
-    assert set(p) == {"text", "blocks"}
+    assert set(p) == {"text", "mrkdwn", "blocks"}
     types = [b["type"] for b in p["blocks"]]
     assert types[0] == "header" and "section" in types and types[-1] == "context"
     body = p["blocks"][1]["text"]["text"]
@@ -204,7 +204,7 @@ async def test_deliver_slack_posts_expected_json(settings) -> None:  # type: ign
     import json
 
     body = json.loads(sent.content)
-    assert set(body) == {"text", "blocks"}
+    assert set(body) == {"text", "mrkdwn", "blocks"}
 
 
 async def test_deliver_refused_destination_reports_safely(settings) -> None:  # type: ignore[no-untyped-def]

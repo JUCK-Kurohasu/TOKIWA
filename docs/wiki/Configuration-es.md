@@ -141,6 +141,8 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `notify.public_ui_url` | Ninguno | Destino de los enlaces a la interfaz incluidos en las notificaciones |
 | `notify.language` | `both` | Idioma de las notificaciones |
 | `notify.dedup_minutes` | 10 | Tiempo durante el que se suprimen las notificaciones idénticas |
+| `notify.include_summary` | false | Incluir en las notificaciones el texto escrito por el LLM (resúmenes de incidentes, motivos de las acciones) |
+| `notify.include_source_ip` | true | Incluir en las notificaciones las IP de origen y los objetivos IP / CIDR de las acciones (false muestra `(hidden)`) |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | Restricción de destinos (protección contra SSRF) |
 | `notify.smtp_password_envs` | `[]` | Nombres de variables de entorno adicionales permitidos como `password_env` del correo (por defecto se permiten `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`) |
 | `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | Restricción de destinos SMTP (rechazar direcciones privadas está desactivado por defecto porque los relés internos son habituales) |

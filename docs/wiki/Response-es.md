@@ -131,6 +131,7 @@ Si registra Webhook / Slack / Discord / correo electrónico en **Settings → No
 
 - Un mismo contenido se envía como máximo una vez cada 10 minutos (`notify.dedup_minutes`). No obstante, se envía si la severidad aumenta.
 - El idioma de las notificaciones se define con `notify.language` (`ja` / `en` / `both`). Los enlaces usan `notify.public_ui_url`.
+- Por defecto, las solicitudes de aprobación solo incluyen el tipo de acción, el objetivo, el TTL, el proponente y el enlace a la interfaz. Los motivos escritos por el LLM y los resúmenes de incidentes pueden ser manipulados por un atacante y contener datos personales, por lo que solo se incluyen con `notify.include_summary=true`. Para omitir las IP de origen, configure `notify.include_source_ip=false`. En Slack, Discord y correo, las URL del texto dejan de ser enlaces (`hxxps://`) y se desactiva el formato de Discord.
 - **Protección contra SSRF**: solo se admiten destinos http / https y no se siguen redirecciones. Por defecto, se rechaza el destino si la resolución de nombres
   da una dirección privada (loopback, red interna, metadatos de la nube, etc.). También se pueden limitar los hosts permitidos
   con `notify.allowed_hosts`.

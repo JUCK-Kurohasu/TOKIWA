@@ -164,10 +164,19 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | kind | config | ペイロード |
 |---|---|---|
 | webhook | `url`, `headers`（任意、値は秘密） | `{source:"tokiwa", kind, severity, title, text, url, fields, data, sent_at}` |
-| slack | `url`（Incoming Webhook） | `{text, blocks:[header, section(mrkdwn), section(fields), context(link)]}`。`< > &` をエスケープ（`<!channel>` 等を無効化） |
-| discord | `url` | `{username:"TOKIWA", embeds:[{title, description, url, color, fields, timestamp}], allowed_mentions:{parse:[]}}` |
+| slack | `url`（Incoming Webhook） | `{text, mrkdwn:false, blocks:[header, section(plain_text), section(plain_text fields), context(link)]}`。`< > &` をエスケープ（`<!channel>` 等を無効化） |
+| discord | `url` | `{username:"TOKIWA", embeds:[{title, description, url, color, fields, timestamp}], allowed_mentions:{parse:[]}}`。title・description・field 値は Markdown をバックスラッシュでエスケープ |
 | email | `host, port(587), from_addr, to_addrs[], username?, password? / password_env?, starttls(true), ssl(false), timeout_seconds` | text/plain。smtplib を `asyncio.to_thread` で実行 |
 
+- **非信頼テキスト（監査 #128 / #168）**: タイトル・本文・フィールド値には攻撃者が制御できる断片（パス、IDS の message、LLM が書いた
+  理由）が入りうる。人が読むチャネル（Slack・Discord・メール）では本文中の URL を無害化（`https://` → `hxxps://`、自動リンクさせない）、
+  Discord は Markdown（マスクリンク `[文言](URL)`・強調・見出し）をエスケープ、Slack は `plain_text` で送る。TOKIWA 自身の UI リンク
+  （`notify.public_ui_url`）だけはリンクのまま。Webhook は機械向けなので生の文字列。双方向制御文字・ゼロ幅文字は全チャネルで除去。
+  TODO(verify): Discord の embed タイトルで Markdown が描画されるか（されなければバックスラッシュが見える）、Slack の plain_text で
+  `&amp;` が復号されるか・スキーム無しのドメインが自動リンクされるか、Incoming Webhook が最上位の `mrkdwn:false` を解釈するか。
+- **LLM の自由文**（インシデント要約・対処の `reason`）は `notify.include_summary=true` のときだけ載せる（既定 false。承認依頼は
+  種類・対象・TTL・提案元・状態と UI リンクのみ）。`notify.include_source_ip=false` で送信元 IP と IP / CIDR の対処対象を `(hidden)` に
+  （Webhook の `data` からも外す。重複抑制のキーには内部で使う）。
 - 秘密のマスク: `url` → `https://<host>/********`、`password` → `********`、`headers` の値 → `********`。
   PATCH でマスク値をそのまま返すと既存の秘密を保持する。ただし **宛先が同じときだけ**（監査 #118）: メールは host / port /
   username、webhook は url が変わったらマスク値の秘密は引き継がず 422（再入力を求める）。エラーメッセージに URL のパス（トークン）を含めない。
@@ -212,7 +221,8 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | nftables_enabled / nftables_binary | false / nft | nft executor |
 
 `notify.*`（`NotifySettings`）: `default_webhook_url`, `default_min_severity`, `public_ui_url`, `language`（both）,
-`dedup_minutes`（10）, `notify_action_proposals`（true）, `allowed_hosts`, `block_private_destinations`（true）,
+`dedup_minutes`（10）, `notify_action_proposals`（true）, `include_summary`（false）, `include_source_ip`（true）,
+`allowed_hosts`, `block_private_destinations`（true）,
 `http_timeout_seconds`（10）, `smtp_password_envs`（[]）, `smtp_allowed_hosts`（[]）, `smtp_block_private`（false）,
 `smtp_allow_plaintext_auth`（false）。
 
@@ -229,4 +239,5 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 - 二人承認（提案者と別人の承認）は未実装。必要なら `approve_action` で `actor != 提案者` を強制する。
 - deception の `create_asset` / `delete_asset` の正式な関数名は deception モジュールと要合意（現状はダックタイピング）。
 - 通知の重複抑制・インシデント重大度の記憶はプロセス内メモリ（複数プロセス構成では共有されない）。
-- `action.proposed` の承認依頼に含める提案理由（LLM 由来の可能性あり）は人間向け表示のみ。エスケープ・長さ制限済み。
+- `action.proposed` の承認依頼に提案理由（LLM 由来の可能性あり）を含めるのは `notify.include_summary=true` のときだけ。
+  含める場合もチャネルごとにエスケープ・URL 無害化・長さ制限済み。

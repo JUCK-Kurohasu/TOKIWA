@@ -141,6 +141,8 @@ deception:
 | `notify.public_ui_url` | なし | 通知に入れる UI のリンク先 |
 | `notify.language` | `both` | 通知の言語 |
 | `notify.dedup_minutes` | 10 | 同じ通知を抑制する時間 |
+| `notify.include_summary` | false | LLM が書いた文（インシデントの要約・対処の理由）を通知に載せる |
+| `notify.include_source_ip` | true | 送信元 IP と IP / CIDR の対処対象を通知に載せる（false で `(hidden)`） |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | 送信先の制限（SSRF 対策） |
 | `notify.smtp_password_envs` | `[]` | メールの `password_env` に使える追加の環境変数名（既定で使えるのは `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`） |
 | `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP の送信先の制限（社内リレーを考え、プライベート宛ての拒否は既定 OFF） |

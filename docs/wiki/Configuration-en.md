@@ -141,6 +141,8 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `notify.public_ui_url` | None | UI link target included in notifications |
 | `notify.language` | `both` | Notification language |
 | `notify.dedup_minutes` | 10 | Period during which identical notifications are suppressed |
+| `notify.include_summary` | false | Include text written by the LLM (incident summaries, action reasons) in notifications |
+| `notify.include_source_ip` | true | Include source IPs and IP / CIDR action targets in notifications (false shows `(hidden)`) |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | Destination restrictions (SSRF protection) |
 | `notify.smtp_password_envs` | `[]` | Extra environment variable names allowed as an email `password_env` (`TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` are allowed by default) |
 | `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP destination restrictions (refusing private addresses is off by default because internal relays are common) |

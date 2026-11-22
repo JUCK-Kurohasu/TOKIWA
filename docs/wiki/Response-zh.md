@@ -131,6 +131,7 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 
 - 相同内容每 10 分钟最多发送 1 次（`notify.dedup_minutes`）。但严重级别上升时仍会发送。
 - 通知的语言由 `notify.language`（`ja` / `en` / `both`）决定。链接使用 `notify.public_ui_url`。
+- 默认情况下，处置的审批请求只包含类型、目标、TTL、提议者和指向界面的链接。LLM 写的理由和安全事件摘要可能被攻击者诱导、也可能含有个人信息，因此仅在 `notify.include_summary=true` 时包含。若不想包含来源 IP，请设置 `notify.include_source_ip=false`。在 Slack、Discord 和邮件中，正文里的 URL 会改为不可点击的形式（`hxxps://`），并禁用 Discord 的格式。
 - **SSRF 防护**：发送目标仅限 http / https，且不跟随重定向。默认情况下，如果域名解析的结果是私有
   地址（回环地址、内网、云元数据等），则拒绝发送。也可以通过
   `notify.allowed_hosts` 限定允许的主机。

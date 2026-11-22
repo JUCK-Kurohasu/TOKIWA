@@ -139,12 +139,13 @@ export TOKIWA_COPILOT__ENABLED=false           # desactivar el Copilot
 | Notificación | Contenido |
 |---|---|
 | Alerta | Título (hasta 200 caracteres), descripción (hasta 600 caracteres), IP de origen, categoría, ID de regla, puntuación de IA |
-| Incidente | Título, IP de origen (5 en el texto, hasta 20 en `data` del webhook), tipo de actor, puntuación de IA, número de alertas, etapa de ataque, **resumen (hasta 600 caracteres)** |
-| Solicitud de aprobación de una acción | Tipo de acción, IP objetivo, TTL, proponente, **motivo (hasta 500 caracteres)** |
+| Incidente | Título, IP de origen (5 en el texto, hasta 20 en `data` del webhook), tipo de actor, puntuación de IA, número de alertas, etapa de ataque, **resumen (hasta 600 caracteres; solo con `notify.include_summary=true`)** |
+| Solicitud de aprobación de una acción | Tipo de acción, IP objetivo, TTL, proponente, **motivo (hasta 500 caracteres; solo con `notify.include_summary=true`)** |
 
 - No se incluyen los cuerpos, consultas ni encabezados de los eventos. Sin embargo, los títulos y descripciones de las alertas pueden contener fragmentos de cadenas controladas por el atacante, como rutas y nombres de parámetros.
-- Los resúmenes de incidentes y los motivos de las acciones pueden ser texto escrito por el LLM durante el triaje. Si el LLM escribe datos personales de la evidencia, ese texto se envía tal cual al destino (con qué frecuencia ocurre con un LLM real no está verificado).
-- No hay ninguna opción para elegir qué elementos se incluyen en las notificaciones.
+- Los resúmenes de incidentes y los motivos de las acciones pueden ser texto escrito por el LLM durante el triaje. Como el LLM puede escribir datos personales de la evidencia, no se incluyen por defecto (`notify.include_summary=true` los incluye; con qué frecuencia ocurre con un LLM real no está verificado).
+- Con `notify.include_source_ip=false`, las IP de origen y los objetivos IP / CIDR de las acciones se muestran como `(hidden)` (y se quitan de `data` del webhook).
+- En Slack, Discord y correo, las URL del texto dejan de ser enlaces (`hxxps://`) y se desactiva el formato de Discord (enlaces, énfasis).
 
 ## Conservación
 

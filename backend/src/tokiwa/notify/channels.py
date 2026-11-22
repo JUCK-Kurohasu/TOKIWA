@@ -2,9 +2,16 @@
 
 Payload shapes (tested):
 - webhook: ``{"source": "tokiwa", "kind", "severity", "title", "text", "url", "fields", "data", "sent_at"}``
-- slack:   incoming-webhook ``{"text", "blocks": [header, section(mrkdwn), section(fields), context?]}``
+- slack:   incoming-webhook ``{"text", "mrkdwn": false, "blocks": [header, section(plain_text),
+  section(plain_text fields), context(mrkdwn link)?]}``
 - discord: ``{"username", "embeds": [{title, description, url?, color, fields, timestamp}], "allowed_mentions": {"parse": []}}``
 - email:   plain-text ``EmailMessage`` sent with smtplib in a worker thread
+
+Untrusted text (audit #128): titles, bodies and field values can carry attacker-controlled fragments (paths, IDS
+messages, LLM-written reasons). For the human channels (Slack, Discord, e-mail) URLs inside them are defanged
+(``https://`` -> ``hxxps://``) so they are not clickable, Discord Markdown is backslash-escaped (no masked links
+``[text](url)``, emphasis or headings), and Slack gets them as ``plain_text``. Only TOKIWA's own UI link
+(``Notification.url``) stays a link. Webhooks receive the raw strings (machine consumers).
 
 Secrets (webhook URLs embed tokens in their path; SMTP password; custom headers) are masked on read and
 never included in error messages.
@@ -293,7 +300,35 @@ _SEVERITY_COLOR = {
 
 def _slack_escape(text: str) -> str:
     # Slack control sequences (<!channel>, <url|label>) start with "<"; escaping neutralizes mentions.
+    # TODO(verify): whether Slack shows "&amp;" decoded inside plain_text objects (it does for mrkdwn).
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_URL_SCHEME = re.compile(r"(?i)\b(h)(ttps?)(://)")
+_DISCORD_SPECIAL = re.compile(r"([\\*_~`|>#\[\]()\-])")
+
+
+def defang(text: str) -> str:
+    """``https://x`` -> ``hxxps://x``: still readable by an analyst, no longer auto-linked by chat / mail clients.
+
+    TODO(verify): Slack may still auto-link bare domains (``example.com``) without a scheme.
+    """
+    return _URL_SCHEME.sub(lambda m: f"{m.group(1)}xx{m.group(2)[2:]}{m.group(3)}", text)
+
+
+def _cut(text: str, limit: int) -> str:
+    """Truncate after escaping without leaving a lone escape backslash at the end."""
+    if len(text) <= limit:
+        return text
+    out = text[: limit - 1]
+    if (len(out) - len(out.rstrip("\\"))) % 2:
+        out = out[:-1]
+    return out + "…"
+
+
+def _discord_text(text: str, limit: int) -> str:
+    """Untrusted text for a Discord embed: defanged, Markdown-escaped (escape first, then cut)."""
+    return _cut(_DISCORD_SPECIAL.sub(r"\\\1", defang(text)), limit)
 
 
 def webhook_payload(n: Notification) -> dict[str, Any]:
@@ -310,35 +345,43 @@ def webhook_payload(n: Notification) -> dict[str, Any]:
     }
 
 
+def _slack_plain(text: str, limit: int) -> dict[str, Any]:
+    return {"type": "plain_text", "text": _cut(_slack_escape(defang(text)), limit), "emoji": False}
+
+
 def slack_payload(n: Notification) -> dict[str, Any]:
+    # Untrusted text goes in plain_text objects (no mrkdwn: no *bold*, no <url|label>, no mentions).
     blocks: list[dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": n.title[:150]}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": _slack_escape(n.text)[:2900]}},
+        {"type": "header", "text": _slack_plain(n.title, 150)},
+        {"type": "section", "text": _slack_plain(n.text, 2900)},
     ]
     if n.fields:
         blocks.append(
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*{_slack_escape(k)}*\n{_slack_escape(v)}"[:1900]}
-                    for k, v in list(n.fields.items())[:10]
-                ],
+                "fields": [_slack_plain(f"{k}\n{v}", 1900) for k, v in list(n.fields.items())[:10]],
             }
         )
     if n.url:
         blocks.append(
             {"type": "context", "elements": [{"type": "mrkdwn", "text": f"<{n.url}|Open in TOKIWA>"}]}
         )
-    return {"text": _slack_escape(f"[{n.severity.value.upper()}] {n.title}")[:3000], "blocks": blocks}
+    return {
+        "text": _cut(_slack_escape(defang(f"[{n.severity.value.upper()}] {n.title}")), 3000),
+        # Top-level text (notification fallback) without mrkdwn parsing. TODO(verify): honoured by incoming webhooks.
+        "mrkdwn": False,
+        "blocks": blocks,
+    }
 
 
 def discord_payload(n: Notification) -> dict[str, Any]:
+    # TODO(verify): whether Discord renders Markdown in embed titles; if not, the escapes show as backslashes there.
     embed: dict[str, Any] = {
-        "title": n.title[:256],
-        "description": n.text[:4000],
+        "title": _discord_text(n.title, 256),
+        "description": _discord_text(n.text, 4000),
         "color": _SEVERITY_COLOR[n.severity],
         "fields": [
-            {"name": k[:256], "value": (v or "-")[:1024], "inline": True}
+            {"name": k[:256], "value": _discord_text(v or "-", 1024), "inline": True}
             for k, v in list(n.fields.items())[:25]
         ],
         "timestamp": utcnow().isoformat(),
@@ -351,12 +394,13 @@ def discord_payload(n: Notification) -> dict[str, Any]:
 
 def email_message(n: Notification, cfg: EmailChannelConfig) -> EmailMessage:
     msg = EmailMessage()
-    subject = f"[{n.severity.value.upper()}] {n.title}".replace("\r", " ").replace("\n", " ")
+    subject = defang(f"[{n.severity.value.upper()}] {n.title}").replace("\r", " ").replace("\n", " ")
     msg["Subject"] = subject[:250]
     msg["From"] = cfg.from_addr
     msg["To"] = ", ".join(cfg.to_addrs)
-    lines = [n.text, ""]
-    lines += [f"{k}: {v}" for k, v in n.fields.items()]
+    # Mail clients auto-link URLs: defang the untrusted text, keep only TOKIWA's own link clickable.
+    lines = [defang(n.text), ""]
+    lines += [f"{k}: {defang(v)}" for k, v in n.fields.items()]
     if n.url:
         lines += ["", n.url]
     msg.set_content("\n".join(lines))

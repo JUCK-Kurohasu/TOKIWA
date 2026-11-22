@@ -131,6 +131,7 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 
 - 同じ内容は 10 分に 1 回まで（`notify.dedup_minutes`）。ただし重大度が上がった場合は送ります。
 - 通知の言語は `notify.language`（`ja` / `en` / `both`）。リンクには `notify.public_ui_url` を使います。
+- 対処の承認依頼には、既定で種類・対象・TTL・提案元と画面へのリンクだけを載せます。LLM が書いた理由やインシデントの要約は攻撃者に誘導されうる・個人情報を含みうるため、`notify.include_summary=true` のときだけ載せます。送信元 IP を載せたくない場合は `notify.include_source_ip=false`。Slack・Discord・メールでは本文中の URL をリンクにならない形（`hxxps://`）にし、Discord の書式は無効化します。
 - **SSRF 対策**: 送信先は http / https のみで、リダイレクトは追いません。既定では、名前解決した結果がプライベート
   アドレス（ループバック・社内網・クラウドのメタデータなど）なら拒否します。許可するホストを
   `notify.allowed_hosts` で限定することもできます。
