@@ -134,4 +134,5 @@ Si registra Webhook / Slack / Discord / correo electrónico en **Settings → No
 - **Protección contra SSRF**: solo se admiten destinos http / https y no se siguen redirecciones. Por defecto, se rechaza el destino si la resolución de nombres
   da una dirección privada (loopback, red interna, metadatos de la nube, etc.). También se pueden limitar los hosts permitidos
   con `notify.allowed_hosts`.
-- Se recomienda no guardar la contraseña del correo en la base de datos y pasarla mediante `password_env` (nombre de una variable de entorno).
+- Se recomienda no guardar la contraseña del correo en la base de datos y pasarla mediante `password_env` (nombre de una variable de entorno). Solo se aceptan nombres `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` y los que figuren en `notify.smtp_password_envs` (la configuración propia de TOKIWA `TOKIWA_*__*` y las claves de API como `ANTHROPIC_*` se rechazan aunque se listen). Si antes usaba otro nombre, renombre la variable o añádala a `notify.smtp_password_envs` (de lo contrario el envío falla con una explicación).
+- Un canal con nombre de usuario (SMTP AUTH) requiere STARTTLS o SSL. Vuelva a introducir la contraseña al cambiar el host, el puerto o el usuario (y los valores de cabecera del webhook al cambiar la URL).

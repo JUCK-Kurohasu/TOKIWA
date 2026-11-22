@@ -382,6 +382,19 @@ class NotifySettings(BaseModel):
     # Disable for lab receivers on a private network.
     block_private_destinations: bool = True
     http_timeout_seconds: float = 10.0
+    # --- e-mail channels (audit #118) ---
+    # ``password_env`` of an e-mail channel may only name TOKIWA_NOTIFY_SMTP_* / TOKIWA_SMTP_PASSWORD* variables,
+    # plus the exact names listed here (set in the config file / environment, never from the web UI). TOKIWA's
+    # own settings (TOKIWA_<SECTION>__*) and LLM / cloud credentials (ANTHROPIC_*, AWS_* ...) are always refused.
+    smtp_password_envs: list[str] = Field(default_factory=list)
+    # Allowed SMTP hosts ("example.com" exact, ".example.com" suffix). Empty = any host.
+    smtp_allowed_hosts: list[str] = Field(default_factory=list)
+    # Refuse SMTP hosts resolving to private / loopback / link-local addresses. Off by default: internal mail
+    # relays are common. Not pinned to the checked address (DNS rebinding is a residual risk, as for webhooks).
+    smtp_block_private: bool = False
+    # Allow SMTP AUTH without TLS (starttls=false and ssl=false). Off: the password would cross the network in
+    # clear text.
+    smtp_allow_plaintext_auth: bool = False
 
 
 class CopilotSettings(BaseModel):

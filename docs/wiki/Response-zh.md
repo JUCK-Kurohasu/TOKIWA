@@ -134,4 +134,5 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 - **SSRF 防护**：发送目标仅限 http / https，且不跟随重定向。默认情况下，如果域名解析的结果是私有
   地址（回环地址、内网、云元数据等），则拒绝发送。也可以通过
   `notify.allowed_hosts` 限定允许的主机。
-- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。
+- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。可用的环境变量名仅限 `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` 以及在设置 `notify.smtp_password_envs` 中列出的名称（TOKIWA 自身的设置 `TOKIWA_*__*` 和 `ANTHROPIC_*` 等 API 密钥即使列出也不能使用）。如果之前使用了其他名称，请重命名该变量或将其加入 `notify.smtp_password_envs`（否则发送会失败并给出原因）。
+- 指定了用户名（SMTP 认证）的渠道必须使用 STARTTLS 或 SSL。更改主机、端口或用户名时请重新输入密码（更改 Webhook 的 URL 时也请重新输入头部值）。

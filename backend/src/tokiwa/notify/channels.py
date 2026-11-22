@@ -8,6 +8,11 @@ Payload shapes (tested):
 
 Secrets (webhook URLs embed tokens in their path; SMTP password; custom headers) are masked on read and
 never included in error messages.
+
+E-mail channels (audit #118): ``password_env`` may only name an allowed variable (:func:`password_env_problem`),
+SMTP AUTH needs STARTTLS or SSL unless ``notify.smtp_allow_plaintext_auth``, the host is checked against
+``notify.smtp_allowed_hosts`` / ``notify.smtp_block_private``, a masked secret is never carried over to a new
+destination (:func:`merge_masked`), and SMTP errors are reported by category only (no port-probing oracle).
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from tokiwa.config import NotifySettings, get_settings
-from tokiwa.notify.outbound import DeliveryError, OutboundBlocked, post_json
+from tokiwa.notify.outbound import DeliveryError, OutboundBlocked, check_host, post_json, safe_url_label
 from tokiwa.notify.render import Notification
 from tokiwa.schemas.common import Severity
 from tokiwa.schemas.response import ChannelKind
@@ -34,6 +39,39 @@ MASK = "********"
 _EMAIL_RE = re.compile(r"^[^@\s<>,;\"']+@[^@\s<>,;\"']+$")
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 _ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+# password_env names an operator may use without any extra configuration.
+ALLOWED_PASSWORD_ENV_PREFIXES = ("TOKIWA_NOTIFY_SMTP_", "TOKIWA_SMTP_PASSWORD")
+# Never readable as an SMTP password, even when listed in notify.smtp_password_envs: TOKIWA's own settings
+# (TOKIWA_LLM__ANTHROPIC_API_KEY, TOKIWA_DATABASE__URL, TOKIWA_SERVER__SECRET_KEY ...) and common credentials.
+_DENIED_ENV_RE = re.compile(r"^TOKIWA_[A-Z0-9]+__")
+DENIED_PASSWORD_ENV_PREFIXES = (
+    "ANTHROPIC_",
+    "OPENAI_",
+    "AWS_",
+    "AZURE_",
+    "GOOGLE_",
+    "GCP_",
+    "GITHUB_",
+    "GH_",
+    "HF_",
+    "HUGGING",
+    "NVD_",
+    "DATABASE_",
+    "POSTGRES",
+    "PG",
+)
+
+
+def password_env_problem(name: str, settings: NotifySettings) -> str | None:
+    """Why ``name`` may not be used as ``password_env`` (None = allowed). The message is safe to show."""
+    if _DENIED_ENV_RE.match(name) or name.startswith(DENIED_PASSWORD_ENV_PREFIXES):
+        return f"password_env {name} is not allowed (TOKIWA settings and API credentials cannot be read)"
+    if name.startswith(ALLOWED_PASSWORD_ENV_PREFIXES) or name in settings.smtp_password_envs:
+        return None
+    return (
+        f"password_env {name} is not allowed: use a TOKIWA_NOTIFY_SMTP_* or TOKIWA_SMTP_PASSWORD* variable, "
+        "or list the name in notify.smtp_password_envs (server configuration)"
+    )
 
 
 def _check_http_url(value: str) -> str:
@@ -123,10 +161,28 @@ class EmailChannelConfig(BaseModel):
             raise ValueError("password_env must be an environment variable name")
         return v
 
-    def resolved_password(self) -> str | None:
-        if self.password_env:
-            return os.environ.get(self.password_env) or None
-        return self.password or None
+    def has_credentials(self) -> bool:
+        return bool(self.username and (self.password or self.password_env))
+
+
+def email_problem(cfg: EmailChannelConfig, settings: NotifySettings) -> str | None:
+    """Policy checks that depend on server settings (at save time and again before every send)."""
+    if cfg.password_env:
+        problem = password_env_problem(cfg.password_env, settings)
+        if problem:
+            return problem
+    if cfg.has_credentials() and not (cfg.starttls or cfg.ssl) and not settings.smtp_allow_plaintext_auth:
+        return "SMTP AUTH requires starttls or ssl (set notify.smtp_allow_plaintext_auth to allow clear-text AUTH)"
+    return None
+
+
+def resolve_smtp_password(cfg: EmailChannelConfig, settings: NotifySettings) -> str | None:
+    """The password to log in with. Re-checks ``password_env`` (channels saved before the allow-list)."""
+    if cfg.password_env:
+        if password_env_problem(cfg.password_env, settings):
+            return None
+        return os.environ.get(cfg.password_env) or None
+    return cfg.password or None
 
 
 _CONFIG_MODELS: dict[ChannelKind, type[BaseModel]] = {
@@ -141,17 +197,32 @@ class ChannelConfigError(ValueError):
     pass
 
 
-def validate_config(kind: ChannelKind, config: dict[str, Any]) -> dict[str, Any]:
+def validate_config(
+    kind: ChannelKind, config: dict[str, Any], settings: NotifySettings | None = None
+) -> dict[str, Any]:
     """Validate and normalize a channel config. Raises :class:`ChannelConfigError` (message is safe)."""
     model = _CONFIG_MODELS[kind]
     try:
-        return model.model_validate(config).model_dump(exclude_none=True)
+        parsed = model.model_validate(config)
     except ValidationError as exc:
         # Do not echo input values (they may be secrets): report locations and messages only.
         problems = "; ".join(
             f"{'.'.join(str(p) for p in err['loc']) or 'config'}: {err['msg']}" for err in exc.errors()
         )
         raise ChannelConfigError(problems) from None
+    if isinstance(parsed, EmailChannelConfig):
+        problem = email_problem(parsed, settings or get_settings().notify)
+        if problem:
+            raise ChannelConfigError(problem)
+    return parsed.model_dump(exclude_none=True)
+
+
+def destination_label(kind: ChannelKind, config: dict[str, Any]) -> str:
+    """Where a channel sends to, without secrets (audit trail of destination changes)."""
+    if kind is ChannelKind.EMAIL:
+        return f"smtp://{config.get('host', '?')}:{config.get('port', 587)}"
+    url = config.get("url")
+    return safe_url_label(url) if isinstance(url, str) else "?"
 
 
 def _mask_url(url: str) -> str:
@@ -176,7 +247,13 @@ def mask_config(kind: ChannelKind, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def merge_masked(kind: ChannelKind, incoming: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
-    """PATCH support: values the client echoes back in masked form keep the stored secret."""
+    """PATCH support: values the client echoes back in masked form keep the stored secret.
+
+    Only for the same destination (audit #118): a masked SMTP password is not carried over when host, port or
+    username change, nor masked webhook header values when the URL changes - the secret must be re-entered,
+    otherwise editing the destination alone would ship the stored secret to another server.
+    Raises :class:`ChannelConfigError`.
+    """
     merged = dict(incoming)
     if (
         "url" in merged
@@ -185,8 +262,18 @@ def merge_masked(kind: ChannelKind, incoming: dict[str, Any], existing: dict[str
     ):
         merged["url"] = existing["url"]
     if merged.get("password") == MASK and existing.get("password"):
+        same = (
+            merged.get("host") == existing.get("host")
+            and merged.get("port", 587) == existing.get("port", 587)
+            and merged.get("username") == existing.get("username")
+        )
+        if not same:
+            raise ChannelConfigError("re-enter the password when changing host, port or username")
         merged["password"] = existing["password"]
     if isinstance(merged.get("headers"), dict) and isinstance(existing.get("headers"), dict):
+        masked = [k for k, v in merged["headers"].items() if v == MASK and k in existing["headers"]]
+        if masked and merged.get("url") != existing.get("url"):
+            raise ChannelConfigError("re-enter the header values when changing the URL")
         merged["headers"] = {
             k: (existing["headers"].get(k, v) if v == MASK else v) for k, v in merged["headers"].items()
         }
@@ -276,9 +363,8 @@ def email_message(n: Notification, cfg: EmailChannelConfig) -> EmailMessage:
     return msg
 
 
-def _send_email_sync(cfg: EmailChannelConfig, msg: EmailMessage) -> None:
+def _send_email_sync(cfg: EmailChannelConfig, msg: EmailMessage, password: str | None) -> None:
     context = ssl.create_default_context()
-    password = cfg.resolved_password()
     smtp: smtplib.SMTP
     if cfg.ssl:
         smtp = smtplib.SMTP_SSL(cfg.host, cfg.port, timeout=cfg.timeout_seconds, context=context)
@@ -290,6 +376,16 @@ def _send_email_sync(cfg: EmailChannelConfig, msg: EmailMessage) -> None:
         if cfg.username and password:
             smtp.login(cfg.username, password)
         smtp.send_message(msg)
+
+
+def _smtp_error(exc: BaseException) -> str:
+    """Category only: the exception type (ConnectionRefusedError vs timeout ...) would let an admin session
+    probe internal ports through the test button."""
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return "SMTP authentication failed"
+    if isinstance(exc, smtplib.SMTPException):
+        return "SMTP error"
+    return "SMTP connection failed"
 
 
 # ---------------------------------------------------------------- delivery
@@ -306,10 +402,17 @@ async def deliver(
     try:
         if kind is ChannelKind.EMAIL:
             cfg = EmailChannelConfig.model_validate(config)
+            problem = email_problem(cfg, s)  # also catches channels saved before the allow-list existed
+            if problem:
+                raise DeliveryError(problem)
+            await check_host(
+                cfg.host, cfg.port, allowed_hosts=s.smtp_allowed_hosts, block_private=s.smtp_block_private
+            )
+            password = resolve_smtp_password(cfg, s)
             try:
-                await asyncio.to_thread(_send_email_sync, cfg, email_message(notification, cfg))
+                await asyncio.to_thread(_send_email_sync, cfg, email_message(notification, cfg), password)
             except (smtplib.SMTPException, OSError) as exc:
-                raise DeliveryError(f"SMTP error: {type(exc).__name__}") from None
+                raise DeliveryError(_smtp_error(exc)) from None
             return
         url_cfg = _CONFIG_MODELS[kind].model_validate(config)
         url = str(url_cfg.url)  # type: ignore[attr-defined]

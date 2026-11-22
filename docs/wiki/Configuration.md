@@ -142,6 +142,9 @@ deception:
 | `notify.language` | `both` | 通知の言語 |
 | `notify.dedup_minutes` | 10 | 同じ通知を抑制する時間 |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | 送信先の制限（SSRF 対策） |
+| `notify.smtp_password_envs` | `[]` | メールの `password_env` に使える追加の環境変数名（既定で使えるのは `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`） |
+| `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP の送信先の制限（社内リレーを考え、プライベート宛ての拒否は既定 OFF） |
+| `notify.smtp_allow_plaintext_auth` | false | TLS なしの SMTP 認証を許可する |
 | `copilot.enabled` | true | コパイロット |
 | `copilot.tier` | `deep` | 使うモデルのティア |
 | `copilot.max_tool_iterations` | 8 | 1 回の質問でツールを使う最大回数 |

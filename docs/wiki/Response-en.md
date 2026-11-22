@@ -134,4 +134,5 @@ When you register Webhook / Slack / Discord / email under **Settings → Notific
 - **SSRF protection**: Destinations must be http / https, and redirects are not followed. By default, a destination is rejected if its name resolves
   to a private address (loopback, internal network, cloud metadata, and so on). You can also restrict the allowed hosts with
   `notify.allowed_hosts`.
-- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead.
+- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead. Only `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` names and the names listed in `notify.smtp_password_envs` are accepted (TOKIWA's own settings `TOKIWA_*__*` and API keys such as `ANTHROPIC_*` are refused even if listed). If you used another name before, rename the variable or add it to `notify.smtp_password_envs` (otherwise sending fails with an explanation).
+- A channel with a username (SMTP AUTH) requires STARTTLS or SSL. Re-enter the password when you change the host, port or username (and webhook header values when you change the URL).

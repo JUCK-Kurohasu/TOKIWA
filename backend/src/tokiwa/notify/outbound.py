@@ -91,6 +91,17 @@ async def check_url(url: str, *, allowed_hosts: list[str], block_private: bool) 
     host = parts.hostname
     if not host:
         raise OutboundBlocked("URL has no host")
+    await check_host(
+        host,
+        port or (443 if parts.scheme == "https" else 80),
+        allowed_hosts=allowed_hosts,
+        block_private=block_private,
+    )
+
+
+async def check_host(host: str, port: int, *, allowed_hosts: list[str], block_private: bool) -> None:
+    """Host part of :func:`check_url` (also used for SMTP hosts, audit #118)."""
+    host = host.strip("[]")
     if not host_allowed(host, allowed_hosts):
         raise OutboundBlocked(f"host {host!r} is not in the allowed host list")
     if not block_private:
@@ -104,7 +115,7 @@ async def check_url(url: str, *, allowed_hosts: list[str], block_private: bool) 
         addrs = [literal]
     else:
         try:
-            resolved = await _resolve(host, port or (443 if parts.scheme == "https" else 80))
+            resolved = await _resolve(host, port)
         except OSError as exc:
             raise OutboundBlocked(f"cannot resolve host {host!r}") from exc
         addrs = []

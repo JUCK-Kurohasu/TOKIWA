@@ -142,6 +142,9 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `notify.language` | `both` | Notification language |
 | `notify.dedup_minutes` | 10 | Period during which identical notifications are suppressed |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | Destination restrictions (SSRF protection) |
+| `notify.smtp_password_envs` | `[]` | Extra environment variable names allowed as an email `password_env` (`TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` are allowed by default) |
+| `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP destination restrictions (refusing private addresses is off by default because internal relays are common) |
+| `notify.smtp_allow_plaintext_auth` | false | Allow SMTP authentication without TLS |
 | `copilot.enabled` | true | Copilot |
 | `copilot.tier` | `deep` | Model tier to use |
 | `copilot.max_tool_iterations` | 8 | Maximum number of tool uses per question |

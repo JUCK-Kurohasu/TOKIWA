@@ -134,4 +134,5 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 - **SSRF 対策**: 送信先は http / https のみで、リダイレクトは追いません。既定では、名前解決した結果がプライベート
   アドレス（ループバック・社内網・クラウドのメタデータなど）なら拒否します。許可するホストを
   `notify.allowed_hosts` で限定することもできます。
-- メールのパスワードは DB に保存せず、`password_env`（環境変数名）で渡すことを勧めます。
+- メールのパスワードは DB に保存せず、`password_env`（環境変数名）で渡すことを勧めます。使える環境変数名は `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` と、設定 `notify.smtp_password_envs` に列挙した名前だけです（TOKIWA 自身の設定 `TOKIWA_*__*` や `ANTHROPIC_*` などの API キーは列挙しても使えません）。以前の任意の名前を使っている場合は、名前を変えるか `notify.smtp_password_envs` に追加してください（そのままでは送信が理由付きで失敗します）。
+- ユーザー名を指定する（SMTP 認証する）チャネルは STARTTLS か SSL が必要です。送信先ホスト・ポート・ユーザー名を変えたときはパスワードを入力し直してください（Webhook のヘッダ値も URL を変えたら入力し直し）。

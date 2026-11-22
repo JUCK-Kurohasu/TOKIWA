@@ -169,9 +169,21 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | email | `host, port(587), from_addr, to_addrs[], username?, password? / password_env?, starttls(true), ssl(false), timeout_seconds` | text/plain。smtplib を `asyncio.to_thread` で実行 |
 
 - 秘密のマスク: `url` → `https://<host>/********`、`password` → `********`、`headers` の値 → `********`。
-  PATCH でマスク値をそのまま返すと既存の秘密を保持する。エラーメッセージに URL のパス（トークン）を含めない。
-- メールのパスワードは `password_env`（環境変数名）推奨（DB に秘密を置かないため）。
-- SMTP にはプライベート宛先拒否を適用しない（社内リレーが一般的なため）。
+  PATCH でマスク値をそのまま返すと既存の秘密を保持する。ただし **宛先が同じときだけ**（監査 #118）: メールは host / port /
+  username、webhook は url が変わったらマスク値の秘密は引き継がず 422（再入力を求める）。エラーメッセージに URL のパス（トークン）を含めない。
+- 監査ログ: チャネルの作成・削除に `destination`（`scheme://host[:port]` / `smtp://host:port`）、更新で宛先が変わったら
+  `destination: {before, after}`。
+- メールのパスワードは `password_env`（環境変数名）推奨（DB に秘密を置かないため）。**使える名前は `TOKIWA_NOTIFY_SMTP_*` /
+  `TOKIWA_SMTP_PASSWORD*` と `notify.smtp_password_envs` に列挙したものだけ**（#118。以前は任意の環境変数を読めたため、
+  admin セッションから `ANTHROPIC_API_KEY` や `TOKIWA_DATABASE__URL` を任意の SMTP サーバーへ送らせられた）。
+  `TOKIWA_<セクション>__*`（TOKIWA 自身の設定）と `ANTHROPIC_` / `OPENAI_` / `AWS_` / `AZURE_` / `GOOGLE_` / `GCP_` / `GITHUB_` /
+  `GH_` / `HF_` / `HUGGING` / `NVD_` / `DATABASE_` / `POSTGRES` / `PG` で始まる名前は列挙しても拒否。保存時は 422、
+  許可リスト導入前に保存されたチャネルは送信時に理由付きで失敗（ログイン・接続をしない）。
+- ユーザー名付き（SMTP AUTH）は `starttls` か `ssl` が必須（`notify.smtp_allow_plaintext_auth=true` で平文 AUTH を許可）。
+- SMTP ホストの制限: `notify.smtp_allowed_hosts`（空なら制限なし）、`notify.smtp_block_private`（既定 false。社内リレーが
+  一般的なため）。名前解決結果への接続固定はしていない（webhook と同じく DNS リバインディングは残存リスク）。
+- 送信エラーは種類だけ返す（`SMTP connection failed` / `SMTP authentication failed` / `SMTP error`）。例外型を返すと
+  テスト送信ボタンが内部ポートの探索に使えるため。
 
 ### SSRF ガード（webhook / slack / discord / webhook executor 共通: `notify/outbound.py`）
 
@@ -201,7 +213,8 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 
 `notify.*`（`NotifySettings`）: `default_webhook_url`, `default_min_severity`, `public_ui_url`, `language`（both）,
 `dedup_minutes`（10）, `notify_action_proposals`（true）, `allowed_hosts`, `block_private_destinations`（true）,
-`http_timeout_seconds`（10）。
+`http_timeout_seconds`（10）, `smtp_password_envs`（[]）, `smtp_allowed_hosts`（[]）, `smtp_block_private`（false）,
+`smtp_allow_plaintext_auth`（false）。
 
 ## 8. API
 
