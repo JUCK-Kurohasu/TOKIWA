@@ -174,6 +174,12 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 | GET | /system/jobs | user | → `JobInfo[]` |
 | POST | /system/jobs/{name}/run | admin | → `JobInfo`（バックグラウンド起動して即返す。実行中なら二重起動しない。未知は 404） |
 | GET | /audit | admin | `?action&actor&limit&offset` → `Page[AuditEntry]`（新しい順） |
+| GET | /audit/access | admin | `?actor&route(完全一致 or 末尾*で前方一致)&target&since&limit&offset` → `Page[AccessLogEntry {id, created_at, last_at, actor, actor_id, role, route, target, filters, hits, items}]`（閲覧監査、監査 #167。`routes/access_log.py`） |
+
+閲覧監査（`tokiwa.access_log`、テーブル `access_log`）: `events.list` / `events.get` / `sessions.list` / `sessions.get` /
+`llm.calls.get` / `copilot.tool.<name>` を記録。同じ actor(id)・route・target・filter の閲覧は 5 分窓で 1 行にまとめ
+（`hits` = 回数、`items` = 返した件数の合計）、窓の最初の 1 回だけ INSERT、以降はメモリ上で加算し窓の切替時と
+`GET /audit/access` の直前に書き戻す（ポーリングで行が増えず、GET が毎回書き込みにならない）。
 | GET | /stream | user(`?access_token`) | **SSE**: `data: {"topic": "...", "data": {...}}`（alert/incident/action/deception/llm.call） |
 
 stream の詳細: 接続直後にコメント `: connected`、15 秒ごとに `: ping` コメント。中継トピックは `alert.*` / `incident.*` /

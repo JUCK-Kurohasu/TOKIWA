@@ -12,8 +12,8 @@
 | #33 | 部分 | `tokiwa token create` / `ApiTokenCreate` / UI の既定スコープを `ingest` のみに。Gate 用は `--scope ingest --scope gate` を明示。`token create` の全呼び出し（AGENTS.md, README, .env.example, docs/deploy.md, docs/gate.md, wiki Installation/Quick-Start/Sensors/CLI ×4 言語）を更新（lab/scripts/init-tokens.sh・Makefile・scripts は既に明示）。Gate はポリシー取得 403 時に「gate スコープ不足」のヒントをログ。docs/gate.md・docs/deception.md・wiki Deception×4 に「gate トークン漏えい＝デセプション配置の漏えい」。既存トークンの scopes は不変 | 3bc39ab |
 | #163 | 部分（(a)(b) は完全、(c)(d) は auth レーン） | (a) `ApiTokenRow` に `expires_at`/`created_by`/`rotated_from`（nullable）。期限切れは 401 `API token expired`。API `expires_in_days`（既定は無期限のまま）と `POST /tokens/{id}/rotate`。CLI `tokiwa token create --expires-in-days` / `list [--all]` / `revoke <id\|name>` / `rotate <id\|name> --grace-hours --expires-in-days`（共通処理 `tokiwa/auth/api_tokens.py`、監査 actor `cli`。CLI 作成も監査に残るようになった）。(b) Gate: `gate/tokens.py` の `TokenSource` がトークンファイルを mtime/サイズ/inode 変化で再読込、401 で強制再読込して変わっていれば即再送、変わらなければイベントをキューに保持してバックオフ（以前は 401 でバッチ破棄）。空・読めないファイルは直前のトークンを維持。`GateSettings.token_file`（`TOKIWA_GATE__TOKEN_FILE`）を追加し lab の gate に設定。UI のトークン一覧に「期限切れ」バッジ | 6b4d6f0 |
 | #157 | 完全 | viewer にはイベントを伏字済み射影で返す（403 ではなく射影なので viewer の画面は壊れない）。`tokiwa/api/visibility.py`。対象: events 一覧/詳細、sessions 詳細の events、alerts 詳細の evidence、deception trips（バイパス経路も塞いだ）。伏字: query・request_body・ヘッダ値（UA/host/content-type/accept/content-length 以外）・referrer のクエリ・raw・Gate 以外の message・cmdline・llm_app.prompt・deception.token。フロントの body 整形は JSON.parse 失敗時に原文表示なので崩れない（確認済み）。wiki Web-UI ×4 にロール表を追記 | 0cd2e99 |
-| #164 | 部分 | `copilot.min_role`（既定 analyst、viewer/admin に変更可）未満は会話作成・送信が 403（既存会話の閲覧は可）。ユーザー別（user.id キー）の送信レート `copilot.messages_per_minute`（既定 6/分、0=無制限）超過で 429 + Retry-After（ストリーム開始前に判定、409 等の拒否は枠を消費しない）。UI は既存の ApiErrorState で 403/429 を表示（送信時に会話作成→403 を `sendError` で表示することをコード上で確認） | (このコミット) |
-| #167 | 未着手 | | |
+| #164 | 部分 | `copilot.min_role`（既定 analyst、viewer/admin に変更可）未満は会話作成・送信が 403（既存会話の閲覧は可）。ユーザー別（user.id キー）の送信レート `copilot.messages_per_minute`（既定 6/分、0=無制限）超過で 429 + Retry-After（ストリーム開始前に判定、409 等の拒否は枠を消費しない）。UI は既存の ApiErrorState で 403/429 を表示（送信時に会話作成→403 を `sendError` で表示することをコード上で確認） | 1b995b5 |
+| #167 | 部分 | 新テーブル `access_log`（`db/models/access.py`）と `tokiwa/access_log.py`。events 一覧/詳細・sessions 一覧/詳細・LLM 呼び出し詳細・Copilot ツール実行を actor/role/route/target/filter/件数で記録。同一 actor(id)+route+target+filter は 5 分窓で 1 行（最初だけ INSERT、以降メモリ加算→窓切替・閲覧前に UPDATE で書き戻し）。開いている窓は 5000 キーで上限。管理者向け `GET /api/v1/audit/access` | (このコミット) |
 | #158 | 未着手 | | |
 
 ### #40 で残したもの（部分の理由）
@@ -44,6 +44,13 @@
 - レート制限はプロセス内メモリ（ワーカーごと）。複数ワーカー構成では「ワーカー数 × 上限」になる。
 - UI で viewer に Copilot のメニュー自体を隠す: `min_role` は設定で変わるのでフロントが知る手段（例 `/auth/me` や
   `/system/info` に copilot 可否）が必要。frontend レーンへ依頼。
+
+### #167 で残したもの
+- ログイン成功/失敗の記録: auth レーン（`routes/auth.py`）担当のため未着手。
+- 閲覧監査の画面（設定 → 監査ログに「閲覧」タブ）: frontend レーンへ依頼。API は `GET /api/v1/audit/access`。
+- alerts 詳細・deception trips・incidents の閲覧は未記録（指摘の対象外。必要なら `record_access` を 1 行足すだけ）。
+- `access_log` の保持期間・パージ: 未実装（#158 の CLI にも入れていない）。
+- 最後の窓の加算分はプロセス終了時に失われうる（最初の 1 回は必ず残る）。ワーカーごとに窓を持つ。
 
 ### #163 で残したもの
 - (c) `tokiwa user reset-password`、(d) CLI の DB 例外で SQL パラメータを出さない（hide_parameters）: auth レーン担当のため未着手。
@@ -89,9 +96,13 @@
 - `frontend/src/pages/settings/TokensTab.tsx`: 状態列に「期限切れ」バッジ（数行）。
 - `tests/gate/test_gate_shipper.py`: 401 を恒久エラーの parametrize から外した（挙動変更のため）。
 - `config.py` の `CopilotSettings` に `min_role` / `messages_per_minute`（#164。copilot セクションのみ）。
+- `api/routes/llm.py`（`get_call` に `record_access` 1 行）、`copilot/service.py`（ツール実行後に `record_access_detached` 2 行）（#167）。
 - `api/routes/alerts.py`（`get_alert` の evidence に `project_events`、2 行）、`api/routes/deception.py`（`list_trips` に同、3 行）（#157）。
 
 ## 他レーンへの依頼
+
+- frontend: 設定 → 監査ログに「閲覧」タブ（`GET /api/v1/audit/access`、`route=events.*` 等で絞り込み）（#167）。
+- auth: ログイン成功/失敗を audit_log に（#167 の recommendation の後半、L07-03 と同時に）。
 
 - frontend: viewer（`copilot.min_role` 未満）にはコパイロットの入力欄を無効化して説明を表示（#164）。
 - LLM: 予算の用途別枠（copilot が triage を枯渇させない）（#164 の残り）。

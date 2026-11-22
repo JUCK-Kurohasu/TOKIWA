@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from tokiwa.access_log import record_access
 from tokiwa.api.deps import AdminUser, CurrentUser, DbSession
 from tokiwa.audit import record_audit
 from tokiwa.db.models.llm import LLMCallRow
@@ -168,10 +169,11 @@ async def list_calls(
 
 
 @router.get("/calls/{call_id}", response_model=LLMCallDetail)
-async def get_call(call_id: str, session: DbSession, _: AdminUser) -> LLMCallDetail:
+async def get_call(call_id: str, session: DbSession, admin: AdminUser) -> LLMCallDetail:
     row = await session.get(LLMCallRow, call_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "LLM call not found")
+    await record_access(session, admin, "llm.calls.get", target=call_id, count=1)  # audit #167
     return LLMCallDetail.model_validate(row)
 
 
