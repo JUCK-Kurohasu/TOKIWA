@@ -30,7 +30,7 @@
 
 | 传感器（dataset） | 保存的内容 | 遮盖的内容 | 不保存的内容 |
 |---|---|---|---|
-| **Gate**（`gate.http`） | 来源 / 目标的 IP 与端口、方法、Host、路径、查询、请求头（前 64 个）及其顺序、User-Agent、Referer、Content-Type、**文本类请求体的前 `gate.capture_body_bytes`（默认 4,096）字节**、请求体大小、状态码、响应大小与 Content-Type、处理时间 | `llm.redaction.sensitive_headers` 中请求头的值（`Authorization`、`Cookie` 等），以及下文“会被遮盖”的项目 | 响应正文、响应头（Content-Type 除外）、二进制请求体（只记录大小）、第 65 个之后的请求头 |
+| **Gate**（`gate.http`） | 来源 / 目标的 IP 与端口、方法、Host、路径、查询、请求头（最多 64 种；用于检测的请求头无论位置都会保留）及其顺序、User-Agent、Referer、Content-Type、**文本类请求体的前 `gate.capture_body_bytes`（默认 4,096）字节**、请求体大小、状态码、响应大小与 Content-Type、处理时间 | `llm.redaction.sensitive_headers` 中请求头的值（`Authorization`、`Cookie` 等），以及下文“会被遮盖”的项目 | 响应正文、响应头（Content-Type 除外）、二进制请求体（只记录大小）、超过 64 种的请求头（只保留标签 `gate:headers_truncated` 和请求头数量） |
 | **Gate 的诱饵响应**（`gate.deception`） | 与上面相同的 HTTP 内容再记录一条（包括输入到诱饵登录表单中的值） | 同上 | 同上（这些请求不会转发给受保护的应用） |
 | **nginx / Caddy**（`nginx.access` / `caddy.access`） | 来源 IP 与端口、方法、Host、路径、查询、日志中包含的请求头、状态码、大小、处理时间、原始日志行（`raw`，脱敏后，最多 4 KB） | 请求头的值（同上）、`password`、`token`、`cookie` 等键的值，以及下文“会被遮盖”的项目 | 请求体（访问日志中不包含） |
 | **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 连接（IP、端口、字节数、状态）、HTTP（路径、查询、UA、Referer、状态码）、notice、原始行（`raw`，最多 4 KB） | `password` 等键的值，以及下文“会被遮盖”的项目 | 上述 3 种以外的日志。另外，`http.log` 的 **`username` 列不在遮盖范围内**，会原样保留在 `raw` 中 |

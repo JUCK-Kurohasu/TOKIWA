@@ -72,6 +72,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节（0 表示不捕获） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | 拉取策略的间隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |
+| max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 
 仅 CLI 提供的运维参数：`--upstream-timeout`（30 秒）、`--max-queue`（待发送事件上限 10,000 条）、
 `--preserve-host / --rewrite-host`、`--access-log`。
@@ -82,6 +83,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   `X-Forwarded-*` 会被丢弃，并替换为 Gate 观测到的值（以防止伪造来源 IP）。
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，
   `password=` 等参数的值，以及令牌、密钥、电子邮件地址等）。
+- 事件中最多保留 64 种请求头。User-Agent、Referer、`Sec-Fetch-*`、`X-Forwarded-*` 等用于检测的请求头无论出现在什么位置都会保留；
+  超出的部分通过标签 `gate:headers_truncated` 和请求头数量（label `gate.header_count`）体现。
 - **fail-open**：即使 TOKIWA 服务器停止，Gate 的代理功能也不会停止（事件会暂时缓存并重新发送）。
 - **fail-static**：无法获取策略时，保持最后一次的策略（以免出现“让服务器宕机就能解除封禁”这样的漏洞）。但 Gate 仍会遵守每条封禁自身的期限（TTL），到期即解除。
 - 健康检查：`GET /__tokiwa/health` → `{"status":"ok"}`。对来自本地 / 私有 IP 的请求，还会返回发送统计等信息。

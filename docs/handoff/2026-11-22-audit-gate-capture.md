@@ -10,7 +10,8 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| （未登録・high 相当）Gate の共有 httpx クッキージャー | 完全 | 上流・サーバー用の httpx クライアントに「何も保存しない」ポリシーの `CookieJar` を渡す。テスト `tests/gate/test_gate_upstream_headers.py`（A の Set-Cookie が B の要求に付かない・ジャーが空のまま・クライアント自身の Cookie はそのまま転送） | fix(gate): never store upstream cookies |
+| （未登録・high 相当）Gate の共有 httpx クッキージャー | 完全 | 上流・サーバー用の httpx クライアントに「何も保存しない」ポリシーの `CookieJar` を渡す。テスト `tests/gate/test_gate_upstream_headers.py`（A の Set-Cookie が B の要求に付かない・ジャーが空のまま・クライアント自身の Cookie はそのまま転送） | 6326b7e |
+| #140 | 部分（推奨 (1)(3)(4) と「truncated 印・ヘッダ数」は完全。(2) の web_recon で「異常なヘッダ数」を medium シグナルにする部分は web-detect レーンへ依頼） | `gate.capture.capture_headers()` を作り直し: `PRIORITY_HEADERS`（UA・Referer・Host・Origin・Cookie・Content-*・Accept-*・`Sec-Fetch-*`・Client Hints・送信元 IP 系・ルーティング上書き・`web_common.INJECTABLE_HEADERS` 全部）とデセプションのカナリアヘッダ（`deception.canary_header`）は位置に関係なく必ず残し、残りの枠（合計 64 名 = `web_common.MAX_HEADERS`）を到着順に使う。辞書は到着順のままなので Web 検知器の `[:64]` で全部見える。超過は `gate:headers_truncated` + label `gate.header_count`（受信行数）/`gate.headers_dropped`。同名ヘッダの連結は 8192 文字で打ち切り（`gate.headers_clipped`）、`header_order` は同じ名前 2 回まで。リストでないヘッダ（Host・Content-Length・UA・`Sec-Fetch-*` 等）の重複は `gate:duplicate_header` + `gate.duplicate_headers`。推奨 (3): `gate.max_request_headers`（既定 100、0 で無効）を超えるヘッダ行の要求は転送せず 431（`gate:too_many_headers`。デコイ・deceive の判定より後＝ローカル応答はそのまま）。テスト `tests/gate/test_gate_header_capture.py`（ダミー 70 個の後ろの UA・Referer の SQLi・`Sec-Fetch-*`・Origin・カナリアヘッダ・X-Api-Version が残る、DB 往復後も `induced_by()` が理由を返す、`decisive_canary_hit()` が効く、`web_common.build_view()` が Referer の UNION SELECT を見る、`INJECTABLE_HEADERS ⊆ PRIORITY_HEADERS` のドリフト検査、重複・連結上限、431 と無効化、設定したカナリアヘッダ名の優先） | （このコミット） |
 
 ## 未登録の指摘（このレーンで発見）
 
@@ -22,12 +23,30 @@
 
 ## 要判断
 
+- **#140 `gate.max_request_headers` の既定を 100 にした**（(b) 既定を変え docs・wiki を同時更新）。Apache httpd の
+  `LimitRequestFields` の既定と同じ値。ヘッダ行が 100 を超える正規の要求はまれだが、0 にすれば従来どおり無制限に転送する。
+  65〜100 行の要求は転送され、64 名を超えた分の任意ヘッダ（優先リスト外の名前に載せた Log4Shell 等）はイベントに残らない
+  （`gate:headers_truncated` とヘッダ数だけ残る）。64 にすれば穴は無くなるが、正規の要求を落とす可能性が上がるので 100 にした。
+- **#140 カナリアヘッダ名は Gate プロセスの設定（`deception.canary_header`、既定 `X-Debug-Auth`）から取る**。サーバーと
+  別ホストで Gate を動かし、サーバー側だけでヘッダ名を変えた場合は優先されない（64 名以内なら従来どおり残る）。ポリシー
+  （`GatePolicy`）にヘッダ名を載せれば確実になるが、`schemas/response.py` とサーバー側の描画（他レーン）に触るので見送った。
+
 ## 既定動作の変更
+
+- （#140）イベントの `http.headers` は「先頭 64 行」から「検知用ヘッダ + 到着順の残り、合計 64 名まで」に。`header_order` は
+  同じ名前を 2 回までしか並べない（以前は先頭 64 行の全部）。同名ヘッダの連結は 8192 文字まで。
+- （#140）ヘッダ行が 100 を超える要求は上流へ転送せず 431。
 
 ## 失敗した試み
 
 ## 担当外の変更
 
+- `docs/wiki/Data-Handling*.md`（4 言語）: Gate が集める項目の「リクエストヘッダ（先頭 64 個）」「65 個目以降のヘッダ」の記述を
+  #140 の挙動に合わせて 1 行ずつ修正。
+
 ## 他レーンへの依頼
+
+- **web-detect**: `gate:headers_truncated` / label `gate.header_count`（受信したヘッダ行数）、`gate:duplicate_header`
+  （`gate.duplicate_headers`）を web_recon の「異常なヘッダ数・重複ヘッダ」シグナル（#140 推奨 (2)。例: 40 行超で medium）に。
 
 ## 未検証事項

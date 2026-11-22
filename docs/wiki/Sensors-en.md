@@ -73,6 +73,7 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Number of leading bytes of the request body to capture (0 disables capture) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | How often to pull the policy |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |
+| max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),
 `--preserve-host / --rewrite-host`, `--access-log`.
@@ -83,6 +84,8 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
   are discarded and replaced with the values the Gate observed (to prevent source IP spoofing).
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,
   parameter values such as `password=`, tokens, keys, email addresses, and so on).
+- Events keep up to 64 distinct request headers. Headers used for detection (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
+  are always kept wherever they appear; anything beyond is visible as the tag `gate:headers_truncated` with the header count (label `gate.header_count`).
 - **fail-open**: If the TOKIWA server goes down, the Gate keeps proxying (events are buffered temporarily and resent).
 - **fail-static**: If the Gate cannot fetch the policy, it keeps the last policy (so that taking the server down does not become a loophole for lifting blocks). Each block's own expiry (TTL) is still honoured by the Gate: entries past it are lifted.
 - Health check: `GET /__tokiwa/health` → `{"status":"ok"}`. Requests from local / private IPs also get send statistics and more.

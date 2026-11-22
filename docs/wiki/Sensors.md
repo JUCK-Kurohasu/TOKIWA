@@ -72,6 +72,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕捉するリクエストボディの先頭バイト数（0 で捕捉しない） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ポリシーを取りに行く間隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |
+| max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431（0 で無効） |
 
 CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue`（送信待ちイベントの上限 10,000 件）、
 `--preserve-host / --rewrite-host`、`--access-log`。
@@ -82,6 +83,8 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
   `X-Forwarded-*` は捨てられ、Gate が観測した値に置き換えられます（送信元 IP の偽装を防ぐため）。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、
   `password=` などのパラメータ値、トークン・鍵・メールアドレスなど）。
+- イベントに残すリクエストヘッダは 64 種類までです。User-Agent・Referer・`Sec-Fetch-*`・`X-Forwarded-*` など検知に使うヘッダは
+  位置に関係なく必ず残し、超えた分はタグ `gate:headers_truncated` とヘッダ数（label `gate.header_count`）で分かるようにします。
 - **fail-open**: TOKIWA サーバーが止まっても、Gate のプロキシは止まりません（イベントは一時的に溜めて再送します）。
 - **fail-static**: ポリシーが取れないときは最後のポリシーを維持します（サーバーを落として遮断を外させる、という抜け道を作らないため）。ただし各遮断の期限（TTL）は Gate 側でも守り、期限を過ぎたものは外します。
 - ヘルスチェック: `GET /__tokiwa/health` → `{"status":"ok"}`。ローカル／プライベート IP からは送信統計なども返します。

@@ -136,6 +136,7 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `gate.token_file` | None | File holding the API token. Re-read when it changes and after a 401 (no restart on rotation). Takes precedence over `ingest_token` when readable |
 | `gate.capture_body_bytes` | 4096 | Number of leading body bytes to capture |
 | `gate.trust_forwarded_for` | false | Trust `X-Forwarded-For` |
+| `gate.max_request_headers` | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA server |
 | `agent.ingest_token` | None | API token (scope: ingest) |
 | `agent.interval_seconds` | 10 | Host sensor collection interval |

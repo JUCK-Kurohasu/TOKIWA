@@ -135,6 +135,7 @@ deception:
 | `gate.token_file` | 无 | 保存 API 令牌的文件。变化时和收到 401 时重新读取（轮换时无需重启）。可读时优先于 `ingest_token` |
 | `gate.capture_body_bytes` | 4096 | 捕获请求体的前多少字节 |
 | `gate.trust_forwarded_for` | false | 信任 `X-Forwarded-For` |
+| `gate.max_request_headers` | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `agent.ingest_token` | 无 | API 令牌（scope: ingest） |
 | `agent.interval_seconds` | 10 | 主机传感器的采集间隔 |

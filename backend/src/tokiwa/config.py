@@ -351,6 +351,9 @@ class GateSettings(BaseModel):
     flush_interval_seconds: float = 1.0
     policy_refresh_seconds: float = 5.0
     trust_forwarded_for: bool = False
+    # Requests with more header lines than this are answered 431 instead of being forwarded (events keep at most
+    # 64 header names, so the rest would reach the upstream unseen). Apache's LimitRequestFields default. 0 = off.
+    max_request_headers: int = Field(default=100, ge=0)
 
 
 class AgentSettings(BaseModel):

@@ -73,6 +73,7 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo de la solicitud que se capturan (0 = no capturar) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
+| max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),
 `--preserve-host / --rewrite-host`, `--access-log`.
@@ -83,6 +84,8 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
   `X-Forwarded-*` enviados por el cliente se descartan y se sustituyen por los valores observados por Gate (para impedir la suplantación de la IP de origen).
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,
   valores de parámetros como `password=`, tokens, claves, direcciones de correo electrónico, etc.).
+- Los eventos conservan hasta 64 encabezados distintos. Los que se usan para la detección (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
+  se conservan siempre, estén donde estén; el resto queda indicado con la etiqueta `gate:headers_truncated` y el número de encabezados (label `gate.header_count`).
 - **fail-open**: aunque el servidor de TOKIWA se detenga, el proxy de Gate sigue funcionando (los eventos se acumulan temporalmente y se reenvían).
 - **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos"). Aun así, el Gate respeta el vencimiento (TTL) de cada bloqueo: las entradas vencidas se levantan.
 - Comprobación de estado: `GET /__tokiwa/health` → `{"status":"ok"}`. Desde IP locales/privadas devuelve también estadísticas de envío, entre otros datos.

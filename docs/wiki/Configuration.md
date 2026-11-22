@@ -135,6 +135,7 @@ deception:
 | `gate.token_file` | なし | API トークンのファイル。変更時と 401 受信時に読み直す（ローテーション時に再起動不要）。読めれば `ingest_token` より優先 |
 | `gate.capture_body_bytes` | 4096 | 捕捉するボディの先頭バイト数 |
 | `gate.trust_forwarded_for` | false | `X-Forwarded-For` を信頼する |
+| `gate.max_request_headers` | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431 を返す（0 で無効） |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA サーバー |
 | `agent.ingest_token` | なし | API トークン（scope: ingest） |
 | `agent.interval_seconds` | 10 | ホストセンサーの収集間隔 |

@@ -34,6 +34,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | batch_size / flush_interval_seconds | `--batch-size` / `--flush-interval` | 100 / 1.0 | |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ±10% ジッタ |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 信頼できる LB の背後でのみ |
+| max_request_headers | — | 100 | ヘッダ行がこれを超える要求は上流へ転送せず **431**（`gate:too_many_headers`）。0 で無効。Apache の `LimitRequestFields` と同じ既定 |
 
 `GateSettings` に無い運用ノブ（`GateOptions`、CLI のみ）: `--upstream-timeout`（30s, 接続 5s）、
 `--max-queue`（10000 件）、`--preserve-host/--rewrite-host`（既定は Caddy 同様にクライアントの Host を転送）、
@@ -53,19 +54,28 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
    `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る
 7. `deceive` に一致する IP → 全リクエストをデコイで応答。ルール不一致なら汎用 404 デコイ（`gate:decoy_generic`。
    DECEPTION イベントは出さない＝ノイズ回避）
-8. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
+8. ヘッダ行が `max_request_headers` を超える → **431**（イベントに残せるのは 64 名までなので、見えない分を上流へ渡さない）
+9. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
 
 ゲート生成の応答（403/429/デコイ）には直近のアップストリームの `Server` ヘッダを付け、デコイが浮かないようにする。
 
 ## 3. 捕捉イベント（`gate.http`）
 
 - `http.method/scheme/host/path/query/headers/header_order/user_agent/referrer/content_type`
+- `headers` は最大 64 名（Web 検知器が見る上限と同じ）。**検知に使うヘッダは位置に関係なく必ず残す**（`gate.capture.PRIORITY_HEADERS`:
+  UA・Referer・Host・Origin・Cookie・Content-*・Accept-*・`Sec-Fetch-*`・Client Hints・`X-Forwarded-*`・`Forwarded`・`X-Real-IP` 等の
+  送信元 IP 系・`X-Original-URL` 等のルーティング上書き・Web 検知器が名前で見るヘッダ・デセプションのカナリアヘッダ）。残りの枠を
+  到着順に使う（監査 #140: ダミーヘッダ 64 個を前に置くと UA 等が消えていた）。同名ヘッダは `, `（Cookie は `; `）で連結し、
+  連結は 8192 文字で打ち切る。`header_order` は到着順で、同じ名前は 2 回まで
 - `request_body`: 先頭 `capture_body_bytes` を UTF-8（置換）で。テキスト系 Content-Type のみ。不明・multipart は内容で判定、
   バイナリはサイズ（`request_body_size`）のみ。多バイト文字の途中で切れた末尾は捨てる
 - `status / response_size / response_content_type / duration_ms`（tarpit 込みのクライアント体感）/ `http_version`
 - `timestamp` = リクエスト到着時刻（AI リズム特徴量用）
-- tags: `gate:blocked|rate_limited|tarpit|decoy|decoy_generic|deceive|html_injected|inject_skipped|upstream_error|client_disconnect|websocket_unsupported|body_timeout`
-- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket）, `gate.rule`, `gate.policy`,
+- tags: `gate:blocked|rate_limited|tarpit|decoy|decoy_generic|deceive|html_injected|inject_skipped|upstream_error|client_disconnect|websocket_unsupported|body_timeout`、
+  `gate:headers_truncated`（64 名を超えた・連結を打ち切った。label `gate.header_count`=受信したヘッダ行数, `gate.headers_dropped`, `gate.headers_clipped`）、
+  `gate:duplicate_header`（Host・Content-Length・User-Agent・`Sec-Fetch-*` などリストでないヘッダが 2 回以上。label `gate.duplicate_headers`）、
+  `gate:too_many_headers`（431）
+- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
 **送信前に `tokiwa.llm.redact`** を適用: ヘッダ（`sensitive_headers` は値を丸ごとマスク）、パス、クエリ、Referer、UA、本文。

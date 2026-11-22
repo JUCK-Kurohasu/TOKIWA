@@ -66,6 +66,7 @@ HEALTH_PATH = "/__tokiwa/health"
 BLOCKED_BODY = b"Forbidden\n"
 RATE_LIMITED_BODY = b"Too Many Requests\n"
 WEBSOCKET_BODY = b"Not Implemented: WebSocket is not supported by this gateway\n"
+TOO_MANY_HEADERS_BODY = b"Request Header Fields Too Large\n"
 BAD_GATEWAY_BODY = b"Bad Gateway\n"
 GATEWAY_TIMEOUT_BODY = b"Gateway Timeout\n"
 GENERIC_404 = (
@@ -154,6 +155,8 @@ class Gate:
             sensor_id=settings.sensor_id,
             capture_body_bytes=settings.capture_body_bytes,
             redaction=redaction or get_settings().llm.redaction,
+            # The server's deception settings, when this process shares its config (else the default name).
+            priority_headers=(get_settings().deception.canary_header,),
         )
         self._sleep = sleep
         self.counters: Counter[str] = Counter()
@@ -330,6 +333,14 @@ class Gate:
         deceived = policy.deceive.lookup(ip) is not None
         if decoy is not None or deceived:
             await self._serve_decoy(receive, send, ex, decoy, deceived)
+            return
+
+        max_headers = self.settings.max_request_headers
+        if max_headers > 0 and len(ex.raw_headers) > max_headers:
+            # The event keeps at most MAX_CAPTURED_HEADERS names: never forward more than the SOC can see (#140).
+            ex.tag("gate:too_many_headers")
+            ex.labels["gate.action"] = "too_many_headers"
+            await self._respond(send, ex, 431, TOO_MANY_HEADERS_BODY, b"text/plain; charset=utf-8")
             return
 
         ex.labels["gate.action"] = "proxy"
@@ -578,7 +589,7 @@ class Gate:
         ]
         if mimic_server and self._upstream_server:
             headers.append((b"server", self._upstream_server))
-        if status in (403, 429, 501):
+        if status in (403, 429, 431, 501):
             headers.append((b"cache-control", b"no-store"))
         if extra_headers:
             headers.extend(extra_headers)
