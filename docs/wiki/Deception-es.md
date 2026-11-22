@@ -15,7 +15,10 @@ Es el mecanismo central de Mirage. Dentro de los señuelos se incrustan "**instr
 - Los valores no aparecen como enlaces (`href`) ni como ejemplos de OpenAPI. Si un rastreador o un fuzzer que sigue enlaces mecánicamente
   los "obedeciera" por casualidad, se perdería la base para afirmar que se trata de una IA.
 
-Si llega una solicitud que sigue las instrucciones, puede concluirse que procede de un cliente impulsado por un LLM (puntuación de IA 0.99).
+Si llega una solicitud que envía el valor en la cabecera del canario según las instrucciones, puede concluirse que procede de un cliente impulsado por un LLM (puntuación de IA 0.99).
+Sin embargo, cualquiera que abra una página protegida puede leer el valor, así que un tercero puede hacer que otras personas abran `/api/internal/<valor>/`
+(un `<img>` incrustado en un foro o en un correo, la vista previa de un enlace pegado en un chat). Por eso, acceder solo a esa ruta no se toma como prueba de una IA
+(véase «Cuando se produce una detección» más abajo).
 
 ## Tipos de activo
 
@@ -46,11 +49,21 @@ Si los habilita, compruebe que no entren en conflicto con el contenido de la apl
 
 | Clasificación | Severidad | Significado |
 |---|---|---|
-| `ai_canary_followed` | critical | Se siguieron las instrucciones del canario de IA (casi con certeza un agente de IA; puntuación de IA 0.99) |
-| `ai_canary_token` | critical | El valor del canario apareció en otro lugar (alguien leyó el texto oculto; no se descarta que una persona lo copiara del código fuente) |
+| `ai_canary_followed` | critical | Se envió el valor **en la cabecera del canario** como indica el canario de IA (casi con certeza un agente de IA; puntuación de IA 0.99) |
+| `ai_canary_token` | critical | El valor del canario apareció en otra cabecera o lugar similar (alguien leyó el texto oculto; no se descarta que una persona lo copiara del código fuente) |
 | `honeytoken` | critical | Se usaron credenciales falsas |
 | `decoy_path` | critical | Se accedió a una ruta señuelo |
 | `labyrinth` | high (critical a partir de profundidad 3) | Se entró en el laberinto |
+
+Los disparos que un tercero puede inducir pesan menos: no se toman como prueba de una IA ni sirven de base para proponer un bloqueo.
+
+- **Pasivo (passive, medium)**: el valor del canario aparece solo en la ruta, la consulta, el cuerpo o el Referer (por ejemplo, solo un acceso a `/api/internal/<valor>/`),
+  porque los enlaces y las vistas previas de enlaces también lo producen. Si el mismo origen genera además alertas de ataque, estas elevan la severidad del incidente.
+- **Inducido (induced, low)**: el navegador indica que envió la solicitud «desde otro sitio» o «como parte de una página, como una imagen o un script»
+  (`Sec-Fetch-Site: cross-site`, `Sec-Fetch-Dest: image`, etc., o un `Origin` / `Referer` de otro host). Las rutas señuelo y los honeytokens se tratan igual.
+
+Ambos aparecen como `provenance` en los detalles de la alerta. Un atacante que añada estas cabeceras por su cuenta puede bajar sus propios disparos a low
+(el registro y la alerta se conservan). Si esto le preocupa, desactive `downgrade_browser_induced`.
 
 Los accesos a señuelos también los producen los escáneres automatizados (`/.env` y similares son objetivos de exploración habituales). Para determinar si se trata de un agente de IA,
 combine `ai_canary_followed` con la puntuación de comportamiento de **[AI sessions](Web-UI-es)** (Sesiones de IA).
@@ -70,6 +83,7 @@ También se pueden añadir trampas según el incidente mediante la acción de re
 | `html_injection` | true | Inserta instrucciones ocultas en las respuestas HTML de la aplicación protegida (justo antes de `</body>`) |
 | `canary_header` | `X-Debug-Auth` | Nombre del encabezado que las instrucciones ocultas piden enviar. Si se incluye en `llm.redaction.sensitive_headers`, deja de poder detectarse |
 | `canary_language` | `both` | Idioma de las instrucciones ocultas (`ja` / `en` / `both`) |
+| `downgrade_browser_induced` | true | Tratar como «inducidos» (low, sin tomarse como prueba de una IA) los disparos que el navegador envió desde otro sitio o como parte de una página |
 | `labyrinth_enabled` | false | Laberinto |
 | `labyrinth_prefix` / `labyrinth_max_depth` | `/archive/` / 8 | Ubicación y profundidad del laberinto |
 

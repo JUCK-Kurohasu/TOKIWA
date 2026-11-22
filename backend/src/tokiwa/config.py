@@ -305,6 +305,11 @@ class DeceptionSettings(BaseModel):
     canary_header: str = "X-Debug-Auth"
     # Language of the hidden instructions and labyrinth pages.
     canary_language: Literal["ja", "en", "both"] = "both"
+    # Trips whose request carries browser cross-site / sub-resource signals (Sec-Fetch-Site cross-site/same-site,
+    # Sec-Fetch-Dest image/script/..., prefetch, foreign Origin/Referer) are recorded as "induced": low severity,
+    # no AI attribution, never a block basis - a third-party page can make any visitor send them (audit #133).
+    # A client can claim these headers itself to lower its trips to low (still alerted); false = old behaviour.
+    downgrade_browser_induced: bool = True
 
 
 class GateSettings(BaseModel):

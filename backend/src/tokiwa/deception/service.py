@@ -179,6 +179,14 @@ async def get_index(*, force: bool = False) -> DeceptionIndex:
     return (await get_cache(force=force)).index
 
 
+def cached_index() -> DeceptionIndex | None:
+    """Last built index without I/O (may be up to ``CACHE_TTL_SECONDS`` old; None before the first build).
+
+    For synchronous callers such as the sessionizer (:func:`tokiwa.deception.provenance.decisive_canary_hit`).
+    """
+    return _cache.index if _cache is not None else None
+
+
 async def gate_decoys() -> tuple[list[DecoyRoute], str | None]:
     """Rendered decoys for the Gate policy (cached until the next asset change)."""
     cache = await get_cache()
@@ -491,6 +499,8 @@ def _trip_detail(e: Event, t: Trip) -> dict[str, Any]:
         "method": h.method if h else None,
         "user_agent": h.user_agent if h else None,
         "depth": t.depth,
+        "provenance": t.provenance.value,
+        "induced_by": t.induced_by,
     }
 
 
@@ -548,6 +558,7 @@ async def record_trips(events: Sequence[Event]) -> list[tuple[Event, Trip]]:
                 "session_id": e.session_id,
                 "trip_type": t.trip_type.value,
                 "ai_canary_followed": t.ai_followed,
+                "provenance": t.provenance.value,
                 "timestamp": ensure_utc(e.timestamp).isoformat(),
             },
         )
@@ -560,6 +571,9 @@ def _trip_event(row: DeceptionTripRow, ev: Event | None) -> Event:
         asset_id=row.asset_id, asset_kind=row.asset_kind, token=detail.get("token"), detail=row.trip_type
     )
     tags = ["deception:trip", f"deception:{row.trip_type}"]
+    provenance = detail.get("provenance")
+    if provenance and provenance != "direct":
+        tags.append(f"deception:{provenance}")  # passive / induced: not an AI verdict (#133)
     if ev is None:  # event purged by retention: synthesize from the trip row
         path = detail.get("path")
         return Event(

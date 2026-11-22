@@ -73,11 +73,15 @@ event.ingested ──▶ service.record_trips ──▶ deception_trips 行 + tr
    理解せずに「追従」してしまうと AI 断定の根拠が崩れるため。
 2. 追従には「読んで従う」ことが要る: ヘッダ `X-Debug-Auth: <値>` を付ける、または `/api/internal/` + 値 + `/` を
    **組み立てる**。これをするのは LLM 駆動のクライアントだけ。
-3. 判定:
-   - **followed**（`ai_canary_followed`、critical, `ai_agent`, ai_score 0.99）: 値が `canary_header` の値にある、
-     またはパス / Referer が `/api/internal/<値>` で始まる。
-   - **observed**（`ai_canary_token`、critical, `deception`, ai_score 0.85）: それ以外の場所に値が現れた
-     （隠しテキストを読んだ主体。人間がソースから写した可能性は残る）。
+3. 判定（重みは §5 の「出所」で変わる）:
+   - **followed**（`ai_canary_followed`）: 値が `canary_header` の値にある、またはパス / Referer が
+     `/api/internal/<値>` で始まる。**AI と断定（critical, `ai_agent`, ai_score 0.99）するのはカナリアヘッダなど
+     クライアント自身にしか付けられない位置に値があるときだけ**。経路 GET だけは「受動」（medium）。
+   - **observed**（`ai_canary_token`）: それ以外の場所に値が現れた（隠しテキストを読んだ主体。人間がソースから
+     写した可能性は残る）。ヘッダ・UA なら critical, `deception`, ai_score 0.85、パス・クエリ・本文だけなら「受動」。
+   - カナリア値は保護対象ページを開けば誰でも読めるので、**経路 GET やクエリは第三者が他人に送らせられる**
+     （掲示板・メール・ユーザー投稿の `<img src=…/api/internal/<値>/>`、チャットに貼られたリンクのプレビュー取得）。
+     これを AI 断定・遮断提案の根拠にすると、閲覧者の IP を「攻撃 AI」に仕立てられる（監査 #133）。
 4. HTML 挿入は `<!-- -->` + `hidden aria-hidden="true" display:none` の要素。視覚利用者にもスクリーンリーダー利用者にも
    提示されない。スクリプト・外部リソースは含まない。
 5. 指示文は `deception/templates.py::canary_sentences()` の 1 か所（日英）。言語は `canary_language`、
@@ -87,9 +91,22 @@ event.ingested ──▶ service.record_trips ──▶ deception_trips 行 + tr
 
 全イベント種別を対象に、パス・クエリ・ヘッダ・本文・Referer・UA・Host・`message`・`llm_app.prompt`・
 `process.cmdline`・`raw`（先頭 16KB）を走査（URL デコード版も）。デコイパスは正規化（`%2e`/二重エンコード、`//`、
-`..`、大文字小文字）して照合。1 イベント × 1 資産につき最も強い分類を 1 件:
+`..`、大文字小文字）して照合。1 イベント × 1 資産につき最も強い分類を 1 件。
 
-| trip_type | severity | category | ai_score | MITRE |
+**出所（`details.provenance`、`deception/provenance.py`。監査 #133）** — そのトリップを第三者が誘発できたか:
+
+| provenance | 条件 | 扱い |
+|---|---|---|
+| `direct` | 下記以外（カナリアヘッダ・その他のヘッダ・UA に値がある、または誘発の兆候の無いデコイ/ハニートークン/迷路） | 下表のとおり（従来どおり） |
+| `passive` | AI カナリア値が **リンクで届く位置だけ**（パス・クエリ・本文・Referer・Host・`message`・`raw`）に現れた | **medium**, `deception`, ai_score 0.5（AI 閾値未満）、AI と断定しない |
+| `induced` | ブラウザがクロスサイト/サブリソースと示している: `Sec-Fetch-Site: cross-site`/`same-site`、`Sec-Fetch-Dest` が `document`/`empty` 以外（`image`, `script`, `iframe` …）、`Sec-Purpose: prefetch`、`Origin` が別ホストか `null`、`Referer` が別ホスト | **low**, `deception`, ai_score なし。全分類（デコイパス・ハニートークン含む） |
+
+`passive` / `induced` のアラートは、相関（`correlate.scoring`）とルール判定（`triage.fallback`）が AI 断定に使う印
+（タグに `ai_canary` を含む・エンティティ値 `ai_canary`）を持たない。タグは `deception:passive|induced` と
+`deception_trip:canary_followed|canary_observed|decoy_path|…`。重大度が high 未満なのでルール判定は遮断を提案しない
+（同じ送信元の攻撃系アラートがあれば、インシデントの重大度はそちらで上がる＝「相関で昇格」）。
+
+| trip_type（`direct` のとき） | severity | category | ai_score | MITRE |
 |---|---|---|---|---|
 | ai_canary_followed | critical | ai_agent | 0.99 | — |
 | ai_canary_token | critical | deception | 0.85 | — |
@@ -97,7 +114,13 @@ event.ingested ──▶ service.record_trips ──▶ deception_trips 行 + tr
 | decoy_path | critical | deception | — | T1595.003 |
 | labyrinth | high（深さ≥3 で critical） | deception | — | T1594 |
 
-重複排除キー: `deception.trip|<asset>|<分類>|<source_ip>`（AI 追従は別アラートとして立つ）。
+重複排除キー: `deception.trip|<asset>|<分類>|<source_ip>`（AI 追従は別アラートとして立つ。`passive` は
+`canary_passive`、`induced` は `induced` という別の分類なので、後から来た `direct` の追従は別アラートになる）。
+
+**AI セッション（`aidetect`）との関係**: Gate が `ai_canary` 資産の経路を返したとき（`kind=deception` イベント）、
+セッションを AI と断定（`canary_hits`）するのは `provenance.decisive_canary_hit()` が真のとき — 既知のカナリア値を
+カナリアヘッダで送っていて、誘発の兆候が無いとき — だけ。経路・カナリアページ（`/api/internal/openapi.json` 等）を
+取得しただけなら `decoy_hits`（敵対スコアのみ）として数える。
 トークン集合はメモリにキャッシュし、資産変更のコミット後・DB/設定の差し替え時・60 秒ごとに再読込。
 DB が初期化されていない文脈（他モジュールの単体テスト等）では空集合として何もしない。
 
@@ -140,11 +163,14 @@ ai_canary_followed, timestamp}`。他モジュール向け関数: `service.creat
 | `deception.html_injection` | true | 上流 HTML への隠し指示挿入だけを止める |
 | `deception.canary_header` | `X-Debug-Auth` | 指示で送らせるヘッダ。秘匿ヘッダ一覧に入れないこと |
 | `deception.canary_language` | `both` | `ja` / `en` / `both`（指示文・迷路） |
+| `deception.downgrade_browser_induced` | true | ブラウザのクロスサイト/サブリソース要求を `induced`（low・AI 断定なし）にする。false で従来どおり（経路だけの `passive` は常に有効） |
 | `deception.decoy_paths` | 5 パス | 起動時にシードするデコイ |
 | `deception.labyrinth_enabled` / `labyrinth_max_depth` / `labyrinth_prefix` | false / 8 / `/archive/` | 迷路 |
 
 そのほか: 指示文 `templates.canary_sentences()`、デコイ本文 `templates.py`、深さ閾値
-`deception_trip.LABYRINTH_CRITICAL_DEPTH`、事前描画ページ数 `labyrinth.DEFAULT_MAX_PAGES`。
+`deception_trip.LABYRINTH_CRITICAL_DEPTH`、事前描画ページ数 `labyrinth.DEFAULT_MAX_PAGES`、
+`passive` / `induced` の重大度・確度 `deception_trip._PASSIVE_SPECS` / `_INDUCED_SPEC` と
+`PASSIVE_CANARY_AI_SCORE`、リンクで届く欄の一覧 `provenance.LINK_REACHABLE_FIELDS`。
 
 ## 9. 倫理・法的配慮・運用上の注意
 
@@ -163,6 +189,15 @@ ai_canary_followed, timestamp}`。他モジュール向け関数: `service.creat
 - 保護対象アプリがページの DOM をサーバーへ送る仕組み（セルフホストのセッションリプレイ、DOM を丸ごと保存する
   エディタ等）を持つと、挿入された隠しテキスト中の値が正規ブラウザから送られ `ai_canary_token` になり得る。
   その場合は `html_injection=false`。
+- **誘発（フレーミング）**: 罠の経路は第三者が他人に踏ませられる（`<img>`・リンク・リンクプレビュー）。
+  ブラウザ由来は `induced`（low）、カナリア経路だけは `passive`（medium）にして AI 断定・遮断提案の根拠にしない（§5）。
+  - 代償: 攻撃者が `Sec-Fetch-Site: cross-site` 等を自分で付ければ、自分のトリップを low に下げられる
+    （記録・アラートは残る。消えはしない）。気になる運用は `deception.downgrade_browser_induced=false`。
+  - 残り: `Sec-Fetch-*` を送らないリンク取得（チャットのリンクプレビュー、メールのリンク検査、古いブラウザ）による
+    **デコイパス・ハニートークン** のトリップは従来どおり critical（ルール判定は遮断を提案する）。
+    `/.env` は detect-web の `web.sensitive_file_probe`（high）も同時に立つ。自動承認を使う前に、共有 IP の扱い（#23）と
+    単発 critical からの遮断提案（#154）を併せて見ること。実 LLM のトリアージは medium のインシデントにも遮断を
+    提案し得るので、自動承認で守られるのはルール判定の経路だけ（監査ノート参照）。
 - `/.env` 等のデコイパスは大量スキャナも叩くため critical が多発し得る（detect-web の機微パス検知とも重複）。
 - TOKIWA 自身の管理 UI を Gate の背後に置くと、資産作成リクエストの本文にトークンが含まれ誤検知になり得る。
 - 既定の接頭辞（`svc_live_`, `dbg_`, `app_rw_`, 24 文字の `AKIA…`）は OSS なので知られている。指紋化を避けたい

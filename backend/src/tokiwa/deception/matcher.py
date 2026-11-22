@@ -14,9 +14,14 @@ What counts as a trip
 Fetching an AI-canary *page* (robots.txt, OpenAPI ...) is NOT a trip - legitimate crawlers read robots.txt.
 Only using the canary value is.
 
-AI canary "followed" (= LLM agent, ai_score 0.99): the canary value is sent in the configured header
-(``deception.canary_header``), or the path / referrer starts with ``/api/internal/<value>`` - the composition the
-instruction asks for. A canary value seen anywhere else is "observed" (strong, but a human could have copied it).
+AI canary "followed": the canary value is sent in the configured header (``deception.canary_header``), or the
+path / referrer starts with ``/api/internal/<value>`` - the composition the instruction asks for. A canary value
+seen anywhere else is "observed" (strong, but a human could have copied it).
+
+How much a trip is worth also depends on whether a third party could have made the client send it
+(:mod:`tokiwa.deception.provenance`, audit #133): ``Trip.provenance`` is ``direct`` (decisive, e.g. the canary
+header), ``passive`` (canary value only in link-reachable fields such as the path) or ``induced`` (browser
+cross-site / sub-resource request). Only a ``direct`` follow is an AI-agent verdict (``Trip.ai_followed``).
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from urllib.parse import unquote, unquote_plus
 
 from tokiwa.config import DeceptionSettings
 from tokiwa.deception import labyrinth
+from tokiwa.deception.provenance import Provenance, field_is_link_reachable, induced_by
 from tokiwa.deception.templates import CANARY_PATH_PREFIX
 from tokiwa.deception.tokens import MIN_TOKEN_LEN, Slot, honey_values
 from tokiwa.schemas.events import Event
@@ -46,6 +52,8 @@ class TripType(StrEnum):
     DECOY_PATH = "decoy_path"
     LABYRINTH = "labyrinth"
 
+
+CANARY_TRIP_TYPES = frozenset({TripType.AI_CANARY_FOLLOWED, TripType.AI_CANARY_TOKEN})
 
 # strongest first: one trip per (event, asset) keeps the strongest classification
 _PRIORITY = [
@@ -91,10 +99,13 @@ class Trip:
     matches: list[TokenMatch] = field(default_factory=list)
     path_hit: bool = False
     depth: int | None = None
+    provenance: Provenance = Provenance.DIRECT
+    induced_by: list[str] = field(default_factory=list)
 
     @property
     def ai_followed(self) -> bool:
-        return self.trip_type == TripType.AI_CANARY_FOLLOWED
+        """Decisive AI-canary follow: instructed form AND only the client itself could have sent it."""
+        return self.trip_type == TripType.AI_CANARY_FOLLOWED and self.provenance == Provenance.DIRECT
 
     @property
     def token(self) -> str | None:
@@ -147,12 +158,15 @@ class DeceptionIndex:
         prefixes: list[tuple[str, IndexedAsset]],
         assets: dict[str, IndexedAsset],
         canary_header: str,
+        *,
+        downgrade_induced: bool = True,
     ) -> None:
         self.tokens = tokens
         self.exact_paths = exact_paths
         self.prefixes = sorted(prefixes, key=lambda p: len(p[0]), reverse=True)
         self.assets = assets
         self.canary_header = canary_header.lower()
+        self.downgrade_induced = downgrade_induced
         values = sorted((v for v in tokens if len(v) >= MIN_TOKEN_LEN), key=len, reverse=True)
         self._pattern = re.compile("|".join(re.escape(v) for v in values)) if values else None
 
@@ -195,7 +209,14 @@ class DeceptionIndex:
                     prefixes.append((normalize_path(ia.path[:-1] or "/"), ia))
                 else:
                     exact.setdefault(_exact_key(ia.path), ia)
-        return cls(tokens, exact, prefixes, by_id, settings.canary_header)
+        return cls(
+            tokens,
+            exact,
+            prefixes,
+            by_id,
+            settings.canary_header,
+            downgrade_induced=settings.downgrade_browser_induced,
+        )
 
     def find_tokens(self, text: str) -> list[str]:
         if self._pattern is None or not text:
@@ -285,7 +306,15 @@ def _followed(m: TokenMatch, event: Event, index: DeceptionIndex) -> bool:
     return False
 
 
-def _classify(acc: _Acc, event: Event, index: DeceptionIndex) -> Trip | None:
+def _provenance(trip_type: TripType, matches: list[TokenMatch], induced: list[str]) -> Provenance:
+    if induced:
+        return Provenance.INDUCED
+    if trip_type in CANARY_TRIP_TYPES and all(field_is_link_reachable(m.field) for m in matches):
+        return Provenance.PASSIVE  # a link / <img> / form / link-preview bot can produce this (#133)
+    return Provenance.DIRECT
+
+
+def _classify(acc: _Acc, event: Event, index: DeceptionIndex, induced: list[str]) -> Trip | None:
     kinds: set[TripType] = set()
     for m in acc.matches:
         if m.slot == Slot.CANARY:
@@ -296,7 +325,8 @@ def _classify(acc: _Acc, event: Event, index: DeceptionIndex) -> Trip | None:
         kinds.add(TripType.LABYRINTH if acc.asset.kind == DeceptionKind.LABYRINTH else TripType.DECOY_PATH)
     for t in _PRIORITY:
         if t in kinds:
-            return Trip(acc.asset, t, acc.matches, acc.path_hit, acc.depth)
+            prov = _provenance(t, acc.matches, induced)
+            return Trip(acc.asset, t, acc.matches, acc.path_hit, acc.depth, prov, list(induced))
     return None
 
 
@@ -332,5 +362,8 @@ def match_event(event: Event, index: DeceptionIndex) -> list[Trip]:
                 for prefix, a in index.prefixes:
                     if a.id == asset.id:
                         acc.depth = labyrinth.depth_of(prefix, normalize_path(event.http.path))
-    trips = [_classify(acc, event, index) for acc in accs.values()]
+    if not accs:
+        return []
+    induced = induced_by(event) if index.downgrade_induced else []
+    trips = [_classify(acc, event, index, induced) for acc in accs.values()]
     return [t for t in trips if t is not None]
