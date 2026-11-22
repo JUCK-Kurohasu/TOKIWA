@@ -10,7 +10,7 @@
 | #94 巨大 offset / IntegrityError 500 | 完全 | `PageParams` の offset に `le=MAX_OFFSET`（1,000,000）。独自 `offset` Query を持つ 15 一覧ルートにも効くよう、全ルーターに `offset_guard`（router-level dependency, 422）を付与。IntegrityError → 409 は #91 のハンドラ。OpenAPI から offset を持つ全 GET ルートを列挙して 422 を確認するテスト | ee30db5 |
 | #57 ボディ・フィールド長上限 | 部分（推奨 (1)(2) は完全、(3) トークン単位レート制限・(4) retention 既定有効は未対応） | (1) 純 ASGI の `BodySizeLimitMiddleware`（`api/middleware.py`）: `server.max_body_bytes`（既定 1 MiB）/ `server.max_ingest_body_bytes`（`/api/v1/ingest/`、既定 32 MiB）。Content-Length 申告と実受信バイト（chunked）の両方で 413。(2) `Event` の全文字列（ヘッダ値・ラベル値・リスト要素・ネストしたモデル含む）を 65,536 文字で**切り詰め**（拒否しない）、`raw` は JSON 64 KiB で adapters と同じ `{"_truncated","_bytes","text"}` 形に。切り詰め時はタグ `truncated` とラベル `tokiwa.truncated`（`field:元の長さ`）。wiki（Configuration / Sensors ×4 言語） | 9985076 |
 | #93 docs / openapi / version 公開・/api/* の SPA 200 | 部分（本レーン分は完全。`/auth/status` の version と CORS `allow_credentials` は未対応＝auth レーン / 要判断） | SPA フォールバックが `api` / `api/...` を JSON 404 に。`server.expose_docs`（既定 true＝後方互換）で `/api/docs`・`/api/openapi.json` を無効化可能。ReDoc（未記載の `/redoc`）を廃止、OAuth2 redirect を `/api/docs/oauth2-redirect` へ。`/health` は認証不要のまま `{"status":"ok"}`、有効なユーザー JWT があるときだけ `version`。wiki（CLI / Configuration ×4）・api-contract | 47437fe |
-| #66 セキュリティヘッダ | 完全 | 純 ASGI の `SecurityHeadersMiddleware`: 全応答に nosniff / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer`、CSP は 3 段（UI: `script-src 'self'`、`/api/docs*`: jsdelivr + インライン許可、その他 `/api/*`: `default-src 'none'`）。既存ヘッダは上書きしない。index.html に `Cache-Control: no-store`、`/assets/*` に immutable。`server.security_headers`（既定 true）。Playwright で CSP 違反 0 件を確認（下記）。deploy.md のプロキシ例（HSTS・ボディ上限 32m）と wiki Configuration ×4 | d0ef5a4 ＋（本コミット: 文書・検証結果） |
+| #66 セキュリティヘッダ | 完全 | 純 ASGI の `SecurityHeadersMiddleware`: 全応答に nosniff / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer`、CSP は 3 段（UI: `script-src 'self'`、`/api/docs*`: jsdelivr + インライン許可、その他 `/api/*`: `default-src 'none'`）。既存ヘッダは上書きしない。index.html に `Cache-Control: no-store`、`/assets/*` に immutable。`server.security_headers`（既定 true）。Playwright で CSP 違反 0 件を確認（下記）。deploy.md のプロキシ例（HSTS・ボディ上限 32m）と wiki Configuration ×4 | d0ef5a4, 59aaf83 |
 
 ## #91 の詳細（事実）
 
@@ -116,6 +116,26 @@
 - （#91）なし。既定動作の変更だが外部仕様（エンドポイント・形式）は変わらない。409 は従来 500 だったケースのみ。
 - （#94）offset 上限 1,000,000（例示値どおり）。これより深いページングが必要な運用があればフィルタで絞る前提。
 
+## 既定動作の変更（PR 本文用）
+
+- ingest のボディ上限: 無制限 → 32 MiB（`server.max_ingest_body_bytes`）。413 のバッチは Gate / Agent の shipper が破棄する。
+- その他 API のボディ上限: 無制限 → 1 MiB（`server.max_body_bytes`）。
+- `?offset` > 1,000,000 → 422（従来は 200 か OverflowError の 500）。
+- `IntegrityError` → 409（従来 500）。書き込みは応答送信前にコミット（従来は送信後）。
+- Event の文字列 65,536 文字超・`raw` 64 KiB 超は切り詰め＋タグ `truncated` / ラベル `tokiwa.truncated`（従来は無制限に保存）。
+- `/api/v1/health` は未認証では `version` を返さない（`{"status":"ok"}` のみ）。
+- 未定義の `/api/*`（GET）は JSON 404（従来は 200 の index.html）。
+- `/redoc` 廃止。Swagger の OAuth2 redirect は `/docs/oauth2-redirect` → `/api/docs/oauth2-redirect`。
+- セキュリティヘッダ（CSP 等）を既定で付与（`server.security_headers`）。index.html は `no-store`。
+- `server.expose_docs` は既定 true（後方互換のため変更なし）。
+
+## 最終チェック（2026-11-22）
+
+- `uv run pytest -q`（全体）: 成功、約 85 秒（目安の約 70 秒より長い。新規テストの合計は数秒で、大半は既存分）。
+- `frontend/dist` を退避した状態（CI 相当、SPA 非マウント）でも `tests/api tests/core tests/test_skeleton.py` 成功。
+- `ruff check` / `ruff format --check`: クリーン。`mypy src`: 既知の 4 エラーのみ（新規なし）。
+- `python3 scripts/check_wiki.py`: OK。フロントのコードは変更していない（`npm run build` は CSP 検証のためにだけ実行）。
+
 ## 失敗した試み
 
 - #94 のテストで `fastapi.dependencies.utils.get_flat_dependant` を使おうとしたが 0.159.1 には無く、`app.routes` も
@@ -125,6 +145,13 @@
 ## 担当外の変更
 
 - `backend/src/tokiwa/api/deps.py`: `DbSession` の 1 行のみ（`scope="function"` とコメント）。tokens レーンへ: この行を戻さないこと。
+- 共有文書: `docs/api-contract.md`（共通節の offset 上限・409・コミット時機、`/health` 行と未定義 `/api/*`・docs の注記）、
+  `docs/deploy.md` §9（セキュリティヘッダ・ボディ上限・expose_docs の注記、nginx `client_max_body_size` 20m→32m と HSTS、
+  Caddy の HSTS と `request_body`）。他レーン（devops 等）も編集し得るのでマージ時に注意。
+- wiki（担当の範囲内だが共有）: `Configuration*.md`（server.* 4 行）、`Sensors*.md`（取り込み API の上限・切り詰め）、
+  `CLI*.md`（expose_docs と /health の version）。各 4 言語、`check_wiki.py` OK。
+- 新規ファイル（衝突なし）: `backend/src/tokiwa/api/middleware.py`、テスト 6 本（`tests/api/test_commit_timing.py`,
+  `test_pagination_limits.py`, `test_body_limits.py`, `test_exposure.py`, `test_security_headers.py`, `tests/core/test_event_limits.py`）。
 
 ## 他レーンへの依頼
 
