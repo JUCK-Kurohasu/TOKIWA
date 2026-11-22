@@ -58,8 +58,8 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 | benign event FPR | 正常アクターのイベントのうち証拠に含まれた割合 |
 | alert precision | 攻撃セッションのみに帰属したアラート / 何らかに帰属したアラート。検知器別にも出す |
 | AI attribution P/R/F1/AUC | セッションスコア = max(actor_session.ai_score, alert.ai_score, triage.ai_agent_likelihood)。`detection.ai_agent_threshold` 以上、または sessionizer の分類が `ai_agent` で AI と判定。AUC は Mann–Whitney |
-| LLM agreement | トリアージ済みアラート/インシデントで actor_type・悪性判定・AI 判定が正解と一致した割合（tier 別件数） |
-| cost | `llm_calls` のトークン・USD 合計、アラートあたり / トリアージあたり |
+| LLM agreement | トリアージ済みアラート/インシデントで actor_type・悪性判定・AI 判定が正解と一致した割合（tier 別件数）。**`--llm mock` ではルール fallback の自己一致で LLM 品質ではない**（`llm.measures_llm=false`、`by_tier` は `rules(mock)`、要求された tier は `by_tier_requested`） |
+| cost | `llm_calls` のトークン・USD 合計、アラートあたり / トリアージあたり。mock では実費 $0 に加え `estimated_cost_usd`（mock の推定トークン〔入力 文字数/4・出力 200 固定〕× 料金表 `tokiwa.llm.pricing` + `llm.pricing`。実測ではない目安）と `estimated_cost_by_model_usd` |
 | latency | バッチ処理時間（取り込み→アラート）p50/p95、アラート→トリアージ p50/p95（バス観測、無ければ DB の updated_at） |
 
 アラートの正解帰属は `evidence_event_ids` 経由が基本。証拠に正解付きイベントが無い場合のみ `source_ip` で帰属する
@@ -70,6 +70,17 @@ llm_calls を読み戻して採点する。時刻は「最後のイベント = �
 `--compare` は主要指標を前回の `metrics.json` と比較し、許容幅（率は ±0.02 など、コスト・遅延は相対）を超えて
 悪化したものを `regressions` に列挙する。`--fail-on-regression` で CI ゲートにできる。許容幅は
 `backend/src/tokiwa/eval/report.py` の `KEY_METRICS` で調整する。
+
+- **アラート量も見る**: `alerts.total`（相対 10%・最低 2 件）と検知器別件数 `alerts.by_detector[<id>]`（相対 20%・最低 2 件）は
+  増減どちらも `changed` として回帰扱い。セッション単位の率が 1.0 に張り付いていても、検知器が止まった
+  （例: Sigma 全停止で 87 → 68 件）ことを拾うため。medium 以上の攻撃セッション検知率
+  `detection.attack_session_rate_medium_plus` も比較対象。
+- **比較可能性の確認**: 各実行は `metrics.json` の `comparability` に、データセットの sha256（同一性の基準。
+  seed / mix / generator_version は説明用）、LLM プロバイダ、有効な検知器、読み込んだ Sigma ルール数、検知・トリアージ・
+  デセプションの設定値（しきい値・窓。パスは含まない）、再生のバッチ設定を記録する。比較する 2 つで 1 つでも違えば
+  「NOT COMPARABLE」と差分を表示し、`--fail-on-regression` では終了コード **3** にする（悪化は 1）。
+  意図して条件を変えた比較（検知器を 1 つ外した効果を見る等）は `--allow-mismatch` を付ける。
+  `comparability` の無い古い `metrics.json` との比較も「比較不能」になるので、ベースラインを取り直す。
 
 ## 調整できるところ
 

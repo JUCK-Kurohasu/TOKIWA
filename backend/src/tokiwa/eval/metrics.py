@@ -16,6 +16,13 @@ Definitions (requirements §7 評価指標):
 * LLM agreement — over triaged alerts/incidents: actor type, malicious verdict, AI verdict vs ground truth;
 * cost — tokens and USD from ``llm_calls`` per alert / per triaged alert; latency — batch processing time
   (ingest -> alert) and alert -> triage.
+
+``--llm mock`` measures nothing about an LLM (#176): the mock provider answers triage with the rule-based fallback
+(``ai_agent_likelihood`` copies the alert's ``ai_score``), so the "LLM agreement" numbers are the rules agreeing with
+themselves, every triage tier is the same rules (``by_tier`` reads ``rules(mock)``; the tier the pipeline asked
+for stays in ``by_tier_requested``), the gateway books $0 and token counts are estimates (chars/4 in, 200 out).
+For mock runs ``cost.estimated_cost_usd`` prices those estimated tokens with the configured price table — an order
+of magnitude for "what would these calls cost live", not a measurement.
 """
 
 from __future__ import annotations
@@ -27,8 +34,17 @@ from typing import Any
 
 from tokiwa.eval.dataset import SessionTruth, Truth
 from tokiwa.eval.harness import RunResults
+from tokiwa.llm.base import LLMUsage
+from tokiwa.llm.pricing import estimate_cost
 
 _SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+MOCK_TIER = "rules(mock)"
+MOCK_LLM_CAVEAT = (
+    "provider=mock: triage results are the rule-based fallback (ai_agent_likelihood copies the alert ai_score); "
+    "LLM agreement is rule self-agreement, not LLM quality; prompt-injection robustness, refusals, real cost and "
+    "latency are not measured"
+)
 
 
 def ratio(num: float, den: float) -> float | None:
@@ -115,7 +131,7 @@ class _Attribution:
 
 def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[str, Any]]:
     per_profile: dict[str, dict[str, Any]] = {}
-    attack_total = attack_hit = benign_total = benign_hit = benign_hit_med = 0
+    attack_total = attack_hit = attack_hit_med = benign_total = benign_hit = benign_hit_med = 0
     for st in truth.sessions.values():
         alerts = att.session_alerts.get(st.session, [])
         hit = bool(alerts)
@@ -131,6 +147,7 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         if st.is_attack:
             attack_total += 1
             attack_hit += int(hit)
+            attack_hit_med += int(hit_med)
         else:
             benign_total += 1
             benign_hit += int(hit)
@@ -148,6 +165,8 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         "attack_sessions": attack_total,
         "attack_sessions_detected": attack_hit,
         "attack_session_rate": ratio(attack_hit, attack_total),
+        "attack_sessions_detected_medium_plus": attack_hit_med,
+        "attack_session_rate_medium_plus": ratio(attack_hit_med, attack_total),
         "benign_sessions": benign_total,
         "benign_sessions_alerted": benign_hit,
         "benign_session_fpr": ratio(benign_hit, benign_total),
@@ -199,6 +218,7 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
         rules.append(row)
     by_sev = Counter(str(a.get("severity")) for a in att.res.alerts)
     by_cat = Counter(str(a.get("category")) for a in att.res.alerts)
+    by_det = Counter(str(a.get("detector") or a.get("rule_id")) for a in att.res.alerts)
     summary = {
         "total": len(att.res.alerts),
         "true_positive": tp,
@@ -207,6 +227,7 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
         "precision": ratio(tp, tp + fp),
         "by_severity": dict(sorted(by_sev.items())),
         "by_category": dict(sorted(by_cat.items())),
+        "by_detector": dict(sorted(by_det.items())),
         "incidents": len(att.res.incidents),
     }
     return summary, rules
@@ -299,10 +320,15 @@ def _llm(truth: Truth, att: _Attribution, threshold: float) -> dict[str, Any]:
         malicious = result.get("actor_type") != "benign" and float(result.get("confidence") or 0.0) >= 0.5
         verdict_ok += int(malicious == (actor != "benign"))
         ai_ok += int((float(result.get("ai_agent_likelihood") or 0.0) >= threshold) == (actor == "ai_agent"))
+    mock = att.res.llm_provider == "mock"
     return {
+        "provider": att.res.llm_provider,
+        "measures_llm": not mock,
+        "caveat": MOCK_LLM_CAVEAT if mock else None,
         "triaged": triaged,
         "judged_against_truth": judged,
-        "by_tier": dict(sorted(by_tier.items())),
+        "by_tier": {MOCK_TIER: triaged} if mock and triaged else dict(sorted(by_tier.items())),
+        "by_tier_requested": dict(sorted(by_tier.items())),
         "actor_agreement": ratio(actor_ok, judged),
         "verdict_agreement": ratio(verdict_ok, judged),
         "ai_agreement": ratio(ai_ok, judged),
@@ -315,8 +341,30 @@ def _cost(res: RunResults, triaged: int) -> dict[str, Any]:
     tin = sum(int(c.get("input_tokens") or 0) for c in calls)
     tout = sum(int(c.get("output_tokens") or 0) for c in calls)
     n_alerts = len(res.alerts)
+    estimated: float | None = None
+    by_model_est: dict[str, float] = {}
+    if res.llm_provider == "mock":
+        for c in calls:
+            model = str(c.get("model") or "")
+            usage = LLMUsage(
+                input_tokens=int(c.get("input_tokens") or 0),
+                output_tokens=int(c.get("output_tokens") or 0),
+                cache_read_tokens=int(c.get("cache_read_tokens") or 0),
+                cache_write_tokens=int(c.get("cache_write_tokens") or 0),
+            )
+            by_model_est[model] = by_model_est.get(model, 0.0) + estimate_cost(model, usage, res.llm_pricing)
+        estimated = round(sum(by_model_est.values()), 6)
     return {
         "provider": res.llm_provider,
+        "estimated_cost_usd": estimated,
+        "estimated_cost_by_model_usd": {k: round(v, 6) for k, v in sorted(by_model_est.items())} or None,
+        "estimated_cost_basis": (
+            "mock token estimates (input chars/4, output fixed 200) x price table (tokiwa.llm.pricing + "
+            "llm.pricing overrides) for the model each call would have used; verify the prices before relying on it"
+            if estimated is not None
+            else None
+        ),
+        "by_model": dict(sorted(Counter(str(c.get("model")) for c in calls).items())),
         "llm_calls": len(calls),
         "by_status": dict(sorted(Counter(str(c.get("status")) for c in calls).items())),
         "by_purpose": dict(sorted(Counter(str(c.get("purpose")) for c in calls).items())),
@@ -369,6 +417,8 @@ def compute_metrics(truth: Truth, res: RunResults, *, ai_threshold: float | None
             "detectors_registered": res.detectors_registered,
             "detectors_enabled": res.detectors_enabled,
             "enrichers": res.enrichers,
+            "sigma_rules_loaded": res.sigma_rules_loaded,
+            "sigma_rule_dirs_missing": res.sigma_rule_dirs_missing,
             "actor_sessions": len(res.sessions),
             "events_stored": len(res.events),
             "notes": res.notes,

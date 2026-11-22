@@ -69,7 +69,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | Key | Default | Description |
 |---|---|---|
 | `disabled_detectors` | `[]` | IDs of detectors to disable |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Where Sigma rules are stored |
+| `sigma_rule_dirs` | resolved from the package location (`<repo>/rules/sigma` in a source checkout, `/app/rules/sigma` in the Docker image) | Where Sigma rules are stored. Does not depend on the working directory. A directory that does not exist is logged as an ERROR at startup. Relative paths are looked up in the working directory, then in `backend/` |
 | `dedup_window_seconds` | 300 | Time window for merging identical alerts |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | HTTP paths monitored for prompt injection |
 | `session_idle_timeout_seconds` | 1800 | After this long without access, activity is treated as a new session |

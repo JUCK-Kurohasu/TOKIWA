@@ -127,8 +127,8 @@ tokiwa sim ingest   [--server http://localhost:8788] [--token-file PATH] [--prof
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
 tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
 tokiwa eval info FILE.jsonl
 ```
@@ -138,7 +138,8 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock`（免费、离线，默认）或 `live`（使用已配置的提供商。**会产生费用**） |
 | `--budget-usd` | 使用 `--llm live` 时 **必填**。本次运行的费用上限 |
 | `--out` | 输出位置（默认 `eval/runs/<UTC 时间>`） |
-| `--compare` / `--fail-on-regression` | 与上次结果比较 / 若指标变差则以退出码 1 结束 |
+| `--compare` / `--fail-on-regression` | 与上次结果比较 / 若指标变差则以退出码 1 结束。两次运行的条件（数据集 sha256、LLM 提供商、启用的检测器、已加载的 Sigma 规则数、阈值、批处理设置）不同时视为“不可比较”，退出码为 3 |
+| `--allow-mismatch` | 即使条件不同也进行比较并判定是否变差（差异以警告显示） |
 | `--speed` | 0 = 最快，1 = 实时，10 = 10 倍速 |
 | `--enable-detector` / `--disable-detector` | 强制启用 / 禁用检测器 |
 | `--keep-work` | 保留评估用的临时数据库 |

@@ -69,7 +69,7 @@ deception:
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `disabled_detectors` | `[]` | 要禁用的检测器 ID |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Sigma 规则的存放位置 |
+| `sigma_rule_dirs` | 根据包的位置解析（源码中为 `<仓库>/rules/sigma`，Docker 镜像中为 `/app/rules/sigma`） | Sigma 规则的存放位置。与启动时的工作目录无关。目录不存在时在启动时记录 ERROR 日志。指定相对路径时依次在工作目录、`backend/` 中查找 |
 | `dedup_window_seconds` | 300 | 合并相同告警的时间窗口 |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | 作为提示注入监控对象的 HTTP 路径 |
 | `session_idle_timeout_seconds` | 1800 | 在此时间内没有访问则视为另一个会话 |

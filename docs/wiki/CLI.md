@@ -127,8 +127,8 @@ tokiwa sim ingest   [--server http://localhost:8788] [--token-file PATH] [--prof
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
 tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
 tokiwa eval info FILE.jsonl
 ```
@@ -138,7 +138,8 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock`（無料・オフライン、既定）または `live`（設定済みのプロバイダ。**費用が発生**） |
 | `--budget-usd` | `--llm live` のときに **必須**。この実行の費用の上限 |
 | `--out` | 出力先（既定 `eval/runs/<UTC 時刻>`） |
-| `--compare` / `--fail-on-regression` | 前回との比較 / 悪化していたら終了コード 1 |
+| `--compare` / `--fail-on-regression` | 前回との比較 / 悪化していたら終了コード 1。2 つの実行の条件（データセットの sha256・LLM プロバイダ・有効な検知器・読み込んだ Sigma ルール数・しきい値・バッチ設定）が違うときは「比較不能」として終了コード 3 |
+| `--allow-mismatch` | 条件が違っても比較して悪化の判定を出す（差分は警告として表示） |
 | `--speed` | 0 = 最速、1 = 実時間、10 = 10 倍速 |
 | `--enable-detector` / `--disable-detector` | 検知器を強制的に有効 / 無効にする |
 | `--keep-work` | 評価用の一時 DB を残す |

@@ -69,7 +69,7 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | Clave | Por defecto | Descripción |
 |---|---|---|
 | `disabled_detectors` | `[]` | ID de los detectores que se desactivan |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Ubicación de las reglas Sigma |
+| `sigma_rule_dirs` | se resuelve a partir de la ubicación del paquete (`<repositorio>/rules/sigma` en el código fuente, `/app/rules/sigma` en la imagen Docker) | Ubicación de las reglas Sigma. No depende del directorio de trabajo. Si un directorio no existe se registra un ERROR al arrancar. Las rutas relativas se buscan en el directorio de trabajo y después en `backend/` |
 | `dedup_window_seconds` | 300 | Ventana de tiempo para agrupar alertas idénticas |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | Rutas HTTP supervisadas para detectar inyección de prompts |
 | `session_idle_timeout_seconds` | 1800 | Si no hay accesos durante este tiempo, se considera una sesión distinta |

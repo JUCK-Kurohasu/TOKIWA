@@ -127,8 +127,8 @@ Setting `--time-scale` below 1 makes the run finish faster, but it changes the r
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
 tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
 tokiwa eval info FILE.jsonl
 ```
@@ -138,7 +138,8 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock` (free, offline, default) or `live` (the configured provider; **incurs cost**) |
 | `--budget-usd` | **Required** with `--llm live`. Cost cap for this run |
 | `--out` | Output directory (default `eval/runs/<UTC time>`) |
-| `--compare` / `--fail-on-regression` | Compare with a previous run / exit with code 1 if results got worse |
+| `--compare` / `--fail-on-regression` | Compare with a previous run / exit with code 1 if results got worse. If the two runs differ in their conditions (dataset sha256, LLM provider, enabled detectors, number of Sigma rules loaded, thresholds, batching), they are "not comparable" and the exit code is 3 |
+| `--allow-mismatch` | Compare and judge regressions even when the conditions differ (the differences are shown as a warning) |
 | `--speed` | 0 = as fast as possible, 1 = real time, 10 = 10× speed |
 | `--enable-detector` / `--disable-detector` | Force a detector on / off |
 | `--keep-work` | Keep the temporary DB used for the evaluation |

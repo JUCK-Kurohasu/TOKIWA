@@ -81,6 +81,15 @@ class RunResults:
     enrichers: list[str] = field(default_factory=list)
     llm_provider: str = "mock"
     ai_agent_threshold: float = 0.7
+    # Sigma file rules actually active in this run (None: sigma module unavailable). A wrong rule directory used to
+    # disable every Sigma rule with a single WARNING and change the alert count without a trace (#177).
+    sigma_rules_loaded: int | None = None
+    sigma_rule_dirs_missing: list[str] = field(default_factory=list)
+    # Detection / triage / deception knobs in effect (no paths, no secrets): two runs are only comparable when these
+    # match (#178).
+    settings_snapshot: dict[str, Any] = field(default_factory=dict)
+    # ``llm.pricing`` overrides in effect, for the "what would this cost" estimate of mock runs (#176).
+    llm_pricing: dict[str, dict[str, float]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -206,6 +215,50 @@ class _TriageObserver:
 # ---------------------------------------------------------------------------------------- replay
 
 
+def settings_snapshot(settings: Any) -> dict[str, Any]:
+    """The settings that change what the pipeline produces for a given dataset (thresholds, windows, decoys).
+
+    Paths (``sigma_rule_dirs``) are machine specific and are covered by ``sigma_rules_loaded`` instead;
+    ``disabled_detectors`` is covered by ``detectors_enabled``; ``max_concurrent`` only changes scheduling.
+    """
+    return {
+        "detection": settings.detection.model_dump(
+            mode="json", exclude={"sigma_rule_dirs", "disabled_detectors"}
+        ),
+        "triage": settings.triage.model_dump(mode="json", exclude={"max_concurrent"}),
+        "deception": settings.deception.model_dump(mode="json"),
+    }
+
+
+def _record_sigma_status(res: RunResults) -> None:
+    """Read the Sigma rule store now: the engine (and its store) is reset when the eval env is torn down."""
+    try:
+        from tokiwa.detect.sigma.loader import SIGMA_DETECTOR_ID, get_rule_store
+    except Exception:  # pragma: no cover - sigma module missing/broken
+        log.exception("sigma module unavailable during eval")
+        return
+    if SIGMA_DETECTOR_ID not in res.detectors_registered:
+        return
+    store = get_rule_store()
+    try:
+        rules = store.rules()
+    except Exception:
+        log.exception("could not read the Sigma rule store during eval")
+        return
+    res.sigma_rules_loaded = sum(1 for r in rules if r.origin == "file")
+    res.sigma_rule_dirs_missing = list(store.missing_dirs)
+    if SIGMA_DETECTOR_ID not in res.detectors_enabled:
+        return
+    if res.sigma_rule_dirs_missing:
+        res.notes.append(
+            "sigma rule dir(s) not found: "
+            + ", ".join(res.sigma_rule_dirs_missing)
+            + " (detection.sigma_rule_dirs); alert counts are not comparable with runs that loaded the rules"
+        )
+    if res.sigma_rules_loaded == 0:
+        res.notes.append("sigma detector enabled but 0 Sigma file rules loaded")
+
+
 async def _start_services() -> list[str]:
     """Like ``runtime.start(run_jobs=False)`` but one failing hook does not abort the evaluation."""
     runtime.load_service_packages()
@@ -253,7 +306,11 @@ async def replay(events: Sequence[Event], work_dir: Path, opts: ReplayOptions | 
 
 async def _replay_inner(events: list[Event], opts: ReplayOptions) -> RunResults:
     settings = get_settings()
-    res = RunResults(ai_agent_threshold=settings.detection.ai_agent_threshold)
+    res = RunResults(
+        ai_agent_threshold=settings.detection.ai_agent_threshold,
+        settings_snapshot=settings_snapshot(settings),
+        llm_pricing={k: dict(v) for k, v in settings.llm.pricing.items()},
+    )
     provider = gw.build_provider(settings)
     res.llm_provider = provider.name
     if opts.llm == "live" and provider.name == "mock":
@@ -282,6 +339,7 @@ async def _run_pipeline(events: list[Event], opts: ReplayOptions, res: RunResult
     res.enrichers = [e.id for e in get_enrichers()]
     if not res.detectors_enabled:
         res.notes.append("no detectors enabled: every detection metric will be 0")
+    _record_sigma_status(res)
 
     observer = _TriageObserver()
     queue = bus.listen(maxsize=1_000_000)
