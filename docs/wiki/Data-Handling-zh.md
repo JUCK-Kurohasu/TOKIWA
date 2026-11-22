@@ -125,9 +125,10 @@ export TOKIWA_TRIAGE__AUTO_TRIAGE=false        # 完全不做自动分诊（llm_
 export TOKIWA_COPILOT__ENABLED=false           # 停用 Copilot
 ```
 
-- **界面设置优先于环境变量**。如果在 **LLM → Settings**（LLM → 设置）中保存了提供商，即使用环境变量设为 `mock`，
-  也会使用界面中的设置。请在 **LLM → Settings** 的“Current status”（当前状态）中确认实际在用的提供商。
-  脱敏设置（`llm.redaction.*`）无法在界面中修改。
+- **默认情况下界面设置优先于环境变量**。如果在 **LLM → Settings**（LLM → 设置）中保存了提供商，即使用环境变量设为 `mock`，
+  也会使用界面中的设置。要固定“不向外部发送”，请同时传入 `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false`（只能通过环境变量或配置文件设置）：
+  界面中的保存会被拒绝，数据库中已有的覆盖也会被忽略（启动时以警告列出项目名）。**LLM → Settings** 的“Current status”（当前状态）
+  会显示实际在用的提供商和被覆盖的项目。脱敏设置（`llm.redaction.*`）无法在界面中修改。
 - 使用 `mock` 时分诊仍会运行，其输入会保存在 `llm_calls` 中（不会向外部发送）。因超出预算而未发送的调用，
   其输入也会被记录。
 - 使用在组织内部运行的 OpenAI 兼容服务器（`llm.provider=openai_compat`），可以把发送目标限制在组织内部（[LLM 设置与成本](LLM-zh)）。

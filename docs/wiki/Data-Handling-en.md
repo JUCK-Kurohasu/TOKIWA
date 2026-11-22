@@ -125,9 +125,11 @@ export TOKIWA_TRIAGE__AUTO_TRIAGE=false        # do not triage automatically at 
 export TOKIWA_COPILOT__ENABLED=false           # turn off the Copilot
 ```
 
-- **The UI setting takes precedence over environment variables**. If a provider has been saved under **LLM → Settings**, it is
-  used even if you set `mock` in an environment variable. Check the provider actually in use under "Current status" in
-  **LLM → Settings**. Redaction (`llm.redaction.*`) cannot be changed from the UI.
+- **By default the UI setting takes precedence over environment variables**. If a provider has been saved under **LLM → Settings**,
+  it is used even if you set `mock` in an environment variable. To pin "do not send outside", also pass
+  `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (it can only be set by environment variable or config file): saving from the UI is refused
+  and overrides already in the DB are ignored (their names are logged as a warning at startup). "Current status" in
+  **LLM → Settings** shows the provider actually in use and any overridden items. Redaction (`llm.redaction.*`) cannot be changed from the UI.
 - With `mock`, triage still runs and its input is stored in `llm_calls` (nothing is sent outside). The input of calls that were not
   sent because the budget was exceeded is also recorded.
 - With an OpenAI-compatible server run inside your organization (`llm.provider=openai_compat`), you can keep the destination inside your organization ([LLM setup & cost](LLM-en)).

@@ -28,13 +28,13 @@ eval-docs / data-handling）。I の #66（セキュリティヘッダ）はバ�
 Issue 化はしていない（要判断: 監査 Issue として追加登録するか）。
 
 - Zeek `http.log` の `username` が `sensors/normalize.py` の `_SENSITIVE_KEYS` に無く、`raw` に残る。
-- 対処の承認依頼通知（`notify/render.py` の `render_action`）が LLM の書いた `reason`（最大 500 文字）を外部チャネルへ送る（#168 の要約とは別経路）。
+- 対処の承認依頼通知（`notify/render.py` の `render_action`）が LLM の書いた `reason`（最大 500 文字）を外部チャネルへ送る（#168 の要約とは別経路）。 → **第 2 弾で対応済み**（`notify.include_summary` 既定 false、#128/#168）。
 - `POST /api/v1/ingest/events` はサーバー側でマスキングしない（ingest トークンがあれば未マスクのデータを保存できる）。
 - `mock` 時・予算超過時もプロンプト全文が `llm_calls.request_redacted` に残る。Copilot の会話を消しても `llm_calls` の行は残る。
 - `db/models/deception.py` の docstring と `deception/service.py` が存在しない「event retention」に言及。
 - Gate の `--access-log` を有効にすると uvicorn のアクセスログ（リクエスト行）がマスクされずに出る。
 - `GET /api/v1/llm/calls` の `error` に拒否時のモデル出力先頭 500 文字が入る（Data-Handling ページの権限表は「本文は含まない」と書いており、やや甘い）。
-- 既存 #172（UI で保存した LLM 設定が環境変数より優先）と #111（DB ファイルの権限）とも重なる。
+- 既存 #172（UI で保存した LLM 設定が環境変数より優先 → 第 2 弾で `llm.allow_ui_override` を追加）と #111（DB ファイルの権限 → #102 で新規作成分は 0600）とも重なる。
 
 ## 統合の記録
 

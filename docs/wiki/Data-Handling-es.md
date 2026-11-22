@@ -125,9 +125,12 @@ export TOKIWA_TRIAGE__AUTO_TRIAGE=false        # no hacer ningún triaje automá
 export TOKIWA_COPILOT__ENABLED=false           # desactivar el Copilot
 ```
 
-- **La configuración de la interfaz tiene prioridad sobre las variables de entorno**. Si se guardó un proveedor en **LLM → Settings**
-  (LLM → Configuración), se usa ese aunque ponga `mock` en una variable de entorno. Compruebe el proveedor realmente en uso en
-  «Current status» (Estado actual) de **LLM → Settings**. El enmascaramiento (`llm.redaction.*`) no se puede cambiar desde la interfaz.
+- **Por defecto, la configuración de la interfaz tiene prioridad sobre las variables de entorno**. Si se guardó un proveedor en
+  **LLM → Settings** (LLM → Configuración), se usa ese aunque ponga `mock` en una variable de entorno. Para fijar «no enviar al exterior»,
+  pase también `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (solo se puede fijar por variable de entorno o archivo de configuración): se rechaza
+  guardar desde la interfaz y se ignoran las sobrescrituras ya guardadas en la base de datos (sus nombres se avisan al arrancar).
+  «Current status» (Estado actual) de **LLM → Settings** muestra el proveedor realmente en uso y lo sobrescrito. El enmascaramiento
+  (`llm.redaction.*`) no se puede cambiar desde la interfaz.
 - Con `mock`, el triaje sigue ejecutándose y su entrada se guarda en `llm_calls` (no se envía nada al exterior). También se registra
   la entrada de las llamadas que no se enviaron por haberse superado el presupuesto.
 - Con un servidor compatible con OpenAI que funcione dentro de su organización (`llm.provider=openai_compat`), el destino queda dentro de la organización ([Configuración de LLM y costos](LLM-es)).
