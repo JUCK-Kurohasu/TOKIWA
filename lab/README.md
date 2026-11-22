@@ -71,7 +71,37 @@ uv run tokiwa eval run --dataset ../eval/datasets/live-ai.jsonl     # 実応答�
 
 ## 検証状況
 
-`docker compose -f lab/compose.yaml --profile sim --profile ingest --profile agent config` は通過（構文・参照）。
-サンドボックスに Docker デーモンが無いため `up` による起動確認は未実施（docs/handoff/2026-10-22-lab-eval.md 参照）。
+2026-11 監査（L14, `docs/audit/2026-11/findings/L14-lab.jsonl`）で、Docker デーモンのあるサンドボックス上で 2026-11-10 に
+次を確認した。Docker / Compose のバージョンは記録されていない。
+
+**起動を確認したもの**
+
+- `docker compose -f lab/compose.yaml up -d`: `tokiwa-init` が終了コード 0 で終わり、`tokiwa` / `gate` / `victim` が healthy。
+- UI（`127.0.0.1:8788`）で `POST /api/v1/auth/setup` → アクセストークン取得（初回セットアップ）。
+- `--profile sim` の `sim`（Gate 経由）→ イベント → アラート → インシデント（actor_type=ai_agent, severity=critical）
+  → 対処提案（block_ip / rate_limit、status=proposed で停止）→ 承認 → Gate が当該 IP に 403。
+  承認直後の最初のリクエストは 200 で、403 になるまで約 4〜8 秒かかった（Gate の取得間隔ぶんの遅延。#112）。
+
+**そのときの条件（素の `up --build` はその環境では通っていない）**
+
+- ベースイメージの取得が Docker Hub の匿名レート制限（429）・ghcr.io の 403・TLS を傍受するプロキシで失敗したため、
+  環境側で CA 入りのローカルベースイメージを作り、compose の override で `NODE_IMAGE` / `PYTHON_IMAGE` / `UV_IMAGE`
+  ビルド引数を差し替えた（リポジトリは無改変）。`victim/Dockerfile` は `FROM python:3.12-slim` 固定で ARG が無いため、
+  ローカルのイメージを `python:3.12-slim` として再タグして通した（#82）。
+- override の例: `docs/audit/2026-11/repro/L14/lab-override.yaml`（`docker compose -f lab/compose.yaml -f <override> up -d`）。
+- LLM は既定の mock。実 LLM（`TOKIWA_LLM_PROVIDER=auto` + `ANTHROPIC_API_KEY`）は試していない。
+
+**未確認のもの**
+
+- `--profile ingest`（`sim-ingest`）と `--profile agent`（`nginx` + `agent`）は起動していない。
+  （同等の `tokiwa sim ingest` は deploy/compose.yaml の PostgreSQL 構成で動作確認済み: #113。ラボのサービスとしては未確認）
+- プロキシ・ミラーの無い素の環境での `up --build`、Docker Desktop（macOS / Windows）での動作。
+
+**既知の問題（監査で登録済み）**
+
+- ラボのコンテナに read_only / cap_drop / no-new-privileges が無い（#105）。ネットワークがフラットで victim から
+  TOKIWA の API/UI に到達できる（#106）。`ANTHROPIC_API_KEY` がコンテナの環境変数として見える（#108）。
+- 承認から遮断の反映まで数秒の遅延がある（#112）。
+
 `agent` はコンテナ内で動くため、ホストセンサーが見るのはコンテナ自身のポートのみ（ホスト全体を見るなら
 `network_mode: host` / `pid: host` が必要。ラボでは既定にしていない）。
