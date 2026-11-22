@@ -10,9 +10,9 @@ Two outputs:
 2. ``FingerprintInfo`` — a classification of the client (browser / HTTP library / headless browser / declared AI
    agent / AI crawler / scanner ...) plus header anomalies (e.g. a browser UA with a library's header set).
 
-UA token lists are point-in-time knowledge (2026-10) and are hypotheses about the ecosystem, not ground truth:
-UAs are trivially spoofed. They are therefore used as *weak* evidence in scoring. TODO(verify): review the AI
-UA list periodically against vendors' published crawler/agent documentation.
+The UA token list lives in :mod:`tokiwa.aidetect.ua_catalog` (shared with the ``web.scanner_ua`` detector). It is
+point-in-time knowledge and a set of hypotheses about the ecosystem, not ground truth: UAs are trivially spoofed,
+so they are used as *weak* evidence in scoring.
 """
 
 from __future__ import annotations
@@ -20,23 +20,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from functools import lru_cache
 
+from tokiwa.aidetect.ua_catalog import UA_RULES, ClientFamily
 from tokiwa.util import short_hash
 
-
-class ClientFamily(StrEnum):
-    BROWSER = "browser"
-    HEADLESS_BROWSER = "headless_browser"
-    HTTP_LIBRARY = "http_library"
-    CLI_TOOL = "cli_tool"
-    AI_AGENT = "ai_agent"  # user-triggered AI fetchers, agent frameworks, LLM SDK clients
-    AI_CRAWLER = "ai_crawler"  # AI training / AI search crawlers
-    SCANNER = "scanner"
-    BOT = "bot"  # classic search/social crawlers
-    EMPTY = "empty"
-    UNKNOWN = "unknown"
+__all__ = ["ClientFamily"]  # re-exported: callers import the family enum from here
 
 
 # Families that indicate programmatic (non-human-browser) clients.
@@ -77,100 +66,16 @@ _LLM_SDK_HEADERS = frozenset(
     {"mcp-session-id", "mcp-protocol-version", "anthropic-version", "openai-organization", "openai-project"}
 )
 
-# (pattern, family, tool) — first match wins, so order matters (specific before generic).
+# (pattern, family, tool) compiled from the shared catalog — first match wins, so order matters.
 _UA_RULES: tuple[tuple[re.Pattern[str], ClientFamily, str], ...] = tuple(
-    (re.compile(p, re.I), fam, tool)
-    for p, fam, tool in (
-        # --- self-declared, user-triggered AI agents / assistants and agent frameworks
-        (r"ChatGPT-User", ClientFamily.AI_AGENT, "chatgpt-user"),
-        (r"Claude-User", ClientFamily.AI_AGENT, "claude-user"),
-        (r"Perplexity-User", ClientFamily.AI_AGENT, "perplexity-user"),
-        (r"MistralAI-User", ClientFamily.AI_AGENT, "mistralai-user"),
-        (r"\bOpenAI/(?:Python|JS|Node)\b", ClientFamily.AI_AGENT, "openai-sdk"),
-        (r"\bAnthropic/(?:Python|JS|TypeScript)\b", ClientFamily.AI_AGENT, "anthropic-sdk"),
-        (r"lang-?chain", ClientFamily.AI_AGENT, "langchain"),
-        (r"llama[-_ ]?index", ClientFamily.AI_AGENT, "llamaindex"),
-        (r"\bautogen\b", ClientFamily.AI_AGENT, "autogen"),
-        (r"\bcrewai\b", ClientFamily.AI_AGENT, "crewai"),
-        (r"browser[-_ ]use", ClientFamily.AI_AGENT, "browser-use"),
-        (r"smolagents", ClientFamily.AI_AGENT, "smolagents"),
-        (r"\bmcp[-_ ]?(?:client|remote|inspector)\b", ClientFamily.AI_AGENT, "mcp-client"),
-        (r"\b(?:ai|llm)[-_ ]?agent\b", ClientFamily.AI_AGENT, "ai-agent"),
-        # --- AI crawlers (training / AI search)
-        (r"GPTBot", ClientFamily.AI_CRAWLER, "gptbot"),
-        (r"OAI-SearchBot", ClientFamily.AI_CRAWLER, "oai-searchbot"),
-        (r"ClaudeBot|Claude-SearchBot|Claude-Web|anthropic-ai", ClientFamily.AI_CRAWLER, "claudebot"),
-        (r"PerplexityBot", ClientFamily.AI_CRAWLER, "perplexitybot"),
-        (r"\bCCBot\b", ClientFamily.AI_CRAWLER, "ccbot"),
-        (r"Bytespider", ClientFamily.AI_CRAWLER, "bytespider"),
-        (r"meta-externalagent", ClientFamily.AI_CRAWLER, "meta-externalagent"),
-        (r"cohere-ai", ClientFamily.AI_CRAWLER, "cohere-ai"),
-        (r"\bYouBot\b", ClientFamily.AI_CRAWLER, "youbot"),
-        # --- offensive scanners
-        (r"sqlmap", ClientFamily.SCANNER, "sqlmap"),
-        (r"nikto", ClientFamily.SCANNER, "nikto"),
-        (r"nuclei", ClientFamily.SCANNER, "nuclei"),
-        (r"Fuzz Faster U Fool|\bffuf\b", ClientFamily.SCANNER, "ffuf"),
-        (r"gobuster", ClientFamily.SCANNER, "gobuster"),
-        (r"feroxbuster", ClientFamily.SCANNER, "feroxbuster"),
-        (r"dirbuster|\bdirb\b", ClientFamily.SCANNER, "dirbuster"),
-        (r"wfuzz", ClientFamily.SCANNER, "wfuzz"),
-        (r"wpscan", ClientFamily.SCANNER, "wpscan"),
-        (r"masscan", ClientFamily.SCANNER, "masscan"),
-        (r"zgrab", ClientFamily.SCANNER, "zgrab"),
-        (r"Nmap Scripting Engine|\bnmap\b", ClientFamily.SCANNER, "nmap"),
-        (r"acunetix", ClientFamily.SCANNER, "acunetix"),
-        (r"netsparker|invicti", ClientFamily.SCANNER, "invicti"),
-        (r"OWASP[ _-]?ZAP|\bZAP/", ClientFamily.SCANNER, "zap"),
-        (r"arachni", ClientFamily.SCANNER, "arachni"),
-        (r"\bw3af\b", ClientFamily.SCANNER, "w3af"),
-        (r"openvas", ClientFamily.SCANNER, "openvas"),
-        (r"nessus", ClientFamily.SCANNER, "nessus"),
-        (r"whatweb", ClientFamily.SCANNER, "whatweb"),
-        # --- headless / automated browsers
-        (r"HeadlessChrome", ClientFamily.HEADLESS_BROWSER, "headless-chrome"),
-        (r"PhantomJS", ClientFamily.HEADLESS_BROWSER, "phantomjs"),
-        (r"Playwright", ClientFamily.HEADLESS_BROWSER, "playwright"),
-        (r"Puppeteer", ClientFamily.HEADLESS_BROWSER, "puppeteer"),
-        (r"Selenium|webdriver", ClientFamily.HEADLESS_BROWSER, "selenium"),
-        # --- classic bots
-        (
-            r"Googlebot|bingbot|Slurp|DuckDuckBot|Baiduspider|YandexBot|facebookexternalhit|Twitterbot|AhrefsBot|SemrushBot",
-            ClientFamily.BOT,
-            "search-bot",
-        ),
-        # --- CLI tools
-        (r"^curl/", ClientFamily.CLI_TOOL, "curl"),
-        (r"^Wget/", ClientFamily.CLI_TOOL, "wget"),
-        (r"HTTPie/", ClientFamily.CLI_TOOL, "httpie"),
-        (r"PowerShell/", ClientFamily.CLI_TOOL, "powershell"),
-        # --- HTTP libraries
-        (r"python-httpx", ClientFamily.HTTP_LIBRARY, "python-httpx"),
-        (r"python-requests", ClientFamily.HTTP_LIBRARY, "python-requests"),
-        (r"aiohttp", ClientFamily.HTTP_LIBRARY, "aiohttp"),
-        (r"Python-urllib", ClientFamily.HTTP_LIBRARY, "python-urllib"),
-        (r"Go-http-client", ClientFamily.HTTP_LIBRARY, "go-http-client"),
-        (r"node-fetch", ClientFamily.HTTP_LIBRARY, "node-fetch"),
-        (r"\bundici\b", ClientFamily.HTTP_LIBRARY, "undici"),
-        (r"\baxios\b", ClientFamily.HTTP_LIBRARY, "axios"),
-        (r"\bgot\b \(https://github.com/sindresorhus/got\)", ClientFamily.HTTP_LIBRARY, "got"),
-        (r"okhttp", ClientFamily.HTTP_LIBRARY, "okhttp"),
-        (r"Apache-HttpClient", ClientFamily.HTTP_LIBRARY, "apache-httpclient"),
-        (r"^Java/", ClientFamily.HTTP_LIBRARY, "java"),
-        (r"libwww-perl", ClientFamily.HTTP_LIBRARY, "libwww-perl"),
-        (r"^Ruby\b|Faraday", ClientFamily.HTTP_LIBRARY, "ruby"),
-        (r"^Dart/", ClientFamily.HTTP_LIBRARY, "dart"),
-        (r"reqwest", ClientFamily.HTTP_LIBRARY, "reqwest"),
-        (r"Scrapy", ClientFamily.HTTP_LIBRARY, "scrapy"),
-        (r"\bcolly\b", ClientFamily.HTTP_LIBRARY, "colly"),
-        (r"^Deno/|^Bun/|^node$|^Node\.js", ClientFamily.HTTP_LIBRARY, "js-runtime"),
-    )
+    (re.compile(r.pattern, re.I), r.family, r.tool) for r in UA_RULES
 )
 
 _BROWSER_RE = re.compile(
     r"^Mozilla/5\.0 \(.+\) (?:AppleWebKit/[\d.]+|Gecko/\d+).*(?:Chrome|Firefox|Safari|Edg)/\d+"
 )
 _MOZILLA_PREFIX_RE = re.compile(r"^Mozilla/\d")
+_ENGINE_TOKEN_RE = re.compile(r"AppleWebKit|Gecko|Trident|Presto")
 _CHROMIUM_RE = re.compile(r"(?:Chrome|Chromium|Edg)/(\d+)")
 
 
@@ -252,8 +157,13 @@ def header_anomalies(
     out: list[str] = []
     if not ua:
         out.append("empty_user_agent")
-    elif _MOZILLA_PREFIX_RE.match(ua) and family == ClientFamily.UNKNOWN:
-        # e.g. "Mozilla/5.0 (spa-api-recon)": a Mozilla prefix without a real browser engine token.
+    elif _MOZILLA_PREFIX_RE.match(ua) and (
+        family == ClientFamily.UNKNOWN
+        or (family == ClientFamily.AI_AGENT and not _ENGINE_TOKEN_RE.search(ua))
+    ):
+        # e.g. "Mozilla/5.0 (spa-api-recon)": a Mozilla prefix without a real browser engine token. Declared AI
+        # agents keep the flag when their UA has no engine token (a scripted client, unlike ChatGPT-/Claude-User,
+        # whose UAs carry "AppleWebKit ... like Gecko").
         out.append("nonstandard_mozilla_ua")
     names = _lower_names(headers, header_order)
     comprehensive = len(names) >= 3
