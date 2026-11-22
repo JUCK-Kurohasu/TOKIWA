@@ -10,6 +10,13 @@ runs further ahead than the wall clock plus ``max_future_skew_s`` (audit #19): w
 also clamps such timestamps (``tokiwa.api.routes.ingest``); the cap here covers in-process callers as well.
 Past-dated (late / re-sent) events are not changed.
 
+Idle expiry is judged per sensor: each ``sensor_id`` keeps its own (capped) high-water mark and a session is idle
+relative to the sensor that saw its latest activity. A sensor re-sending an hour-old backlog therefore keeps its
+sessions whole instead of having them expired by another sensor's live clock on every flush, and one sensor's clock
+cannot expire another sensor's sessions. This is robustness, not an attacker defence (an unbound ingest token can
+claim any ``sensor_id``; the wall-clock cap is what bounds a forger). Sessions of a sensor that goes quiet stay live
+until that sensor sends again, LRU eviction, or a sensor clock slot is recycled (then the global mark applies).
+
 Bounds (memory is O(max_sessions * max_obs) small records):
 - at most ``max_sessions`` live sessions (LRU eviction; dirty evicted sessions are kept until the next flush);
 - at most ``max_obs`` request observations per session (sliding window — features describe recent behaviour,
@@ -48,6 +55,9 @@ LLM_APP_FINGERPRINT = "llm_app"
 # How far event time may move the tracker's reference clock past the wall clock
 # (``detection.max_future_skew_seconds``).
 DEFAULT_MAX_FUTURE_SKEW_S = 120.0
+MAX_SENSOR_CLOCKS = (
+    256  # per-sensor high-water marks kept (LRU); sessions of a recycled sensor use the global mark
+)
 
 
 @dataclass(slots=True)
@@ -77,6 +87,7 @@ class LiveSession:
     stale: bool = False
     new_since_rescore: int = 0
     last_rescore_mono: float = 0.0
+    sensor: str = ""  # sensor that observed the latest activity (its clock decides idle expiry)
 
     @property
     def unique_paths(self) -> int:
@@ -141,9 +152,9 @@ class SessionTracker:
         self._by_id: dict[str, LiveSession] = {}
         self._by_ip: dict[str, set[str]] = {}
         self._pending: dict[str, SessionSnapshot] = {}
-        self.max_event_ts = (
-            0.0  # reference "now" for idle expiry: max event time, capped at wall clock + skew
-        )
+        # Reference "now" for idle expiry: max event time, capped at wall clock + skew; global and per sensor.
+        self.max_event_ts = 0.0
+        self._sensor_ts: OrderedDict[str, float] = OrderedDict()
         self.significant_change = False
         self.stats = {"created": 0, "evicted": 0, "expired": 0, "rescored": 0, "future_capped": 0}
 
@@ -197,17 +208,33 @@ class SessionTracker:
             if not keys:
                 self._by_ip.pop(s.source_ip, None)
 
-    def _advance_clock(self, ts: float, ceiling: float) -> None:
-        """Move the reference clock forward, never past ``ceiling`` (wall clock + allowed future skew)."""
+    def _advance_clock(self, ts: float, ceiling: float, sensor: str) -> None:
+        """Move the reference clocks forward, never past ``ceiling`` (wall clock + allowed future skew)."""
         if ts > ceiling:
             ts = ceiling
             self.stats["future_capped"] += 1
         if ts > self.max_event_ts:
             self.max_event_ts = ts
+        clocks = self._sensor_ts
+        cur = clocks.get(sensor)
+        if cur is None:
+            clocks[sensor] = ts
+            if len(clocks) > MAX_SENSOR_CLOCKS:
+                clocks.popitem(last=False)
+        else:
+            if ts > cur:
+                clocks[sensor] = ts
+            clocks.move_to_end(sensor)
+
+    def reference_ts(self, sensor: str) -> float:
+        """Event-time "now" of ``sensor`` (global mark when the sensor is unknown or its slot was recycled)."""
+        return self._sensor_ts.get(sensor, self.max_event_ts)
 
     def expire_idle(self) -> int:
-        cutoff = self.max_event_ts - self.idle_timeout_s
-        expired = [s for s in self._by_key.values() if s.last_seen.timestamp() < cutoff]
+        idle = self.idle_timeout_s
+        expired = [
+            s for s in self._by_key.values() if s.last_seen.timestamp() < self.reference_ts(s.sensor) - idle
+        ]
         for s in expired:
             self._finalize(s)
         self.stats["expired"] += len(expired)
@@ -278,8 +305,9 @@ class SessionTracker:
         e.session_id = s.id
         h = e.http
         assert h is not None
-        if e.timestamp > s.last_seen:
+        if e.timestamp >= s.last_seen:
             s.last_seen = e.timestamp
+            s.sensor = e.sensor_id or ""
         s.request_count += 1
         if h.status is not None and h.status >= 400:
             s.error_count += 1
@@ -311,8 +339,9 @@ class SessionTracker:
         if s is None:
             return None
         e.session_id = s.id
-        if ts > s.last_seen:
+        if ts >= s.last_seen:
             s.last_seen = ts
+            s.sensor = e.sensor_id or ""
         if e.kind == EventKind.DECEPTION:
             kind = (e.deception.asset_kind if e.deception else None) or "unknown"
             if kind == "ai_canary":
@@ -338,12 +367,12 @@ class SessionTracker:
         other = sorted((e for e in evs if e.kind != EventKind.HTTP), key=lambda e: e.timestamp)
         ceiling = self._clock() + self.max_future_skew_s
         for e in http:
-            self._advance_clock(e.timestamp.timestamp(), ceiling)
+            self._advance_clock(e.timestamp.timestamp(), ceiling, e.sensor_id or "")
             s = self._observe_http(e)
             if s is not None:
                 touched[s.id] = s
         for e in other:
-            self._advance_clock(e.timestamp.timestamp(), ceiling)
+            self._advance_clock(e.timestamp.timestamp(), ceiling, e.sensor_id or "")
             s = self._observe_other(e)
             if s is not None:
                 touched[s.id] = s

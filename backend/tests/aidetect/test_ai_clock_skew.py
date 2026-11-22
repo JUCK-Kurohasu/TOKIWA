@@ -37,12 +37,12 @@ def _agent() -> list[Event]:
     return events
 
 
-def _probe(ts_offset_s: float, base: Event, ip: str = "10.9.9.9") -> Event:
+def _probe(ts_offset_s: float, base: Event, ip: str = "10.9.9.9", sensor: str = SENSOR) -> Event:
     return Event(
         timestamp=base.timestamp + timedelta(seconds=ts_offset_s),
         kind=EventKind.HTTP,
         dataset="gate.http",
-        sensor_id=SENSOR,
+        sensor_id=sensor,
         source=Endpoint(ip=ip),
         http=HttpInfo(method="GET", path="/health", status=200, user_agent="kube-probe/1.30"),
     )
@@ -116,6 +116,39 @@ def test_past_dated_events_keep_their_behaviour() -> None:
     s = tr.get(sid)
     assert s is not None and s.request_count == len(agent) + 1 and s.classification == ActorType.AI_AGENT
     assert tr.get(old.session_id) is None  # idle relative to the reference clock -> finalized and persisted
+
+
+@pytest.mark.parametrize("per_sensor", [True, False], ids=["per-sensor", "global-clock"])
+def test_backlog_from_another_sensor_is_judged_on_its_own_clock(per_sensor: bool) -> None:
+    """A sensor re-sending a 3-hour-old backlog while another sensor is live keeps its sessions whole."""
+    agent = _agent()
+    for e in agent:
+        e.sensor_id = "gate-backlog"
+    live_base = agent[-1]
+    tr = SessionTracker(clock=lambda: live_base.timestamp.timestamp() + 3 * 3600 + 60)
+    if not per_sensor:  # the old behaviour: one clock for everyone
+        tr.reference_ts = lambda sensor: tr.max_event_ts  # type: ignore[method-assign]
+    for i, batch in enumerate(_batches(agent)):
+        live = _probe(3 * 3600 + i, live_base, ip="10.7.7.7", sensor="nginx-live")
+        tr.observe_batch([live, *batch])
+        tr.drain_dirty()
+    sids = {e.session_id for e in agent}
+    if per_sensor:
+        assert len(sids) == 1
+        s = tr.get(sids.pop())
+        assert s is not None and s.classification == ActorType.AI_AGENT
+    else:
+        assert len(sids) > 1  # every flush expired the backlog session
+
+
+def test_sensor_clocks_are_bounded() -> None:
+    from tokiwa.aidetect.sessions import MAX_SENSOR_CLOCKS
+
+    base = _agent()[0]
+    tr = SessionTracker()
+    tr.observe_batch([_probe(i, base, ip=f"10.6.{i // 256}.{i % 256}", sensor=f"s{i}") for i in range(300)])
+    assert len(tr._sensor_ts) == MAX_SENSOR_CLOCKS
+    assert tr.reference_ts("s0") == tr.max_event_ts  # recycled slot -> global mark
 
 
 # ------------------------------------------------------------------------------------------------ ingest route
