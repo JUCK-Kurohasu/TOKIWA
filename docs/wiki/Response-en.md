@@ -86,6 +86,20 @@ The approver of an auto-approved response action is recorded as `policy`. Think 
 
 > "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase).
 
+## Reject, revert and suppression (stopping re-proposals)
+
+The reject and revert dialogs let you choose what happens to "re-proposals for this target".
+
+| Choice | Rule / LLM proposals of the same type for the same target | Auto-approval |
+|---|---|---|
+| Don't suppress (default) | Still proposed | **Not for 24 hours** (`response.auto_approve_cooldown_minutes`, 0 disables) |
+| Don't re-propose for N hours / never | **Not created** (`response.propose_suppressed` in the audit log; no approval-request notification either) | No |
+
+- IP / CIDR targets match by overlap (an IP inside a suppressed /24, or a broader CIDR containing a suppressed IP, also matches). A different action type is treated separately.
+- A proposal a human makes manually is still created while suppressed (it is never auto-approved).
+- List and lift suppressions on the **Suppressions** tab of the Response page (API: `GET /api/v1/response/suppressions`, lift with `POST /api/v1/response/suppressions/{id}/lift`).
+- To suppress a shared NAT or monitoring-service IP in advance, use `POST /api/v1/response/suppressions`.
+
 ## Blocking with nftables (optional)
 
 Use this when you also want to stop traffic that does not go through the Gate. It is **disabled by default**, and it always fails unless you enable it.

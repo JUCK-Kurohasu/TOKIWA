@@ -43,9 +43,42 @@ export interface ActionProposal {
   proposed_by?: ActionProposer;
 }
 
+/** Optional part of reject / revert (audit #63): do not re-propose this type + target. */
+export interface SuppressOptions {
+  suppress_hours?: number;
+  suppress_permanent?: boolean;
+}
+
 /** POST /response/actions/{id}/reject */
-export interface ActionRejectBody {
+export interface ActionRejectBody extends SuppressOptions {
   reason?: string;
+}
+
+/** POST /response/actions/{id}/revert */
+export interface ActionRevertBody extends SuppressOptions {
+  reason?: string;
+}
+
+/** schemas.suppressions.SuppressionMode */
+export type SuppressionMode = "suppress" | "manual_only";
+
+/** GET /response/suppressions — schemas.suppressions.ResponseSuppression */
+export interface ResponseSuppression {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  action_type: ActionType;
+  target: string;
+  mode: SuppressionMode;
+  reason: string;
+  created_by: string;
+  source_action_id: string | null;
+  expires_at: string | null;
+  lifted_at: string | null;
+  lifted_by: string | null;
+  hits: number;
+  last_hit_at: string | null;
+  active: boolean;
 }
 
 /** POST /deception/assets — schemas.response.DeceptionAssetIn (PATCH accepts a subset) */

@@ -102,6 +102,7 @@ deception:
 | キー | 既定 | 説明 |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | 自動承認（両方の設定が必要） |
+| `auto_approve_cooldown_minutes` | 1440 | 人間が却下・取り消した種類 + 対象は、この時間（分）自動承認しない（0 で無効） |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL の既定と上限 |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | 絶対に対象にしない範囲 |
 | `protect_server_addresses` | true | サーバー自身の IP を保護 |

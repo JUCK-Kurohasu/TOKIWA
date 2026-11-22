@@ -102,6 +102,7 @@ deception:
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | 自动批准（两项设置都需要） |
+| `auto_approve_cooldown_minutes` | 1440 | 人工拒绝或撤销后，同类型 + 同目标在此时间（分钟）内不会被自动批准（0 表示禁用） |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL 的默认值和上限 |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | 绝不作为处置对象的范围 |
 | `protect_server_addresses` | true | 保护服务器自身的 IP |

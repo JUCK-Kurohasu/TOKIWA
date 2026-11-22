@@ -114,7 +114,7 @@ against vulnerability information and for prioritizing incidents (whether a KEV 
 
 ### Response
 
-A list of response actions proposed by the LLM, rules, and users. Tabs: **Awaiting approval** / **Active** / **History**.
+A list of response actions proposed by the LLM, rules, and users. Tabs: **Awaiting approval** / **Active** / **History** / **Suppressions** (targets marked "do not re-propose" on reject or revert; lift them here).
 Users with `analyst` or higher can approve, reject, and revert. For details, see [Response (approval workflow)](Response-en).
 
 ### Deception

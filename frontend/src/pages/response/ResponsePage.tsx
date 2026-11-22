@@ -7,7 +7,7 @@
  * still renders correctly.
  */
 import { useQueries } from "@tanstack/react-query";
-import { History, Play, RefreshCw, ShieldCheck, ShieldPlus, Sparkles } from "lucide-react";
+import { BellOff, History, Play, RefreshCw, ShieldCheck, ShieldPlus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api } from "@/api/client";
@@ -42,10 +42,11 @@ import {
 import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { SuppressionsPanel } from "./SuppressionsPanel";
 
-type TabKey = "pending" | "active" | "history";
+type TabKey = "pending" | "active" | "history" | "suppressions";
 
-const TAB_STATUSES: Record<TabKey, ActionStatus[]> = {
+const TAB_STATUSES: Record<Exclude<TabKey, "suppressions">, ActionStatus[]> = {
   pending: ["proposed"],
   active: ["approved", "active"],
   history: ["expired", "reverted", "rejected", "failed"],
@@ -86,6 +87,7 @@ const strings = {
     pending: "承認待ち",
     active: "実行中",
     history: "履歴",
+    suppressions: "抑止",
     llmPending: "うち LLM 提案",
     kpiPendingHint: "承認されるまで何も実行されません",
     kpiActiveHint: "TTL 経過で自動解除",
@@ -118,6 +120,7 @@ const strings = {
     pending: "Awaiting approval",
     active: "Active",
     history: "History",
+    suppressions: "Suppressions",
     llmPending: "of which LLM-proposed",
     kpiPendingHint: "Nothing runs until approved",
     kpiActiveHint: "Lifted automatically when the TTL ends",
@@ -163,7 +166,8 @@ export function ResponsePage() {
   const canOperate = useCanOperate();
   const [sp, setSp] = useSearchParams();
   const tabParam = sp.get("tab");
-  const tab: TabKey = tabParam === "active" || tabParam === "history" ? tabParam : "pending";
+  const tab: TabKey =
+    tabParam === "active" || tabParam === "history" || tabParam === "suppressions" ? tabParam : "pending";
   const setTab = (v: TabKey) =>
     setSp(
       (prev) => {
@@ -272,11 +276,22 @@ export function ResponsePage() {
                 </span>
               ),
             },
+            {
+              value: "suppressions",
+              label: (
+                <span className="flex items-center gap-1.5">
+                  <BellOff className="h-3.5 w-3.5" aria-hidden />
+                  {L.suppressions}
+                </span>
+              ),
+            },
           ]}
         />
 
         <div className="pt-4">
-          {current.error ? (
+          {tab === "suppressions" ? (
+            <SuppressionsPanel />
+          ) : current.error ? (
             <div className="space-y-2">
               <ErrorState error={current.error} />
               <Button size="sm" variant="outline" onClick={current.refetch}>

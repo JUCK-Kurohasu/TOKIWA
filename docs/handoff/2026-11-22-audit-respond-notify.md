@@ -8,7 +8,7 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| #63 | 進行中 | backend: 新テーブル `response_suppressions`（`db/models/response_suppression.py`）と `respond/suppress.py`。却下・取り消しで抑止を記録（指定時 `suppress`＝自動提案を破棄、無指定でも `manual_only`＝`response.auto_approve_cooldown_minutes` 既定 24 時間は自動承認しない）。`create_proposal` が同じトランザクションで照合（IP/CIDR は重なり）。API: reject/revert の `suppress_hours`/`suppress_permanent`/`reason`、`GET/POST /response/suppressions`、`POST .../{id}/lift`。テスト `tests/respond/test_respond_suppression.py` | (backend) |
+| #63 | 完全 | backend: 新テーブル `response_suppressions`（`db/models/response_suppression.py`）と `respond/suppress.py`。却下・取り消しで抑止を記録（指定時 `suppress`＝自動提案を破棄、無指定でも `manual_only`＝`response.auto_approve_cooldown_minutes` 既定 24 時間は自動承認しない）。`create_proposal` が同じトランザクションで照合（IP/CIDR は重なり）。API: reject/revert の `suppress_hours`/`suppress_permanent`/`reason`、`GET/POST /response/suppressions`、`POST .../{id}/lift`。テスト `tests/respond/test_respond_suppression.py`（取り消し後の再提案が自動承認されない・破棄される・期限切れ/解除で戻る・CIDR 重なり・人間の提案・API）。UI: 却下/取り消しダイアログに「同じ対象への再提案」（抑止しない / N 時間 / 恒久）と取り消し理由、カードに「抑止中のため自動承認しない」、対処画面に「抑止」タブ（一覧・解除）。docs/response.md §1.1、api-contract、wiki Response・Configuration・Web-UI ×4 | d1aa482, (ui) |
 | #64 | 未着手 | | |
 | #118 | 未着手 | | |
 | #128 + #168 | 未着手 | | |
@@ -30,6 +30,11 @@
 ## 失敗した試み
 
 ## 担当外の変更
+
+- `frontend/src/components/common/ResponseActions.tsx`（対処カード・承認/却下/取り消しダイアログ。対処画面の共通部品）: #63 の抑止選択・取り消し理由・抑止バッジ。
+- `frontend/src/api/types-ops.ts`: `SuppressOptions` / `ActionRevertBody` / `ResponseSuppression` を追加（既存型は `ActionRejectBody` に任意項目を足しただけ）。
+- `docs/api-contract.md`: 対処の表に抑止 API を追記。
+- `config.py` は `ResponseSettings` / `NotifySettings` のみ（担当内）。
 
 ## 他レーンへの依頼
 
