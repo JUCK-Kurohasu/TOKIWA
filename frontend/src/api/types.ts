@@ -460,6 +460,8 @@ export interface LLMCall {
   latency_ms: number;
   related: Record<string, string>;
   error: string | null;
+  /** "table" | "snapshot" | "unpriced" (model not in the pricing table: estimated at the highest known rates) | null */
+  cost_basis?: string | null;
 }
 
 export interface LLMCallDetail extends LLMCall {

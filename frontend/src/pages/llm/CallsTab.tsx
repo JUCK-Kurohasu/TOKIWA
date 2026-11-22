@@ -27,6 +27,8 @@ const strings = {
     model: "モデル",
     tokens: "トークン（入力 / 出力）",
     cost: "費用",
+    estimated: "見積もり: 料金表にないモデル",
+    estimatedHint: "料金表にないモデルのため、最も高い既知単価で見積もった費用です（llm.pricing で設定）",
     latency: "応答時間",
     related: "関連",
     empty: "LLM 呼び出しの記録はありません",
@@ -52,6 +54,9 @@ const strings = {
     model: "Model",
     tokens: "Tokens (in / out)",
     cost: "Cost",
+    estimated: "estimate: model not in the pricing table",
+    estimatedHint:
+      "Model not in the pricing table: cost estimated at the highest known rates (set llm.pricing)",
     latency: "Latency",
     related: "Related",
     empty: "No LLM calls recorded",
@@ -207,7 +212,12 @@ function CallDetailDialog({ id, row, onClose }: { id: string; row?: LLMCall; onC
                 [L.tokens, `${formatNumber(c.input_tokens)} / ${formatNumber(c.output_tokens)}`],
                 [L.cache, `${formatNumber(c.cache_read_tokens)} / ${formatNumber(c.cache_write_tokens)}`],
                 [L.webSearch, formatNumber(c.web_search_requests)],
-                [L.cost, formatUsd(c.cost_usd)],
+                [
+                  L.cost,
+                  c.cost_basis === "unpriced"
+                    ? `${formatUsd(c.cost_usd)} (${L.estimated})`
+                    : formatUsd(c.cost_usd),
+                ],
                 [L.latency, `${formatNumber(Math.round(c.latency_ms))} ms`],
                 [L.related, <RelatedChips key="r" related={c.related} />],
               ] as const
@@ -361,7 +371,13 @@ export function CallsTab() {
                           </div>
                         )}
                       </TD>
-                      <TD className="text-right text-xs tabular-nums">{formatUsd(c.cost_usd)}</TD>
+                      <TD
+                        className="text-right text-xs tabular-nums"
+                        title={c.cost_basis === "unpriced" ? L.estimatedHint : undefined}
+                      >
+                        {formatUsd(c.cost_usd)}
+                        {c.cost_basis === "unpriced" && <span className="text-sev-medium">*</span>}
+                      </TD>
                       <TD className="text-right text-xs tabular-nums">
                         {formatNumber(Math.round(c.latency_ms))} ms
                       </TD>

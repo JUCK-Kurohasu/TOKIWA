@@ -126,6 +126,8 @@ class LLMCall(ORMModel):
     latency_ms: float
     related: dict[str, str]
     error: str | None = None
+    # "table" | "snapshot" | "unpriced" (estimated at the highest known rates, #35) | None (nothing billed / old row)
+    cost_basis: str | None = None
 
 
 class LLMCallDetail(LLMCall):

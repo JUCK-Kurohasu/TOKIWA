@@ -84,6 +84,8 @@ const strings = {
     model: "モデル",
     latency: "応答時間",
     mockTest: "mock が応答しました。実 API は呼ばれていません（プロバイダ設定を確認してください）。",
+    unpriced:
+      "料金表にないモデル: {models}。呼び出しは最も高い既知単価で見積もられ、日次予算もその見積もりで判定されます。llm.pricing に単価を設定してください（無料のローカルモデルは 0）。",
   },
   en: {
     status: "Current status",
@@ -140,6 +142,8 @@ const strings = {
     model: "Model",
     latency: "Latency",
     mockTest: "The mock answered; no real API was called (check the provider setting).",
+    unpriced:
+      "Not in the pricing table: {models}. Calls are estimated at the highest known rates and the daily budget uses that estimate. Set the price in llm.pricing (0 for a free local model).",
   },
 };
 
@@ -676,6 +680,11 @@ export function ConfigTab() {
                 {L.spent} / {L.budget}
               </div>
               <BudgetMeter spent={c.spent_today_usd ?? 0} budget={c.daily_budget_usd ?? 0} />
+              {(c.unpriced_models?.length ?? 0) > 0 && (
+                <p role="alert" className="text-[11px] text-sev-medium">
+                  {L.unpriced.replace("{models}", (c.unpriced_models ?? []).join(", "))}
+                </p>
+              )}
             </div>
           </CardBody>
         </Card>

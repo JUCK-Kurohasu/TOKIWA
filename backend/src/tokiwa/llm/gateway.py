@@ -33,7 +33,7 @@ from tokiwa.llm.base import (
 )
 from tokiwa.llm.mock import MockProvider
 from tokiwa.llm.models import ModelListCache, ModelListing, builtin_listing
-from tokiwa.llm.pricing import estimate_cost
+from tokiwa.llm.pricing import CostBasis, estimate, is_priced
 from tokiwa.schemas.system import LLMCall, LLMCallStatus
 from tokiwa.util import new_id, utcnow
 
@@ -70,6 +70,13 @@ class LLMGateway:
         self.settings = settings or get_settings()
         self.provider = provider or build_provider(self.settings)
         self._models_cache = ModelListCache()
+        unpriced = self.unpriced_models()
+        if unpriced:
+            log.warning(
+                "LLM model(s) %s are not in the pricing table: their calls are charged at the highest known rates "
+                "so the daily budget still applies (#35). Add them to llm.pricing (0 for a free local model).",
+                ", ".join(unpriced),
+            )
 
     @property
     def llm(self) -> LLMSettings:
@@ -80,6 +87,32 @@ class LLMGateway:
 
     def effort_for(self, tier: LLMTier) -> str:
         return self.llm.effort_fast if tier == LLMTier.FAST else self.llm.effort_deep
+
+    def unpriced_models(self) -> list[str]:
+        """Configured models that have no price (budget estimates use the highest known rates). Empty for mock."""
+        if self.provider.name == "mock":
+            return []
+        models = dict.fromkeys((self.llm.model_fast, self.llm.model_deep))
+        return [m for m in models if not is_priced(m, self.llm.pricing)]
+
+    def _cost(self, model: str, usage: LLMUsage) -> tuple[float, str | None]:
+        """(cost_usd, cost_basis) for one call. Nothing billed (mock, no tokens) -> (0.0, None)."""
+        if self.provider.name == "mock":
+            return 0.0, None
+        if not (
+            usage.input_tokens
+            or usage.output_tokens
+            or usage.cache_read_tokens
+            or usage.cache_write_tokens
+            or usage.web_search_requests
+        ):
+            return 0.0, None
+        cost, basis = estimate(model, usage, self.llm.pricing)
+        if basis == CostBasis.UNPRICED:
+            log.warning(
+                "LLM model %r is not in the pricing table; cost estimated at the highest known rates", model
+            )
+        return cost, str(basis)
 
     async def list_models(self) -> ModelListing:
         """Anthropic model choices for the UI: live from the API when this gateway talks to Anthropic, else built-in."""
@@ -211,7 +244,7 @@ class LLMGateway:
         citations: list[dict[str, Any]],
     ) -> StructuredResult[T]:
         latency = (time.perf_counter() - started) * 1000
-        cost = estimate_cost(model, usage, self.llm.pricing) if self.provider.name != "mock" else 0.0
+        cost, cost_basis = self._cost(model, usage)
         call_id = await self._audit(
             purpose=req.purpose,
             tier=req.tier,
@@ -220,6 +253,7 @@ class LLMGateway:
             status=status,
             usage=usage,
             cost=cost,
+            cost_basis=cost_basis,
             latency=latency,
             related=req.related,
             error=error,
@@ -279,7 +313,7 @@ class LLMGateway:
             status = LLMCallStatus.REFUSED if turn.refused else LLMCallStatus.OK
         latency = (time.perf_counter() - started) * 1000
         served_model = turn.model if turn else model  # may differ from `model` after a server-side fallback
-        cost = estimate_cost(served_model, usage, self.llm.pricing) if self.provider.name != "mock" else 0.0
+        cost, cost_basis = self._cost(served_model, usage)
         call_id = await self._audit(
             purpose=purpose,
             tier=tier,
@@ -288,6 +322,7 @@ class LLMGateway:
             status=status,
             usage=usage,
             cost=cost,
+            cost_basis=cost_basis,
             latency=latency,
             related=related or {},
             # The returned `err` stays None for refusals (callers branch on status); the audit row gets the reason.
@@ -312,6 +347,7 @@ class LLMGateway:
         latency: float,
         related: dict[str, str],
         error: str | None,
+        cost_basis: str | None = None,
         request_text: str | None,
         response_text: str | None,
     ) -> str:
@@ -330,6 +366,7 @@ class LLMGateway:
             cache_write_tokens=usage.cache_write_tokens,
             web_search_requests=usage.web_search_requests,
             cost_usd=cost,
+            cost_basis=cost_basis,
             latency_ms=latency,
             related=related,
             error=error,

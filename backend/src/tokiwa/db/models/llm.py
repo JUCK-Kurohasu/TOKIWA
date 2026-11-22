@@ -27,6 +27,9 @@ class LLMCallRow(IdMixin, Base):
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
     web_search_requests: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # How cost_usd was obtained (tokiwa.llm.pricing.CostBasis): table / snapshot / unpriced; NULL = nothing billed
+    # (mock, no tokens) or a row written before #35. Nullable so sync_additive can add it to existing databases.
+    cost_basis: Mapped[str | None] = mapped_column(String(16), default=None, nullable=True)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     related: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, default=None)

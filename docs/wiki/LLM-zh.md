@@ -74,7 +74,13 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 - 在 **LLM → Usage**（LLM → 用量）中，可以查看按日、按用途的费用和调用次数。**Dashboard**（仪表盘）上也会显示当天的费用。
 - 实际费用在很大程度上取决于流量、告警严重级别的分布以及模型设置。建议 **先用较小的预算运行，
   在用量页面实测之后** 再进行调整（尚未用真实 LLM 进行费用评估）。
-- 用于计算费用的单价表可以通过 `llm.pricing` 覆盖。
+- 用于计算费用的单价表可以通过 `llm.pricing` 覆盖或补充（每 100 万 token 的美元价格，例如 `{"my-model": {"input": 3, "output": 15}}`）。
+  带日期的快照 ID（`claude-opus-5-5-20261001`、`claude-opus-4-5@20251101`）和 Bedrock 形式的 ID（`us.anthropic.…-v1:0`）
+  按原模型的单价计算。
+- **单价表中没有的模型不会按免费计算**。为确保预算始终生效，会按表中最高的单价估算，并在 **LLM → 使用量** 中
+  显示为“单价表中没有的模型的调用”次数（设置页面也会显示警告）。**免费的本地 LLM**（通过 `openai_compat` 使用的 Ollama 等）
+  请在 `llm.pricing` 中登记为 0（例如 `{"llama3.1:8b": {"input": 0, "output": 0}}`），或设置 `llm.daily_budget_usd: 0`（不设预算）。
+  否则估算的费用会达到每日预算，TOKIWA 将切换为基于规则的判定。
 
 ## 安全设计
 

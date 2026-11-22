@@ -75,7 +75,14 @@ Only alerts at or above `triage.min_severity_for_llm` (default medium) are sent 
 - **LLM → Usage** shows cost and call counts by day and by purpose. The Dashboard also shows today's cost.
 - Actual cost depends heavily on traffic volume, the severity distribution of alerts, and model settings. We recommend that you **start with a small budget,
   measure actual usage on the Usage page,** and then adjust (cost with a real LLM has not been evaluated yet).
-- You can override the price table used for cost calculation with `llm.pricing`.
+- You can override or extend the price table used for cost calculation with `llm.pricing` (USD per 1M tokens, e.g.
+  `{"my-model": {"input": 3, "output": 15}}`). Dated snapshot IDs (`claude-opus-5-5-20261001`, `claude-opus-4-5@20251101`) and
+  Bedrock-style IDs (`us.anthropic.…-v1:0`) are priced like the base model.
+- **A model missing from the price table is not free**. So that the budget always applies, it is estimated at the highest
+  rate in the table and counted as "calls to models not in the pricing table" under **LLM → Usage** (the settings page warns too).
+  For a **free local LLM** (Ollama etc. through `openai_compat`), register it at zero in `llm.pricing`
+  (e.g. `{"llama3.1:8b": {"input": 0, "output": 0}}`) or set `llm.daily_budget_usd: 0` (no budget). Otherwise the estimated cost
+  reaches the daily budget and TOKIWA switches to rule-based decisions.
 
 ## Designed for safety
 

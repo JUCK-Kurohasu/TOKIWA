@@ -75,7 +75,14 @@ Solo se envían al LLM las alertas de severidad `triage.min_severity_for_llm` (m
 - En **LLM → Usage** (LLM → Uso) se pueden consultar los costos y el número de llamadas por día y por finalidad. El **Dashboard** (Panel) también muestra el costo del día.
 - El costo real depende en gran medida del volumen de tráfico, de la distribución de severidades de las alertas y de la configuración de modelos. Se recomienda **empezar con un presupuesto pequeño,
   medir el consumo real en la pantalla de uso** y ajustar después (todavía no se ha evaluado el costo con un LLM real).
-- La tabla de precios unitarios usada para calcular los costos puede sobrescribirse con `llm.pricing`.
+- La tabla de precios unitarios usada para calcular los costos puede sobrescribirse o ampliarse con `llm.pricing` (USD por
+  1 M de tokens, p. ej. `{"my-model": {"input": 3, "output": 15}}`). Los ID de instantáneas con fecha (`claude-opus-5-5-20261001`,
+  `claude-opus-4-5@20251101`) y los ID al estilo Bedrock (`us.anthropic.…-v1:0`) se calculan con el precio del modelo base.
+- **Un modelo que no está en la tabla de precios no es gratuito**. Para que el presupuesto siempre se aplique, se estima con el
+  precio más alto de la tabla y se cuenta como «llamadas a modelos que no están en la tabla de precios» en **LLM → Uso**
+  (la página de configuración también avisa). Para un **LLM local gratuito** (Ollama, etc. mediante `openai_compat`), regístrelo
+  con precio 0 en `llm.pricing` (p. ej. `{"llama3.1:8b": {"input": 0, "output": 0}}`) o establezca `llm.daily_budget_usd: 0`
+  (sin presupuesto). De lo contrario, el costo estimado alcanza el presupuesto diario y TOKIWA pasa a decisiones basadas en reglas.
 
 ## Diseño orientado a la seguridad
 
