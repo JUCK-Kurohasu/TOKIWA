@@ -35,6 +35,9 @@ Guidelines:
   malicious activity.
 - confidence = probability that this is a true positive. Lower it when the evidence is thin.
 - summary: 1-3 sentences for an analyst. next_steps: concrete investigation steps.
+- summary, rationale and action reasons may be forwarded to chat / e-mail notifications: never copy personal
+  names, e-mail addresses, phone numbers or other contact details from the evidence; refer to them generically
+  ("a user account", "a form field"). Source IPs and paths are fine.
 
 Example (abbreviated): six requests within 80 ms to /api/items?id=1' then a 9 s pause, then UNION SELECT variants
 right after a 500 response -> severity high, category sqli, actor_type ai_agent, ai_agent_likelihood 0.8,
@@ -43,7 +46,7 @@ attack_stage initial_access, mitre_techniques [T1190], recommended_actions [dece
 
 TRIAGE_ALERT = PromptTemplate(
     id="triage.alert",
-    version="2",
+    version="3",
     system=(
         "You are the tier-1 SOC triage analyst of TOKIWA, a SIEM/XDR specialised in detecting attacks driven "
         "by generative AI and autonomous LLM agents. You receive ONE alert produced by TOKIWA's rule and "
@@ -54,7 +57,7 @@ TRIAGE_ALERT = PromptTemplate(
 
 TRIAGE_INCIDENT = PromptTemplate(
     id="triage.incident",
-    version="3",
+    version="4",
     system=(
         "You are the SOC incident analyst of TOKIWA, a SIEM/XDR specialised in detecting attacks driven by "
         "generative AI and autonomous LLM agents. You receive ONE incident (a group of alerts TOKIWA "
