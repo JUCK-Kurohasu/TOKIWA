@@ -12,8 +12,8 @@
 | #52 | 完全 | `web_common.content_type_params()`: Content-Type を `;` 区切りの `name=value` として解析（名前は完全一致・大小無視、値は大小保持、引用符・バックスラッシュエスケープ対応）。前方一致の `_BOUNDARY` 正規表現を廃止。`boundary` が複数（値が違う）なら全候補で分割して検査し、`web.inspection_evasion` に `multipart_boundary_ambiguous`。どの候補でも分割できなければ `None` を返しボディ全体を `body` として検査（以前は空リストで `body_raw` にしか入らなかった）。テスト `tests/detect/test_web_multipart.py`。docs/detection/web.md §1.2.2 | a1460cb |
 | #53 | 完全 | 許可リスト方式を反転: 既知の反射ヘッダ（`header`）とフレーミング系（`header_other` = Accept*・Sec-CH-*/Sec-Fetch-*・If-*・Cache-Control・Content-Type・traceparent/tracestate/baggage・X-Requested-With ほか `FRAMING_HEADERS`）以外のヘッダを新 location `header_custom` とし、`INJECTION_LOCATIONS` に追加（SQLi・XSS・コマンド注入・LFI・SSTI）。トラバーサルは `header_custom` だけ追加（Referer はブラウザ正規化済み URL で、`/etc/hosts` の解説ページ等が os_file に当たるため対象外）、単発の `../`（dotdot_single, medium）はヘッダでは見ない（`X-Return-To: ../orders` 等）。デシリアライズ・SSRF メタデータは全ヘッダ（`HEADER_LOCATIONS`）。件数は `max_headers`、長さは `max_inspect_chars`（#51 のあふれ・打ち切り記録が効く）。設定 `detection.web.inspect_custom_headers`（既定 true）・`extra_framing_headers`（末尾 `*` で前方一致）。RFI の include パラメータ判定で `(overflow)` / `(json keys)` を 1 つの値として扱わないよう修正。良性 fixture に実在形のカスタムヘッダ 36 個（Stripe-Signature, X-Hub-Signature-256, sec-ch-ua, baggage, JSON 値ヘッダ等）。テスト `tests/detect/test_web_headers.py`。docs/detection/web.md §1.2・§4、wiki Configuration ×4 | 82add43 |
 | #89 | 完全（HTML 実体参照は「直す必要なし」と判断） | (1) URL 多重: デコード上限 3 → 8 ラウンド（安定したら止まるので通常の値のコストは不変。`max_decode_rounds`）。(2) base64: `query`/`body`/`cookie`/`header_custom` の値が base64/base64url（16 文字以上）でデコード結果が UTF-8・95% 以上表示可能なら `<名前>(base64)` を追加ターゲット化（1 要求 8 個まで。トークン・hex ID・JWT・バイナリは対象外をテスト）。(3) UTF-16 JSON: 交互 NUL パターン（先頭 256 文字で片側 90% 以上 NUL・もう片側 10% 以下）なら NUL を除去してから解析（ゼロ埋めバイナリは対象外）。(4) セミコロンなし実体参照: Python の `html.unescape` は既に `;` 省略を展開する。行列の取りこぼしは直後が 16 進数字（`&#x3dalert` → U+03DA）の場合で、仕様どおり貪欲に読むとブラウザでも壊れる形 = 行列の作り方の問題と判断（テストで挙動を固定、ブラウザ実機は未確認）。(5) %A0: 不正な UTF-8 単独バイトを U+FFFD ではなく Latin-1 に（surrogateescape → 0x80-0xFF）。NFKC で U+00A0 → 空白。(6) HPP: 同名パラメータ 2 回以上で `,` 連結した `<名前>(joined)`（ASP.NET の挙動。1 location 4 個まで）。L05 行列: url 4x / %a0 / base64 / UTF-16 / HPP の SQLi がすべて W に（残る `w` は HPP の cmdi: 分割位置でコマンドが壊れるため）。テスト `tests/detect/test_web_normalize.py`。docs/detection/web.md §1.1・§4、wiki Configuration ×4 | 9ee199f |
-| #76 | 完全（fingerprint の path_key 化は不採用） | 3 案から「合流」を選択（理由は要判断）。新モジュール `detect/sigma/overlap.py`: 同梱 web ルール 14 本の Sigma id → ネイティブ検知器の対応表。`DetectionEngine.run()` でイベントごとに全検知器の後に適用: ネイティブが同じイベントで発報 → Sigma を落としネイティブに `details.corroborated_by` とタグ `sigma-corroborated`／ネイティブ有効だが沈黙 → Sigma を low に（`native_detector`・`native_verdict=silent`・`sigma_level_severity`、タグ `native-silent`）／ネイティブ無効 → ルールの level のまま。rules テーブル由来（利用者・LLM）のルールは対象外。L16 良性コーパス: アラート 42 → 31、mock LLM 82 → 64、提案 5 のまま。テスト `tests/sigma/test_sigma_overlap.py`（同梱 web ルール全件が対応表にあること・合流・無効時・沈黙時・利用者ルール）、`tests/sigma/test_sigma_api.py` の 2 テストはスキャナルール自身のアラート数を数えるため設定でネイティブ `web.scanner_ua` を無効化。docs/detection/sigma.md §5.1、web.md §5、wiki Web-UI ×4 | (このコミット) |
-| #166 + #173 | 未着手 | | |
+| #76 | 完全（fingerprint の path_key 化は不採用） | 3 案から「合流」を選択（理由は要判断）。新モジュール `detect/sigma/overlap.py`: 同梱 web ルール 14 本の Sigma id → ネイティブ検知器の対応表。`DetectionEngine.run()` でイベントごとに全検知器の後に適用: ネイティブが同じイベントで発報 → Sigma を落としネイティブに `details.corroborated_by` とタグ `sigma-corroborated`／ネイティブ有効だが沈黙 → Sigma を low に（`native_detector`・`native_verdict=silent`・`sigma_level_severity`、タグ `native-silent`）／ネイティブ無効 → ルールの level のまま。rules テーブル由来（利用者・LLM）のルールは対象外。L16 良性コーパス: アラート 42 → 31、mock LLM 82 → 64、提案 5 のまま。テスト `tests/sigma/test_sigma_overlap.py`（同梱 web ルール全件が対応表にあること・合流・無効時・沈黙時・利用者ルール）、`tests/sigma/test_sigma_api.py` の 2 テストはスキャナルール自身のアラート数を数えるため設定でネイティブ `web.scanner_ua` を無効化。docs/detection/sigma.md §5.1、web.md §5、wiki Web-UI ×4 | 8a8e113 |
+| #166 + #173 | 部分（backend は完全。**UI（抑制の一覧・解除・許可リスト作成画面、FP 化ダイアログの抑制オプション）は未着手** — 利用枠節約のため統合担当の指示で見送り。API と型 `frontend/src/api/types-ops.ts` は用意済み。推奨 (3) の rule_id ごとの FP 率ダッシュボードも未） | 新テーブル `alert_suppressions`（`db/models/alert_suppression.py`）、ロジック `detect/suppress.py`、`DetectionEngine.persist` の重複排除の前で適用。**誤検知**: `PATCH /alerts/{id}` で `false_positive` にすると指紋（ルール ID + 正規化した一致内容 = web.* は署名 ID 集合・location・param、Sigma は selection 集合 + パスの route key + 送信元 /32・/128）で `detection.fp_suppress_hours`（既定 168h）抑制。後続 draft が同じルール・route・送信元で署名 / selection が部分集合かつ重大度が元以下なら、新アラートを作らず元の FP アラートの count・last_seen・証拠に加算（bus に流さない → トリアージ・通知・インシデントなし）。新しい署名・別パラメータ・重大度上昇・別送信元は通常発報。オプション `suppress`（false で作らない）/ `suppress_hours` / `suppress_permanent` / `suppress_any_source` / `reason`。`false_positive` から戻すと解除、再マークで置き換え。**許可リスト（#173）**: `POST /alert-suppressions`（admin のみ）で送信元 CIDR（必須・IPv4 /8・IPv6 /32 以上）+ 期間（必須・`detection.allowlist_max_hours` 既定 720h まで）+ 任意のルール ID・パス。`downgrade`（既定）= info・acknowledged・タグ `allowlisted` で記録し publish しない（fingerprint に `allowlisted|` を前置して通常のヒットと別行にし、許可リスト失効後の本物の攻撃が静かな行に合流して未トリアージになるのを防ぐ）、`suppress` = 記録せず件数のみ。`GET /alert-suppressions`（user）・`POST .../{id}/lift`（analyst）。監査ログ `alert.suppression.create` / `.lift`。`AlertUpdate` に default 付きフィールド追加、`AlertSuppression*` スキーマは新ファイル `schemas/alert_suppressions.py`。テスト `tests/detect/test_alert_suppression.py`（FP 後の再送で新規 0・count 加算・alert.created 0／別送信元・新署名は発報／解除／オプトアウト・送信元を問わない／許可リストは info・acknowledged・publish なし／CIDR 外は通常／検証 422・analyst の許可リスト作成 403・解除 409/404／期限切れは無視／一致規則の単体）。docs/detection/web.md §5.1、api-contract、wiki Configuration ×4 | (このコミット) |
 
 ## 計測（ベースライン = 95343eb、worktree の rules/sigma を指すよう harness のパスだけ書き換えて実行）
 
@@ -40,7 +40,19 @@
   推奨 (2) の「Sigma の fingerprint を path_key ベースに」は採らなかった: IP ローテーションによる件数増（監査の 200 件）は path_key では
   減らず、合流でほぼ解消するため。
 
+- **#166**: FP 抑制の既定スコープは狭くした（同じルール・一致内容・route・**送信元 IP**）。送信元を問わない抑制（`suppress_any_source`）は
+  その route・パラメータへの同種の攻撃も黙らせる（攻撃者の回避手段になりうる）ので明示指定のみ。既定期間 168h は運用で調整
+  （`detection.fp_suppress_hours`、0 で自動作成なし）。FP マークで抑制を既定で作るのは既定動作の変更（下記）。
+- **#173**: 許可リストの作成は admin のみ（検知を CIDR 単位で黙らせるため）、期間必須（恒久は不可）、IPv4 /8・IPv6 /32 より広い CIDR は
+  拒否。ルールを絞らない許可リストはデセプション・AI 判定のアラートも静かにする。RFC1918 を常に「記録するが提案しない」にする
+  推奨 (3) は、広すぎるので既定にはせず、許可リストで宣言する運用とした。
+- **#166 / #173**: `vuln_exposure` 検知器も `engine.persist` を使うので、脆弱性露出アラートにも FP 抑制・許可リストが効く（意図どおりと判断）。
+
 ## 既定動作の変更
+
+- **#166**: アラートを `false_positive` にすると、既定で同じ指紋の再発を 168 時間抑制する（再発は元のアラートの count に加算され、
+  新アラート・トリアージ・通知・インシデント再紐付けが起きない）。以前は FP にしても次のヒットで新規アラートになった。
+  `PATCH` に `"suppress": false` を付けるか `detection.fp_suppress_hours: 0` で旧動作。
 
 - **#76**: 同梱 Sigma の web ルールが同じイベントで同じ種類の `web.*` と重複したら Sigma のアラートは作られない（ネイティブ側の
   `details.corroborated_by` に残る）。`web.*` が有効なのに沈黙したときの Sigma アラートは low。Sigma の rules API のヒット数
@@ -64,10 +76,27 @@
   （+6 行）。ロジックは所有モジュール `detect/sigma/overlap.py`。
 - `backend/tests/sigma/test_sigma_api.py`（所有 `tests/sigma/` 内だが他レーンの API テスト）: 2 テストに `native_scanner_off()`
   （設定でネイティブ `web.scanner_ua` を無効化）を追加。
+- `backend/src/tokiwa/detect/engine.py`（#166 / #173）: `persist()` の冒頭で `suppress.load_active()`、各 draft で `suppress.apply()`。
+  `"drop"` は continue、`"quiet"` は fingerprint に `allowlisted|` を前置・状態 acknowledged・created/updated に入れない（publish しない）。+15 行程度。
+- `backend/src/tokiwa/schemas/alerts.py`: `AlertUpdate` に default 付きの `suppress` / `suppress_hours` / `suppress_permanent` /
+  `suppress_any_source` / `reason` を追加（互換）。`frontend/src/api/types-ops.ts` に対応する型と `AlertSuppression*` を追加。
+- `backend/src/tokiwa/api/routes/alerts.py`: `update_alert` の status 変更部分のみ（FP 化で抑制作成、FP から戻すと解除）。
+- `docs/api-contract.md`: アラート節に PATCH の追加フィールドと `/alert-suppressions` 3 本。
 
 ## 他レーンへの依頼
 
+- **triage（llm-triage レーン）**: 自動トリアージが走っている最中にアナリストがアラートを `false_positive` にすると、トリアージ側の
+  読み込み→`TRIAGING` 書き込み（`triage/service.py` 232〜240 行付近）が PATCH の後に確定し、状態が `triaging` に戻ることがある
+  （lost update。`tests/detect/test_alert_suppression.py` で再現したため、このテストは `triage.auto_triage=false` にしている）。
+  FP にした事実が消えるので、行ロックか「人間が設定した状態は上書きしない」条件付き UPDATE が要る。抑制行は残るので #166 の抑制自体は効く。
+- **frontend**: #166 / #173 の UI（`frontend/src/pages/alerts/` に抑制の一覧・解除、許可リスト作成、FP 化時の抑制オプション）。
+  API・型は用意済み（`GET/POST /api/v1/alert-suppressions`, `POST .../{id}/lift`, `AlertUpdate.suppress*`）。
+
 ## 未検証事項
+
+- **#173**: L16 コーパスの `internal_authorised_scan` / `internal_k6_loadtest` に許可リストを掛けた全パイプライン再生（提案 0 件の確認）は
+  未実施（利用枠節約）。代わりにテストで「許可リスト中のアラートは alert.created / alert.updated を publish しない」ことを確認しており、
+  トリアージ・通知・相関・提案はすべてこのイベント起点なので提案は出ない、という推論。PostgreSQL での動作も未確認。
 
 - **#89**: HPP の `,` 連結は ASP.NET の挙動として知られているもの（`TODO(verify)`: 一次資料で未確認。他のフレームワークの
   先勝ち / 後勝ちは個別の値として検査済み）。セミコロンなし数値文字参照の貪欲な解釈がブラウザでも同じかは実機未確認

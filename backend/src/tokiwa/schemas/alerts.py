@@ -97,6 +97,14 @@ class AlertDetail(Alert):
 class AlertUpdate(BaseModel):
     status: AlertStatus | None = None
     tags: list[str] | None = None
+    # Only when the status changes to false_positive (audit #166): suppress recurrences of the same finding.
+    # ``suppress`` None = server default (on while ``detection.fp_suppress_hours`` > 0). The default scope is the
+    # same rule, matched signatures, route and source IP; ``suppress_any_source`` widens it to every source.
+    suppress: bool | None = None
+    suppress_hours: float | None = Field(default=None, gt=0, le=24 * 365)
+    suppress_permanent: bool = False
+    suppress_any_source: bool = False
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class IncidentStatus(StrEnum):

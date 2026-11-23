@@ -55,8 +55,11 @@ users / tokens の変更はすべて `audit_log` に記録（パスワード・�
 ## アラート（`routes/alerts.py`）
 | GET | /alerts | user | `?status&severity&category&source_ip&q&min_ai_score&incident_id&limit&offset` → `Page[Alert]` |
 | GET | /alerts/{id} | user | → `AlertDetail`（evidence 付き） |
-| PATCH | /alerts/{id} | analyst | `AlertUpdate` → `Alert` |
+| PATCH | /alerts/{id} | analyst | `AlertUpdate` → `Alert`。`status=false_positive` のとき `suppress?`（省略 = `detection.fp_suppress_hours` > 0 なら抑制を作る）, `suppress_hours?`, `suppress_permanent?`, `suppress_any_source?`, `reason?` で同じ指紋の再発を抑制（#166）。`false_positive` から戻すと抑制を解除 |
 | POST | /alerts/{id}/triage | analyst | `?tier=fast|deep` → `Alert`（強制トリアージ） |
+| GET | /alert-suppressions | user | `?active=true&kind=false_positive\|allowlist&source_alert_id&limit&offset` → `Page[AlertSuppression]`（#166 / #173） |
+| POST | /alert-suppressions | analyst（`kind=allowlist` は admin） | `AlertSuppressionIn {kind?, mode?: downgrade\|suppress, source_cidr?, rule_id?, path?, hours?, reason?}` → `AlertSuppression`。許可リストは `source_cidr`（IPv4 /8・IPv6 /32 以上）と `hours`（≤ `detection.allowlist_max_hours`）必須、違反は 422 |
+| POST | /alert-suppressions/{id}/lift | analyst | → `AlertSuppression`（解除済みは 409、無ければ 404） |
 
 ## インシデント（`routes/incidents.py`）
 | GET | /incidents | user | `?status&severity&actor_type&limit&offset` → `Page[Incident]` |

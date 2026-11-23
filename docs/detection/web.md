@@ -152,6 +152,25 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 - 同梱 Sigma の web ルール（`rules/sigma/web`）は同じイベントで同じ種類の `web.*` が発報したらそちらに合流し、`web.*` が
   有効なのに沈黙したときは low に下がる（重複発報とネイティブの抑制のすり抜けを防ぐ。#76、docs/detection/sigma.md §5.1）。
 
+### 5.1 誤検知のフィードバックと許可リスト（#166 / #173）
+
+全検知器のアラートに効く（`web.*` に限らない）。テーブル `alert_suppressions`、ロジックは `detect/suppress.py`、適用は
+`DetectionEngine.persist`（重複排除の前）。
+
+- **誤検知（false_positive）**: アラートを `false_positive` にすると（`PATCH /alerts/{id}`）、そのアラートの指紋で
+  `detection.fp_suppress_hours`（既定 168 時間。0 = 自動では作らない）抑制する。指紋 = ルール ID + 正規化した一致内容
+  （`web.*`: 一致した署名 ID の集合・location・パラメータ名、Sigma: 真になった selection の集合）+ パスの route key（`path_key`）
+  + 送信元 IP（/32・/128）。後続の draft がこれと同じルール・route・送信元で、署名 / selection が **部分集合** かつ重大度が元のアラート
+  以下なら、新しいアラートを作らず元のアラートの `count`・`last_seen`・証拠に加算する（bus に流さないのでトリアージ・通知・
+  インシデント再紐付けは起きない）。新しい署名・別パラメータ・重大度の上昇は新しい証拠として通常どおり発報する。
+  `suppress: false` で作らない、`suppress_hours` / `suppress_permanent` で期間、`suppress_any_source: true` で送信元を問わない
+  （広げると同じ route・パラメータへの攻撃も抑えるので注意）。状態を `false_positive` 以外に戻すと抑制は解除される。
+- **許可リスト（allowlist）**: 許可済みの脆弱性診断・負荷試験のために、送信元 CIDR（必須。IPv4 は /8、IPv6 は /32 より狭いこと）と
+  期間（必須。`detection.allowlist_max_hours` 既定 720 時間まで）を宣言する（`POST /alert-suppressions`、admin のみ）。任意でルール ID・
+  パスを絞れる。`downgrade`（既定）はアラートを info・状態 acknowledged・タグ `allowlisted` で記録し bus に流さない（トリアージ・
+  通知・インシデント・対処提案に乗らない）。`suppress` は記録せず件数だけ数える。ルールを絞らない許可リストはデセプションや
+  AI 判定のアラートも静かにする（期間付きで、一覧・解除は API / 監査ログで追える）。
+
 - 正常トラフィック fixture（`backend/tests/detect/fixtures/web_benign.json`: "select" を含む検索、アポストロフィ、
   `fields=name|id`、リッチテキスト JSON、JSON-LD の `@type`、XHTML DOCTYPE、正規の Next.js Server Action、
   開発者ブラウザの `Referer: http://localhost:3000/` 等）で web.* が 1 件も発火しないことをテストしている。

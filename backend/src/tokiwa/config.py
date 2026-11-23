@@ -224,6 +224,12 @@ class DetectionSettings(BaseModel):
     # Live actor sessions kept in memory (the audit measured ~44 MB peak for 4096 one-request sessions). When full,
     # one-request low-score sessions are evicted first and sessions with AI / canary / decoy evidence last (#88).
     max_live_sessions: int = Field(default=4096, ge=16)
+    # Marking an alert false_positive suppresses the same finding (rule, matched signatures, route, source IP) for
+    # this many hours: hits are counted on the marked alert instead of raising, triaging and notifying again
+    # (audit #166). 0 = only when the analyst asks for it. docs/detection/web.md §5.1
+    fp_suppress_hours: float = Field(default=168.0, ge=0, le=24 * 365)
+    # Longest allowlist (authorised scan / load test window) an analyst may declare (audit #173).
+    allowlist_max_hours: float = Field(default=720.0, gt=0, le=24 * 365)
     web: WebDetectionSettings = Field(default_factory=WebDetectionSettings)
 
 

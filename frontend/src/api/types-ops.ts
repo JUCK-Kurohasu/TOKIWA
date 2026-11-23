@@ -22,6 +22,50 @@ export type RetriageTier = "fast" | "deep";
 export interface AlertUpdate {
   status?: AlertStatus;
   tags?: string[];
+  /** status=false_positive only (#166): suppress recurrences. Omitted = server default (detection.fp_suppress_hours). */
+  suppress?: boolean | null;
+  suppress_hours?: number | null;
+  suppress_permanent?: boolean;
+  suppress_any_source?: boolean;
+  reason?: string | null;
+}
+
+/** schemas.alert_suppressions.AlertSuppressionKind / AlertSuppressionMode */
+export type AlertSuppressionKind = "false_positive" | "allowlist";
+export type AlertSuppressionMode = "suppress" | "downgrade";
+
+/** GET /alert-suppressions — schemas.alert_suppressions.AlertSuppression (#166 / #173) */
+export interface AlertSuppression {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  kind: AlertSuppressionKind;
+  mode: AlertSuppressionMode;
+  rule_id: string | null;
+  path_key: string | null;
+  source_cidr: string | null;
+  match: Record<string, unknown>;
+  max_severity: string | null;
+  reason: string;
+  created_by: string;
+  source_alert_id: string | null;
+  expires_at: string | null;
+  lifted_at: string | null;
+  lifted_by: string | null;
+  hits: number;
+  last_hit_at: string | null;
+  active: boolean;
+}
+
+/** POST /alert-suppressions — schemas.alert_suppressions.AlertSuppressionIn */
+export interface AlertSuppressionIn {
+  kind?: AlertSuppressionKind;
+  mode?: AlertSuppressionMode;
+  source_cidr?: string | null;
+  rule_id?: string | null;
+  path?: string | null;
+  hours?: number | null;
+  reason?: string;
 }
 
 /** PATCH /incidents/{id} — schemas.alerts.IncidentUpdate */

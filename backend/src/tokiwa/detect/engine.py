@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tokiwa.bus import bus
 from tokiwa.config import Settings, get_settings
 from tokiwa.db.models.detection import AlertRow
+from tokiwa.detect import suppress
 from tokiwa.detect.base import Detector, registered_detectors
 from tokiwa.detect.context import DetectionContext
 from tokiwa.detect.sigma.overlap import merge_native_overlap
@@ -94,8 +95,16 @@ class DetectionEngine:
         updated: list[Alert] = []
         window = timedelta(seconds=self.settings.detection.dedup_window_seconds)
         now = utcnow()
+        # False-positive feedback and allowlists (#166 / #173): "drop" = no alert, "quiet" = stored at info and
+        # never published (no triage / notification / incident). Logic in tokiwa.detect.suppress.
+        suppressions = await suppress.load_active(session, now) if drafts else []
         for d in drafts:
+            verdict = await suppress.apply(session, suppressions, d, now) if suppressions else None
+            if verdict == "drop":
+                continue
             fp = d.fingerprint or f"{d.rule_id}|{d.source_ip or '-'}"
+            if verdict == "quiet":  # never merge allowlisted and normal hits into one row
+                fp = f"{suppress.ALLOWLISTED_TAG}|{fp}"[:128]
             row = (
                 await session.execute(
                     select(AlertRow)
@@ -118,7 +127,8 @@ class DetectionEngine:
                 row.tags = list(dict.fromkeys([*row.tags, *d.tags]))
                 row.updated_at = now
                 await session.flush()
-                updated.append(Alert.model_validate(row))
+                if verdict is None:
+                    updated.append(Alert.model_validate(row))
                 continue
             row = AlertRow(
                 id=new_id(),
@@ -142,11 +152,12 @@ class DetectionEngine:
                 evidence_event_ids=d.evidence_event_ids,
                 tags=d.tags,
                 details=d.details,
-                status=AlertStatus.NEW,
+                status=AlertStatus.ACKNOWLEDGED if verdict else AlertStatus.NEW,
             )
             session.add(row)
             await session.flush()
-            created.append(Alert.model_validate(row))
+            if verdict is None:
+                created.append(Alert.model_validate(row))
         return created, updated
 
     async def publish(self, created: list[Alert], updated: list[Alert]) -> None:
