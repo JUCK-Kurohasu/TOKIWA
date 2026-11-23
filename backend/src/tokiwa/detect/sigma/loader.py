@@ -94,6 +94,8 @@ class SigmaRuleStore:
         self.errors: dict[str, list[str]] = {}
         self.loaded = False
         self.db_loaded = False
+        # Configured rule directories that do not exist (as configured). Health checks / eval read this (#177).
+        self.missing_dirs: list[str] = []
         _STORES.add(self)
 
     @property
@@ -104,14 +106,23 @@ class SigmaRuleStore:
 
     def rule_dirs(self) -> list[Path]:
         dirs: list[Path] = []
+        missing: list[str] = []
         for p in self.settings.detection.sigma_rule_dirs:
             p = Path(p).expanduser()
             candidates = [p] if p.is_absolute() else [Path.cwd() / p, _BACKEND_DIR / p]
             found = next((c.resolve() for c in candidates if c.is_dir()), None)
             if found is None:
-                log.warning("sigma rule dir %s not found", p)
+                missing.append(str(p))
+                if str(p) not in self.missing_dirs:  # once per store, not on every reload
+                    log.error(
+                        "sigma rule dir %s not found (tried %s): no Sigma file rules are loaded from it; "
+                        "set detection.sigma_rule_dirs / TOKIWA_DETECTION__SIGMA_RULE_DIRS",
+                        p,
+                        ", ".join(str(c) for c in candidates),
+                    )
             elif found not in dirs:
                 dirs.append(found)
+        self.missing_dirs = missing
         return dirs
 
     def load_file_rules(self, errors: dict[str, list[str]] | None = None) -> list[LoadedRule]:

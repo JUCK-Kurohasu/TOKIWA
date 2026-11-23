@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 import httpx
 
+from tokiwa.gate.netmatch import parse_ip
+
 Headers = list[tuple[bytes, bytes]]
 
 # RFC 9110 §7.6.1 + legacy proxy headers. Never forwarded in either direction.
@@ -31,9 +33,43 @@ HOP_BY_HOP = frozenset(
     }
 )
 FORWARDED_HEADERS = frozenset({b"x-forwarded-for", b"x-forwarded-proto", b"x-forwarded-host"})
+# Other client-address / scheme claims that upstream frameworks honour from "the trusted proxy in front" (Go chi
+# RealIP: True-Client-IP > X-Real-IP; Spring: Forwarded; Rack: X-Forwarded-Ssl/-Scheme; nginx real_ip_header ...).
+# A client could set them and the upstream would believe they came from the Gate (audit #138), so they are
+# removed; the Gate then sets X-Real-IP and Forwarded itself. ``GateSettings.forward_client_headers`` passes
+# named ones through unchanged when a trusted proxy in front of the Gate sets them.
+CLIENT_IP_HEADERS = frozenset(
+    {
+        b"forwarded",
+        b"x-real-ip",
+        b"true-client-ip",
+        b"cf-connecting-ip",
+        b"x-client-ip",
+        b"x-cluster-client-ip",
+        b"fastly-client-ip",
+        b"x-originating-ip",
+        b"client-ip",
+        b"x-original-forwarded-for",
+        b"x-forwarded-port",
+        b"x-forwarded-prefix",
+        b"x-forwarded-server",
+        b"x-forwarded-scheme",
+        b"x-forwarded-ssl",
+        b"front-end-https",
+        b"x-url-scheme",
+    }
+)
+# Routing overrides honoured by IIS URL Rewrite / legacy Symfony and Zend / some Java filters as "the real path":
+# the request line would say /static/app.js while the application serves /.env (audit #147). Removed too.
+ROUTE_OVERRIDE_HEADERS = frozenset({b"x-original-url", b"x-rewrite-url", b"x-override-url"})
+STRIPPED_CLIENT_HEADERS = CLIENT_IP_HEADERS | ROUTE_OVERRIDE_HEADERS
+# What httpx itself may add to a request (Host from the URL, body framing, Connection). Everything else the
+# upstream receives must come from the client or from the Gate's own header list (audit #149).
+HTTPX_FRAMING = frozenset({"host", "content-length", "transfer-encoding", "connection"})
 _DECODABLE = frozenset({"gzip", "x-gzip", "deflate", "identity"})
 _BODY_CLOSE = re.compile(rb"</body\s*>", re.IGNORECASE)
 _CHARSET = re.compile(r"charset\s*=\s*\"?([A-Za-z0-9._:-]+)", re.IGNORECASE)
+_META_CHARSET = re.compile(rb"<meta\b[^>]*?charset\s*=\s*[\"']?\s*([A-Za-z0-9._:-]+)", re.IGNORECASE)
 
 
 def connection_tokens(headers: Iterable[tuple[bytes, bytes]]) -> set[bytes]:
@@ -61,6 +97,30 @@ def restrict_accept_encoding(value: bytes) -> bytes:
     return b", ".join(kept) if kept else b"identity"
 
 
+def stripped_client_headers(raw: Iterable[tuple[bytes, bytes]], pass_through: frozenset[bytes]) -> list[str]:
+    """Names of client-sent headers :func:`forwarded_request_headers` removes (sorted, for the event)."""
+    drop = STRIPPED_CLIENT_HEADERS - pass_through
+    return sorted({k.lower().decode("latin-1") for k, _ in raw if k.lower() in drop})
+
+
+def _forwarded_token(value: str) -> str:
+    """RFC 7239 value: a token when possible, else a quoted-string (no parameter can be smuggled in)."""
+    if value and all(c.isalnum() or c in "!#$%&'*+-.^_`|~" for c in value):
+        return value
+    cleaned = "".join(c for c in value if 0x20 <= ord(c) < 0x7F)
+    return '"' + cleaned.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def forwarded_element(client_ip: str | None, proto: str, host: str | None) -> bytes:
+    """One ``Forwarded`` element describing what the Gate determined (``for=...;proto=...;host=...``)."""
+    ip = parse_ip(client_ip)
+    node = "unknown" if ip is None else (f'"[{ip}]"' if ip.version == 6 else str(ip))
+    parts = [f"for={node}", f"proto={_forwarded_token(proto)}"]
+    if host:
+        parts.append(f"host={_forwarded_token(host)}")
+    return ";".join(parts).encode("latin-1", errors="replace")
+
+
 def forwarded_request_headers(
     raw: Headers,
     *,
@@ -70,6 +130,8 @@ def forwarded_request_headers(
     preserve_host: bool,
     upstream_host: str,
     restrict_encoding: bool,
+    client_ip: str | None = None,
+    pass_through: frozenset[bytes] = frozenset(),
 ) -> Headers:
     """Headers sent upstream.
 
@@ -77,6 +139,11 @@ def forwarded_request_headers(
     - ``X-Forwarded-*``: when the client side is *not* trusted, client-supplied values are discarded and replaced
       by what the gate observed (an attacker cannot spoof its address to the upstream app through the gate);
       when trusted (``trust_forwarded_for``), the peer is appended to the existing chain as usual.
+    - every other client-address / scheme / routing claim (:data:`STRIPPED_CLIENT_HEADERS`) is removed unless
+      listed in ``pass_through``; the Gate sets ``X-Real-IP`` and a single-element ``Forwarded`` to the client
+      address it determined (``client_ip``: the peer, or the right-most X-Forwarded-For entry when trusted), so
+      the upstream sees one answer whichever header it reads. ``Forwarded`` is never built from the client's
+      X-Forwarded-For chain: its left part is client-controlled (``1.2.3.4;proto=https`` would add parameters).
     """
     had_te = any(k.lower() == b"transfer-encoding" for k, _ in raw)
     out = strip_hop_by_hop(raw)
@@ -85,7 +152,8 @@ def forwarded_request_headers(
     for k, v in out:
         if k in FORWARDED_HEADERS:  # repeated header lines form one comma-separated list
             incoming[k] = incoming[k] + b", " + v if k in incoming else v
-    out = [(k, v) for k, v in out if k not in FORWARDED_HEADERS]
+    drop = FORWARDED_HEADERS | (STRIPPED_CLIENT_HEADERS - pass_through)
+    out = [(k, v) for k, v in out if k not in drop]
     if had_te:
         out = [(k, v) for k, v in out if k != b"content-length"]
     if not preserve_host:
@@ -105,6 +173,17 @@ def forwarded_request_headers(
     out.append((b"x-forwarded-proto", proto or scheme.encode("latin-1")))
     if fhost or original_host:
         out.append((b"x-forwarded-host", fhost or original_host))
+
+    client = client_ip or peer_ip
+    if b"x-real-ip" not in pass_through and parse_ip(client) is not None:
+        out.append((b"x-real-ip", str(parse_ip(client)).encode("latin-1")))
+    if b"forwarded" not in pass_through:
+        # proto / host as the X-Forwarded-* pair says, right-most entry (the one the trusted hop added).
+        f_proto = (proto or b"").decode("latin-1").split(",")[-1].strip().lower()
+        if f_proto not in ("http", "https"):
+            f_proto = scheme
+        f_host = (fhost or original_host).decode("latin-1").split(",")[-1].strip()
+        out.append((b"forwarded", forwarded_element(client, f_proto, f_host or None)))
     return out
 
 
@@ -148,19 +227,55 @@ def raw_path_of(scope: Mapping[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------------------------- injection
 
 
+def _codec(label: str) -> str | None:
+    try:
+        name = codecs.lookup(label).name
+    except LookupError:
+        return None
+    # A BOM-less "utf-16"/"utf-32" codec would write a BOM in the middle of the page.
+    return {"utf-16": "utf-16-le", "utf-32": "utf-32-le"}.get(name, name)
+
+
 def charset_of(content_type: str | None) -> str:
+    """Charset named by ``Content-Type`` (UTF-8 when absent or unknown)."""
     if content_type:
         m = _CHARSET.search(content_type)
         if m:
-            try:
-                return codecs.lookup(m.group(1)).name
-            except LookupError:
-                pass
+            name = _codec(m.group(1))
+            if name:
+                return name
     return "utf-8"
 
 
-def encode_snippet(snippet: str, content_type: str | None) -> bytes:
-    return snippet.encode(charset_of(content_type), errors="xmlcharrefreplace")
+def document_charset(content_type: str | None, html: bytes | None = None) -> str | None:
+    """Encoding of an HTML document, or None when it cannot be told (audit #146).
+
+    Order as browsers do: a UTF-8 BOM, the ``Content-Type`` charset, then ``<meta charset>`` /
+    ``<meta http-equiv=Content-Type content="...; charset=...">`` within the first 1024 bytes (the WHATWG prescan
+    window; a meta declaring UTF-16 means UTF-8 there).
+    """
+    if html and html.startswith(codecs.BOM_UTF8):
+        return "utf-8"
+    if content_type:
+        m = _CHARSET.search(content_type)
+        if m and (name := _codec(m.group(1))):
+            return name
+    if html:
+        meta = _META_CHARSET.search(html[:1024])
+        if meta and (name := _codec(meta.group(1).decode("ascii"))):
+            return "utf-8" if name.startswith(("utf-16", "utf-32")) else name
+    return None
+
+
+def encode_snippet(snippet: str, content_type: str | None, html: bytes | None = None) -> bytes:
+    """The canary snippet in the page's own encoding (characters it lacks as numeric character references).
+
+    When the encoding cannot be told (no charset in the header or in a ``<meta>``, as on many Shift_JIS / EUC-JP
+    sites the snippet used to be written as UTF-8 into), only ASCII is written: every non-ASCII character becomes
+    a reference, which reads the same in any ASCII-compatible encoding.
+    """
+    charset = document_charset(content_type, html)
+    return snippet.encode(charset or "ascii", errors="xmlcharrefreplace")
 
 
 def inject_before_body_close(html: bytes, snippet: bytes) -> bytes | None:
@@ -171,6 +286,67 @@ def inject_before_body_close(html: bytes, snippet: bytes) -> bytes | None:
     if last is None:
         return None
     return html[: last.start()] + snippet + html[last.start() :]
+
+
+# Where the canary snippet goes (GatePolicy.html_injection_positions, audit #41). Agents' tools often keep only
+# the first N characters of a page (ARTEX: 30,000), so a snippet only before </body> of a large page is cut off.
+POSITION_HEAD = (
+    "head"  # right after <head ...>: the snippet's leading HTML comment only (a <div> would end <head>)
+)
+POSITION_BODY_START = "body_start"  # right after <body ...>
+POSITION_BODY_END = "body_end"  # right before the last </body> (the only position before #41)
+LEGACY_POSITIONS = (POSITION_BODY_END,)
+
+# Raw-text regions are skipped so "<body>" inside a script string, a comment or a <title> is never taken for the
+# tag (inserting there would break the script). Attribute values may contain ">" when quoted.
+_OPEN_TAG_SCAN = re.compile(
+    rb"<!--.*?-->"
+    rb"|<(script|style|textarea|title|template)\b.*?</\1\s*>"
+    rb"|<(head|body)\b(?:[^>\"']|\"[^\"]*\"|'[^']*')*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEADING_COMMENTS = re.compile(rb"\s*((?:<!--.*?-->\s*)+)", re.DOTALL)
+
+
+def _open_tag_end(html: bytes, name: bytes) -> int | None:
+    """Offset just after the first real ``<head ...>`` / ``<body ...>`` open tag, or None."""
+    for m in _OPEN_TAG_SCAN.finditer(html):
+        tag = m.group(2)
+        if tag is not None and tag.lower() == name:
+            return m.end()
+        if tag is not None and tag.lower() == b"body" and name == b"head":
+            return None  # <head> after <body> would not be the document head
+    return None
+
+
+def inject_html(html: bytes, snippet: bytes, positions: Iterable[str] = LEGACY_POSITIONS) -> bytes | None:
+    """Insert ``snippet`` at each requested position that exists. None when none of them exists.
+
+    Unknown position names are ignored (a newer server may know more than this gate).
+    """
+    wanted = set(positions)
+    inserts: list[tuple[int, bytes]] = []
+    if POSITION_HEAD in wanted:
+        comment = _LEADING_COMMENTS.match(snippet)
+        at = _open_tag_end(html, b"head") if comment else None
+        if comment and at is not None:
+            inserts.append((at, b"\n" + comment.group(1).strip() + b"\n"))
+    if POSITION_BODY_START in wanted:
+        at = _open_tag_end(html, b"body")
+        if at is not None:
+            inserts.append((at, snippet))
+    if POSITION_BODY_END in wanted:
+        last = None
+        for last in _BODY_CLOSE.finditer(html):  # noqa: B007 - we want the final match
+            pass
+        if last is not None and not any(at > last.start() for at, _ in inserts):
+            inserts.append((last.start(), snippet))
+    if not inserts:
+        return None
+    out = html
+    for at, piece in sorted(inserts, key=lambda x: x[0], reverse=True):
+        out = out[:at] + piece + out[at:]
+    return out
 
 
 def decode_content(raw: bytes, content_encoding: str, limit: int) -> bytes | None:

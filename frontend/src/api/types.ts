@@ -154,6 +154,8 @@ export interface TriageRecord {
   result: TriageResult;
   tier: string;
   model?: string | null;
+  /** Provider that actually answered; "mock" = no LLM was called. Null for rules / older records. */
+  provider?: string | null;
   prompt_version: string;
   llm_call_id?: string | null;
   escalated: boolean;
@@ -283,6 +285,19 @@ export interface ResponseAction {
   expires_at: string | null;
   reverted_at: string | null;
   result: Record<string, unknown>;
+  /** Audit #130: username behind an API proposal (null for rule / llm / policy). */
+  proposed_by_user?: string | null;
+  /** Audit #130: proposals that arrived after approval (the reason stays what the approver saw). */
+  notes?: ActionNote[];
+}
+
+export interface ActionNote {
+  at: string;
+  proposed_by: "rule" | "llm" | "user" | "policy";
+  by: string;
+  reason: string;
+  incident_id: string | null;
+  alert_id: string | null;
 }
 
 export type DeceptionKind = "honeytoken" | "decoy_path" | "ai_canary" | "labyrinth";
@@ -458,6 +473,8 @@ export interface LLMCall {
   latency_ms: number;
   related: Record<string, string>;
   error: string | null;
+  /** "table" | "snapshot" | "unpriced" (model not in the pricing table: estimated at the highest known rates) | null */
+  cost_basis?: string | null;
 }
 
 export interface LLMCallDetail extends LLMCall {
@@ -506,4 +523,46 @@ export interface ApiToken {
   created_at: string;
   last_used: string | null;
   revoked: boolean;
+  /** Ingest binding (null = unrestricted): events are forced to one of these sensor ids. */
+  allowed_sensor_ids?: string[] | null;
+  /** Ingest binding (null = unrestricted): fnmatch patterns of datasets this token may send. */
+  allowed_datasets?: string[] | null;
+  /** null = never expires. An expired token is refused with 401. */
+  expires_at?: string | null;
+  created_by?: string | null;
+  /** id of the token this one replaced (POST /tokens/{id}/rotate). */
+  rotated_from?: string | null;
+}
+
+// ---------- gate status (schemas/gate_status.py, GET /gate/status) ----------
+export interface GateInstance {
+  token_name: string;
+  source_ip: string;
+  first_seen: string;
+  last_seen: string;
+  last_version: string;
+  last_status: number;
+  fetch_count: number;
+  /** last_version equals the current policy version */
+  current: boolean;
+  /** no poll for longer than stale_after_seconds */
+  stale: boolean;
+}
+
+export interface GateActionReflection {
+  action_id: string;
+  active_since: string;
+  /** Gates whose last poll happened after the action became active */
+  gates_applied: number;
+  /** ... of which still polling */
+  gates_applied_fresh: number;
+  last_applied_at: string | null;
+}
+
+export interface GateStatus {
+  generated_at: string;
+  current_version: string;
+  stale_after_seconds: number;
+  gates: GateInstance[];
+  actions: GateActionReflection[];
 }

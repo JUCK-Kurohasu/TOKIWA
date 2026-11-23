@@ -4,8 +4,25 @@ Session key = ``source_ip`` + client fingerprint (UA + stable header names, see 
 ends after ``idle_timeout_s`` of *event time* without activity (event time, not wall clock, so replayed datasets
 sessionize the same way as live traffic).
 
+Event time is sender-controlled, so the tracker's reference "now" (``max_event_ts``, used for idle expiry) never
+runs further ahead than the wall clock plus ``max_future_skew_s`` (audit #19): without that cap, one event dated
+2099 made every live session look idle on every flush and silently disabled AI attribution until restart. Ingest
+also clamps such timestamps (``tokiwa.api.routes.ingest``); the cap here covers in-process callers as well.
+Past-dated (late / re-sent) events are not changed.
+
+Idle expiry is judged per sensor: each ``sensor_id`` keeps its own (capped) high-water mark and a session is idle
+relative to the sensor that saw its latest activity. A sensor re-sending an hour-old backlog therefore keeps its
+sessions whole instead of having them expired by another sensor's live clock on every flush, and one sensor's clock
+cannot expire another sensor's sessions. This is robustness, not an attacker defence (an unbound ingest token can
+claim any ``sensor_id``; the wall-clock cap is what bounds a forger). Sessions of a sensor that goes quiet stay live
+until that sensor sends again, LRU eviction, or a sensor clock slot is recycled (then the global mark applies).
+
 Bounds (memory is O(max_sessions * max_obs) small records):
-- at most ``max_sessions`` live sessions (LRU eviction; dirty evicted sessions are kept until the next flush);
+- at most ``max_sessions`` live sessions (``detection.max_live_sessions``; dirty evicted sessions are kept until the
+  next flush). Eviction is *not* plain LRU (audit #88): a flood of one-request clients from fresh IPs / UAs could
+  otherwise push a quiet AI agent's session out and reset its features. Among the least recently used sessions,
+  one-request low-score sessions go first; sessions with AI / canary / decoy evidence get a second chance (moved to
+  the back) and are evicted only when a bounded scan finds nothing cheaper. See :meth:`SessionTracker._pick_victim`;
 - at most ``max_obs`` request observations per session (sliding window — features describe recent behaviour,
   counters such as ``request_count`` are whole-session);
 - at most ``max_endpoints`` endpoints remembered for mutation analysis, 10k path hashes for ``unique_paths``.
@@ -21,14 +38,14 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict, deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from tokiwa.aidetect.features import RequestObs, SessionExtras, annotate, compute_features, observe_http
 from tokiwa.aidetect.fingerprints import ClientFamily, FingerprintInfo, fingerprint_info
-from tokiwa.aidetect.scoring import DEFAULT_AI_THRESHOLD, score_features
+from tokiwa.aidetect.scoring import DEFAULT_AI_THRESHOLD, MIN_REQUESTS_FOR_VERDICT, score_features
 from tokiwa.schemas.common import ActorType
 from tokiwa.schemas.events import Event, EventKind
 from tokiwa.util import new_id
@@ -39,6 +56,15 @@ RESCORE_MIN_INTERVAL_S = 2.0
 MAX_PATH_HASHES = 10_000
 RECENT_EVENT_IDS = 64
 LLM_APP_FINGERPRINT = "llm_app"
+# How far event time may move the tracker's reference clock past the wall clock
+# (``detection.max_future_skew_seconds``).
+DEFAULT_MAX_FUTURE_SKEW_S = 120.0
+# Per-sensor high-water marks kept (LRU); sessions of a recycled sensor use the global mark.
+MAX_SENSOR_CLOCKS = 256
+# Eviction (audit #88): candidates examined per eviction (bounded work per new session under a flood) and the
+# score below which a one-request session is evicted without looking further.
+EVICT_SCAN = 128
+EVICT_CHEAP_MAX_SCORE = 0.35
 
 
 @dataclass(slots=True)
@@ -68,6 +94,7 @@ class LiveSession:
     stale: bool = False
     new_since_rescore: int = 0
     last_rescore_mono: float = 0.0
+    sensor: str = ""  # sensor that observed the latest activity (its clock decides idle expiry)
 
     @property
     def unique_paths(self) -> int:
@@ -118,19 +145,33 @@ class SessionTracker:
         max_sessions: int = 4096,
         max_obs: int = 256,
         max_endpoints: int = 128,
+        max_future_skew_s: float = DEFAULT_MAX_FUTURE_SKEW_S,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.idle_timeout_s = float(idle_timeout_s)
         self.threshold = threshold
         self.max_sessions = max_sessions
         self.max_obs = max_obs
         self.max_endpoints = max_endpoints
+        self.max_future_skew_s = max(0.0, float(max_future_skew_s))
+        self._clock = clock  # wall clock in epoch seconds (injectable for tests)
         self._by_key: OrderedDict[str, LiveSession] = OrderedDict()
         self._by_id: dict[str, LiveSession] = {}
         self._by_ip: dict[str, set[str]] = {}
         self._pending: dict[str, SessionSnapshot] = {}
+        # Reference "now" for idle expiry: max event time, capped at wall clock + skew; global and per sensor.
         self.max_event_ts = 0.0
+        self._sensor_ts: OrderedDict[str, float] = OrderedDict()
         self.significant_change = False
-        self.stats = {"created": 0, "evicted": 0, "expired": 0, "rescored": 0}
+        self.stats = {
+            "created": 0,
+            "evicted": 0,
+            # evictions that had to drop a session with >= MIN_REQUESTS_FOR_VERDICT requests or AI/decoy evidence
+            "evicted_valuable": 0,
+            "expired": 0,
+            "rescored": 0,
+            "future_capped": 0,
+        }
 
     # ------------------------------------------------------------------ lookup
     def __len__(self) -> int:
@@ -164,10 +205,62 @@ class SessionTracker:
         self._by_ip.setdefault(ip, set()).add(key)
         self.stats["created"] += 1
         while len(self._by_key) > self.max_sessions:
-            _, old = next(iter(self._by_key.items()))
-            self._finalize(old)
+            # ``s`` has no requests counted yet (the caller observes the event after creation): never pick it.
+            victim = self._pick_victim(exclude=s)
+            if victim is None:
+                break
+            if self._protected(victim) or victim.request_count >= MIN_REQUESTS_FOR_VERDICT:
+                self.stats["evicted_valuable"] += 1
+            self._finalize(victim)
             self.stats["evicted"] += 1
         return s
+
+    def _protected(self, s: LiveSession) -> bool:
+        """Sessions carrying evidence that is expensive to rebuild: AI verdict / score, canary or decoy contact."""
+        return (
+            s.classification == ActorType.AI_AGENT
+            or s.ai_score >= self.threshold
+            or s.extras.canary_hits > 0
+            or s.extras.decoy_hits > 0
+        )
+
+    def _pick_victim(self, exclude: LiveSession) -> LiveSession | None:
+        """Choose a session to evict, oldest first but cheapest first (audit #88).
+
+        Walks the LRU order from the oldest entry, examining at most ``EVICT_SCAN`` sessions:
+        - the first one-request session with a low score is evicted at once (plain LRU while the oldest is cheap);
+        - protected sessions (:meth:`_protected`) get a second chance: they are moved to the back of the LRU, so a
+          flood of fresh one-request clients cannot push a quiet AI agent out (it still ends by idle expiry);
+        - otherwise the least valuable examined session goes: fewest requests (capped at the verdict minimum),
+          then lowest score, then oldest. Only when every examined session is protected is one of them evicted.
+        """
+        best: LiveSession | None = None
+        best_rank: tuple[int, float] | None = None
+        fallback: LiveSession | None = None
+        second_chance: list[LiveSession] = []
+        examined = 0
+        for cand in self._by_key.values():
+            if examined >= EVICT_SCAN:
+                break
+            if cand is exclude:
+                continue
+            examined += 1
+            if self._protected(cand):
+                if fallback is None or cand.ai_score < fallback.ai_score:
+                    fallback = cand
+                second_chance.append(cand)
+                continue
+            if cand.request_count <= 1 and cand.ai_score < EVICT_CHEAP_MAX_SCORE:
+                best = cand
+                break
+            rank = (min(cand.request_count, MIN_REQUESTS_FOR_VERDICT), cand.ai_score)
+            if best_rank is None or rank < best_rank:
+                best, best_rank = cand, rank
+        victim = best or fallback
+        for cand in second_chance:
+            if cand is not victim:
+                self._by_key.move_to_end(cand.key)
+        return victim
 
     def _finalize(self, s: LiveSession) -> None:
         if s.dirty or s.stale:
@@ -182,9 +275,33 @@ class SessionTracker:
             if not keys:
                 self._by_ip.pop(s.source_ip, None)
 
+    def _advance_clock(self, ts: float, ceiling: float, sensor: str) -> None:
+        """Move the reference clocks forward, never past ``ceiling`` (wall clock + allowed future skew)."""
+        if ts > ceiling:
+            ts = ceiling
+            self.stats["future_capped"] += 1
+        if ts > self.max_event_ts:
+            self.max_event_ts = ts
+        clocks = self._sensor_ts
+        cur = clocks.get(sensor)
+        if cur is None:
+            clocks[sensor] = ts
+            if len(clocks) > MAX_SENSOR_CLOCKS:
+                clocks.popitem(last=False)
+        else:
+            if ts > cur:
+                clocks[sensor] = ts
+            clocks.move_to_end(sensor)
+
+    def reference_ts(self, sensor: str) -> float:
+        """Event-time "now" of ``sensor`` (global mark when the sensor is unknown or its slot was recycled)."""
+        return self._sensor_ts.get(sensor, self.max_event_ts)
+
     def expire_idle(self) -> int:
-        cutoff = self.max_event_ts - self.idle_timeout_s
-        expired = [s for s in self._by_key.values() if s.last_seen.timestamp() < cutoff]
+        idle = self.idle_timeout_s
+        expired = [
+            s for s in self._by_key.values() if s.last_seen.timestamp() < self.reference_ts(s.sensor) - idle
+        ]
         for s in expired:
             self._finalize(s)
         self.stats["expired"] += len(expired)
@@ -255,8 +372,9 @@ class SessionTracker:
         e.session_id = s.id
         h = e.http
         assert h is not None
-        if e.timestamp > s.last_seen:
+        if e.timestamp >= s.last_seen:
             s.last_seen = e.timestamp
+            s.sensor = e.sensor_id or ""
         s.request_count += 1
         if h.status is not None and h.status >= 400:
             s.error_count += 1
@@ -288,11 +406,16 @@ class SessionTracker:
         if s is None:
             return None
         e.session_id = s.id
-        if ts > s.last_seen:
+        if ts >= s.last_seen:
             s.last_seen = ts
+            s.sensor = e.sensor_id or ""
         if e.kind == EventKind.DECEPTION:
             kind = (e.deception.asset_kind if e.deception else None) or "unknown"
-            if kind == "ai_canary":
+            # A served canary route is decisive only for a deliberate canary-header follow: a link or an <img>
+            # makes anyone fetch the canary path / pages (audit #133; owner: deception module).
+            from tokiwa.deception.provenance import decisive_canary_hit
+
+            if kind == "ai_canary" and decisive_canary_hit(e):
                 s.extras.canary_hits += 1
             else:
                 s.extras.decoy_hits += 1
@@ -313,13 +436,14 @@ class SessionTracker:
         # HTTP first (they create sessions), then other kinds that attach to the most recent session of the IP.
         http = sorted((e for e in evs if e.kind == EventKind.HTTP), key=lambda e: e.timestamp)
         other = sorted((e for e in evs if e.kind != EventKind.HTTP), key=lambda e: e.timestamp)
+        ceiling = self._clock() + self.max_future_skew_s
         for e in http:
-            self.max_event_ts = max(self.max_event_ts, e.timestamp.timestamp())
+            self._advance_clock(e.timestamp.timestamp(), ceiling, e.sensor_id or "")
             s = self._observe_http(e)
             if s is not None:
                 touched[s.id] = s
         for e in other:
-            self.max_event_ts = max(self.max_event_ts, e.timestamp.timestamp())
+            self._advance_clock(e.timestamp.timestamp(), ceiling, e.sensor_id or "")
             s = self._observe_other(e)
             if s is not None:
                 touched[s.id] = s

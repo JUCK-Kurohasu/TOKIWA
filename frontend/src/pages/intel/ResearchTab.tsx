@@ -10,8 +10,9 @@ import type { Page, ResearchFinding, ResearchReport } from "@/api/types";
 import { AiGeneratedBadge, hostOf, isSafeHttpUrl, SafeLink } from "@/components/common/IntelBadges";
 import { ApiErrorState, QueryView } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
+import { Time } from "@/components/common/Time";
 import { Badge, Button, Card, CardBody, EmptyState, Input, Spinner } from "@/components/ui";
-import { formatDateTime } from "@/lib/format";
+
 import { useLocal } from "@/lib/i18n";
 
 const strings = {
@@ -147,7 +148,9 @@ function ReportCard({ report, onOpenVuln }: { report: ResearchReport; onOpenVuln
         <Badge>
           {findings.length} {L.findings}
         </Badge>
-        <span className="text-xs text-muted">{formatDateTime(report.created_at)}</span>
+        <span className="text-xs text-muted">
+          <Time iso={report.created_at} />
+        </span>
       </div>
       <CardBody className="space-y-3">
         {report.output?.overall_assessment && (

@@ -59,6 +59,15 @@ def is_cve(value: str | None) -> bool:
     return bool(value) and bool(_CVE_FULL_RE.match(value or ""))
 
 
+def withdrawn_at(record: Any) -> str | None:
+    """``data[<first source>]["withdrawn_at"]`` of a parsed :class:`VulnRecord` (audit #132), else None."""
+    sources = getattr(record, "sources", None) or []
+    data = getattr(record, "data", None) or {}
+    block = data.get(sources[0]) if sources else None
+    value = block.get("withdrawn_at") if isinstance(block, dict) else None
+    return str(value) if value else None
+
+
 def normalize_vuln_id(value: str) -> str:
     """Canonical spelling: ``CVE-…`` upper-case, ``GHSA-xxxx-xxxx-xxxx`` (prefix upper, body lower as GitHub
     publishes it), ``JVNDB-…`` upper-case. Unknown schemes (PYSEC-, GO-, RUSTSEC- …) are only stripped."""

@@ -17,6 +17,12 @@ async def _me(client: httpx.AsyncClient, headers: dict[str, str]) -> dict[str, s
     return r.json()
 
 
+async def _login_headers(client: httpx.AsyncClient, username: str, password: str) -> dict[str, str]:
+    r = await client.post("/api/v1/auth/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
 async def _audit_actions() -> list[str]:
     from sqlalchemy import select
 
@@ -78,7 +84,9 @@ async def test_demote_and_promote_take_effect_immediately(
     r = await client.patch(f"/api/v1/users/{admin['id']}", json={"role": "analyst"}, headers=admin_headers)
     assert r.status_code == 200, r.text
     assert r.json()["role"] == "analyst"
-    # The existing JWT is re-checked against the DB role -> admin endpoints are now forbidden.
+    # A role change ends the user's existing logins (#34); a fresh login carries the new role.
+    assert (await client.get("/api/v1/users", headers=admin_headers)).status_code == 401
+    admin_headers = await _login_headers(client, "admin", "correct-horse-battery")
     assert (await client.get("/api/v1/users", headers=admin_headers)).status_code == 403
     # ...and admin2 is now the last admin.
     admin2 = await _me(client, second_admin)
@@ -87,6 +95,7 @@ async def test_demote_and_promote_take_effect_immediately(
     # Promote back.
     r = await client.patch(f"/api/v1/users/{admin['id']}", json={"role": "admin"}, headers=second_admin)
     assert r.status_code == 200
+    admin_headers = await _login_headers(client, "admin", "correct-horse-battery")
     assert (await client.get("/api/v1/users", headers=admin_headers)).status_code == 200
 
 
@@ -179,7 +188,7 @@ async def test_token_default_scopes_and_validation(
 ) -> None:
     r = await client.post("/api/v1/tokens", json={"name": "agent"}, headers=admin_headers)
     assert r.status_code == 201
-    assert sorted(r.json()["scopes"]) == ["gate", "ingest"]
+    assert r.json()["scopes"] == ["ingest"]  # gate is opt-in (audit #33)
     empty = await client.post("/api/v1/tokens", json={"name": "x", "scopes": []}, headers=admin_headers)
     assert empty.status_code == 422
     bogus = await client.post("/api/v1/tokens", json={"name": "x", "scopes": ["root"]}, headers=admin_headers)

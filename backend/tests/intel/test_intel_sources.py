@@ -286,7 +286,11 @@ async def test_ghsa_params_paging_and_mapping(settings: Settings, feeds: Any) ->
     assert reqs[0].url.params["updated"] == ">=2026-10-19"
     assert reqs[1].url.params["after"] == "Y3Vyc29yOnYyOpK0"  # followed the Link header verbatim
     v = _by_id(res.vulns)
-    assert set(v) == {"CVE-2021-44228", "GHSA-9wx4-h78v-vm56", "CVE-2021-45046"}  # withdrawn skipped
+    assert set(v) == {"CVE-2021-44228", "GHSA-9wx4-h78v-vm56", "CVE-2021-45046"}  # withdrawn not upserted
+    # ... but handed over separately so a stored copy can be closed (audit #132)
+    assert [(w.id, w.data["ghsa"]["withdrawn_at"]) for w in res.withdrawn] == [
+        ("CVE-2026-99999", "2026-10-20T00:00:00Z")
+    ]
     log4j = v["CVE-2021-44228"]
     assert log4j.aliases == ["GHSA-jfh8-c2jp-5v3q"]
     assert log4j.cvss_score == 10.0 and log4j.severity is Severity.CRITICAL

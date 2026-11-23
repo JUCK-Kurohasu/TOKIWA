@@ -40,6 +40,18 @@ Events
   full KEV import from flooding subscribers with ~1.5k old entries);
 - ``epss_spike``: a previously known EPSS score rose to >= ``intel.epss_alert_threshold`` from below it, or by at
   least ``EPSS_SPIKE_DELTA`` while above it. A first-ever score does not count (no baseline).
+- ``withdrawn`` (``apply_withdrawals``): a GHSA / OSV advisory stored earlier was withdrawn by its feed; the matcher
+  re-runs for the id so exposures based on it are auto-closed.
+
+Withdrawn advisories (audit #132)
+---------------------------------
+A withdrawal never creates a row. On an existing row it is recorded in ``data["withdrawn"]`` (advisory id ->
+timestamp). Because ``affected`` is a union without per-source provenance, package data is only dropped when the
+withdrawn advisory is the one that supplied this feed's data and no other package feed (GHSA / OSV) still vouches
+for the row: then its ecosystem entries are removed (CPE entries from NVD stay). When no other source is left at
+all (e.g. a GHSA-only row), ``affected`` is emptied and ``data["withdrawn_at"]`` set. A duplicate GHSA withdrawn in
+favour of another advisory for the same CVE therefore leaves the row as it is. A later non-withdrawn copy of the
+advisory clears the marks again.
 """
 
 from __future__ import annotations
@@ -65,6 +77,7 @@ from tokiwa.intel.sources._common import (
     severity_from_score,
     software_from_cpe,
     unique,
+    withdrawn_at,
 )
 from tokiwa.schemas.intel import IntelItem, SoftwareItem, VulnRecord
 from tokiwa.util import new_id, sha256_hex, utcnow
@@ -83,6 +96,9 @@ MAX_EPSS_TARGETS = 5000
 _CHUNK = 400
 _ALIAS_LIKE_CHUNK = 40
 PROV_KEY = "_prov"
+WITHDRAWN_KEY = "withdrawn"  # data["withdrawn"] = {advisory id: withdrawn_at}
+WITHDRAWN_AT_KEY = "withdrawn_at"  # row-level: every source behind the row is withdrawn
+PACKAGE_FEEDS = ("ghsa", "osv")
 
 FIELD_PRECEDENCE: dict[str, tuple[str, ...]] = {
     "cvss": ("nvd", "ghsa", "osv", "jvn", "research"),
@@ -413,6 +429,7 @@ async def upsert_vulns(
                     folded[alias] = rec.id
         after = merge_states(base if base is not None else _empty_state(), _record_state(rec))
         after["aliases"] = [a for a in after["aliases"] if a != rec.id]
+        _clear_withdrawal(after, rec)
         states[rec.id] = after
         for reason in _events(base, after, now, threshold):
             if reason not in reasons.setdefault(rec.id, []):
@@ -446,6 +463,105 @@ async def upsert_vulns(
     for rid, rs in reasons.items():
         if rid in states:
             result.updates.append(VulnUpdate(vuln=state_to_record(rid, states[rid]), reasons=rs))
+    return result
+
+
+def _advisory_id(rec: VulnRecord) -> tuple[str, str]:
+    """(feed, advisory id) of a GHSA / OSV record (the feed's own id, not the CVE it is keyed by)."""
+    source = rec.sources[0] if rec.sources else "unknown"
+    block = rec.data.get(source)
+    adv = block.get("id") if isinstance(block, dict) else None
+    return source, normalize_vuln_id(str(adv or rec.id))
+
+
+def _clear_withdrawal(st: State, rec: VulnRecord) -> None:
+    """A non-withdrawn copy of an advisory arrived again: drop its withdrawal marks (in place)."""
+    data = st.get("data") or {}
+    marks = data.get(WITHDRAWN_KEY)
+    if not isinstance(marks, dict):
+        return
+    _, adv = _advisory_id(rec)
+    if adv in marks:
+        marks = {k: v for k, v in marks.items() if k != adv}
+        data = {k: v for k, v in data.items() if k not in (WITHDRAWN_KEY, WITHDRAWN_AT_KEY)}
+        if marks:
+            data[WITHDRAWN_KEY] = marks
+        st["data"] = data
+
+
+def withdraw_state(st: State, row_id: str, rec: VulnRecord, at: str) -> State:
+    """Apply the withdrawal of ``rec``'s advisory to a stored row state (pure; see module docstring)."""
+    source, adv = _advisory_id(rec)
+    out = dict(st)
+    data = dict(out.get("data") or {})
+    marks = dict(data.get(WITHDRAWN_KEY) or {})
+    marks[adv] = at
+    data[WITHDRAWN_KEY] = marks
+    block = data.get(source)
+    owner = block.get("id") if isinstance(block, dict) else None
+    owns = row_id == adv or owner is None or normalize_vuln_id(str(owner)) == adv
+    sources = set(out.get("sources") or [])
+
+    def still_vouched(feed: str) -> bool:
+        b = data.get(feed)
+        fid = b.get("id") if isinstance(b, dict) else None
+        return normalize_vuln_id(str(fid)) not in marks if fid else True
+
+    others = [f for f in PACKAGE_FEEDS if f != source and f in sources and still_vouched(f)]
+    if owns and not others:
+        keys = {
+            (a.product.lower(), (a.ecosystem or "").lower())
+            for a in rec.affected
+            if a.product and a.ecosystem
+        }
+        out["affected"] = [
+            a
+            for a in out.get("affected") or []
+            if not (
+                a.get("ecosystem")
+                and (not keys or (str(a.get("product") or "").lower(), str(a["ecosystem"]).lower()) in keys)
+            )
+        ]
+        if not (sources - {"epss", *PACKAGE_FEEDS}):
+            out["affected"] = []
+            data[WITHDRAWN_AT_KEY] = at
+    out["data"] = data
+    return out
+
+
+async def apply_withdrawals(
+    session: AsyncSession, records: Sequence[VulnRecord], *, now: datetime | None = None
+) -> UpsertResult:
+    """Mark stored rows whose GHSA / OSV advisory was withdrawn (no commit). Unknown advisories are ignored.
+
+    ``result.updates`` carry the reason ``withdrawn`` so :func:`publish_updates` makes the matcher re-run."""
+
+    now = now or utcnow()
+    result = UpsertResult()
+    for rec in records:
+        at = withdrawn_at(rec) or now.isoformat()
+        _, adv = _advisory_id(rec)
+        ids = unique([canonicalize(rec).id, adv])
+        rows = await _load_rows(session, ids)
+        if not rows:
+            rows = {r.id: r for r in (await _rows_by_alias(session, ids)).values()}
+        if not rows:
+            result.unchanged += 1
+            continue
+        for rid, row in rows.items():
+            before = _row_state(row)
+            if adv in ((before.get("data") or {}).get(WITHDRAWN_KEY) or {}):
+                result.unchanged += 1
+                continue
+            after = withdraw_state(before, rid, rec, at)
+            for col in COLUMNS:
+                setattr(row, col, after[col])
+            row.updated_at = now
+            result.updated += 1
+            result.ids.append(rid)
+            result.updates.append(VulnUpdate(vuln=state_to_record(rid, after), reasons=["withdrawn"]))
+            log.info("intel: %s withdrawn by its feed; marked on %s", adv, rid)
+    await session.flush()
     return result
 
 

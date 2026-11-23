@@ -14,9 +14,14 @@ What counts as a trip
 Fetching an AI-canary *page* (robots.txt, OpenAPI ...) is NOT a trip - legitimate crawlers read robots.txt.
 Only using the canary value is.
 
-AI canary "followed" (= LLM agent, ai_score 0.99): the canary value is sent in the configured header
-(``deception.canary_header``), or the path / referrer starts with ``/api/internal/<value>`` - the composition the
-instruction asks for. A canary value seen anywhere else is "observed" (strong, but a human could have copied it).
+AI canary "followed": the canary value is sent in the configured header (``deception.canary_header``), or the
+path / referrer starts with ``/api/internal/<value>`` - the composition the instruction asks for. A canary value
+seen anywhere else is "observed" (strong, but a human could have copied it).
+
+How much a trip is worth also depends on whether a third party could have made the client send it
+(:mod:`tokiwa.deception.provenance`, audit #133): ``Trip.provenance`` is ``direct`` (decisive, e.g. the canary
+header), ``passive`` (canary value only in link-reachable fields such as the path) or ``induced`` (browser
+cross-site / sub-resource request). Only a ``direct`` follow is an AI-agent verdict (``Trip.ai_followed``).
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from urllib.parse import unquote, unquote_plus
 
 from tokiwa.config import DeceptionSettings
 from tokiwa.deception import labyrinth
+from tokiwa.deception.provenance import Provenance, field_is_link_reachable, induced_by
 from tokiwa.deception.templates import CANARY_PATH_PREFIX
 from tokiwa.deception.tokens import MIN_TOKEN_LEN, Slot, honey_values
 from tokiwa.schemas.events import Event
@@ -46,6 +52,8 @@ class TripType(StrEnum):
     DECOY_PATH = "decoy_path"
     LABYRINTH = "labyrinth"
 
+
+CANARY_TRIP_TYPES = frozenset({TripType.AI_CANARY_FOLLOWED, TripType.AI_CANARY_TOKEN})
 
 # strongest first: one trip per (event, asset) keeps the strongest classification
 _PRIORITY = [
@@ -91,10 +99,13 @@ class Trip:
     matches: list[TokenMatch] = field(default_factory=list)
     path_hit: bool = False
     depth: int | None = None
+    provenance: Provenance = Provenance.DIRECT
+    induced_by: list[str] = field(default_factory=list)
 
     @property
     def ai_followed(self) -> bool:
-        return self.trip_type == TripType.AI_CANARY_FOLLOWED
+        """Decisive AI-canary follow: instructed form AND only the client itself could have sent it."""
+        return self.trip_type == TripType.AI_CANARY_FOLLOWED and self.provenance == Provenance.DIRECT
 
     @property
     def token(self) -> str | None:
@@ -147,14 +158,25 @@ class DeceptionIndex:
         prefixes: list[tuple[str, IndexedAsset]],
         assets: dict[str, IndexedAsset],
         canary_header: str,
+        *,
+        downgrade_induced: bool = True,
+        canaries_served: bool = True,
     ) -> None:
         self.tokens = tokens
         self.exact_paths = exact_paths
         self.prefixes = sorted(prefixes, key=lambda p: len(p[0]), reverse=True)
         self.assets = assets
         self.canary_header = canary_header.lower()
+        self.downgrade_induced = downgrade_induced
+        # canary-header attempts only mean something while the canary text (naming the header) is served
+        self.canary_attempts = canaries_served and any(r.slot == Slot.CANARY for r in tokens.values())
         values = sorted((v for v in tokens if len(v) >= MIN_TOKEN_LEN), key=len, reverse=True)
-        self._pattern = re.compile("|".join(re.escape(v) for v in values)) if values else None
+        # Case-insensitive (#30): an LLM re-typing a 24-char random value, or a pipeline lower-casing a header,
+        # must not lose the trip. ``_canonical`` maps the case-folded match back to the stored value.
+        self._canonical: dict[str, str] = {}
+        for v in values:
+            self._canonical.setdefault(v.casefold(), v)
+        self._pattern = re.compile("|".join(re.escape(v) for v in values), re.IGNORECASE) if values else None
 
     @property
     def empty(self) -> bool:
@@ -166,8 +188,15 @@ class DeceptionIndex:
 
     @classmethod
     def build(
-        cls, assets: Iterable[DeceptionAsset], *, key: bytes, settings: DeceptionSettings
+        cls,
+        assets: Iterable[DeceptionAsset],
+        *,
+        key: bytes,
+        settings: DeceptionSettings,
+        older_keys: Iterable[bytes] = (),
     ) -> DeceptionIndex:
+        """``key`` renders decoys; values derived with ``older_keys`` (key ring, #68) are matched as well."""
+        keys = list(dict.fromkeys([key, *older_keys]))
         tokens: dict[str, TokenRef] = {}
         exact: dict[str, IndexedAsset] = {}
         prefixes: list[tuple[str, IndexedAsset]] = []
@@ -182,8 +211,9 @@ class DeceptionIndex:
                 continue
             by_id[ia.id] = ia
             if ia.token:
-                for slot, value in honey_values(ia.kind, ia.token, key).items():
-                    tokens.setdefault(value, TokenRef(ia, slot, value))
+                for k in keys:
+                    for slot, value in honey_values(ia.kind, ia.token, k).items():
+                        tokens.setdefault(value, TokenRef(ia, slot, value))
             if ia.kind == DeceptionKind.AI_CANARY:
                 continue  # fetching a canary page is not a trip; only using the value is
             if ia.kind == DeceptionKind.LABYRINTH:
@@ -195,12 +225,26 @@ class DeceptionIndex:
                     prefixes.append((normalize_path(ia.path[:-1] or "/"), ia))
                 else:
                     exact.setdefault(_exact_key(ia.path), ia)
-        return cls(tokens, exact, prefixes, by_id, settings.canary_header)
+        return cls(
+            tokens,
+            exact,
+            prefixes,
+            by_id,
+            settings.canary_header,
+            downgrade_induced=settings.downgrade_browser_induced,
+            canaries_served=settings.ai_canaries,
+        )
 
     def find_tokens(self, text: str) -> list[str]:
+        """Known values in ``text`` (case-insensitive), returned as stored (keys of ``tokens``)."""
         if self._pattern is None or not text:
             return []
-        return [m.group(0) for m in self._pattern.finditer(text)]
+        out = []
+        for m in self._pattern.finditer(text):
+            value = self._canonical.get(m.group(0).casefold())
+            if value is not None:
+                out.append(value)
+        return out
 
     def match_path(self, path: str) -> tuple[IndexedAsset | None, int | None]:
         norm = normalize_path(path)
@@ -252,13 +296,32 @@ def iter_fields(event: Event) -> Iterator[tuple[str, str]]:
             yield "raw", raw
 
 
+def _unescape(text: str) -> str:
+    """Drop backslashes (#30): markdownify, the most common HTML->Markdown step of agent web tools, escapes
+    ``_`` so the agent sees and sends ``dbg\\_...``. Generated values never contain a backslash."""
+    return text.replace("\\", "")
+
+
 def _variants(text: str) -> list[str]:
     out = [text]
     if "%" in text or "+" in text:
         decoded = unquote_plus(text)
         if decoded != text:
             out.append(decoded)
+    for v in list(out):
+        if "\\" in v:
+            out.append(_unescape(v))
     return out
+
+
+def _canary_path(path: str | None) -> str:
+    """Request path as compared with ``/api/internal/<value>``: decoded, unescaped, normalized, lower-cased."""
+    p = path or "/"
+    for _ in range(2):
+        if "%" not in p:
+            break
+        p = unquote(p)
+    return normalize_path(_unescape(p))
 
 
 @dataclass
@@ -276,16 +339,43 @@ def _followed(m: TokenMatch, event: Event, index: DeceptionIndex) -> bool:
         return True
     composed = f"{CANARY_PATH_PREFIX}{m.value}".lower()
     if m.field == "http.path" and event.http is not None:
-        return normalize_path(event.http.path).startswith(composed)
+        return _canary_path(event.http.path).startswith(composed)
     if m.field in ("http.referrer", "http.headers.referer"):
         text: str | None = None
         if event.http is not None:
             text = event.http.referrer if m.field == "http.referrer" else event.http.headers.get("referer")
-        return composed in unquote(text or "").lower()
+        return composed in _unescape(unquote(text or "")).lower()
     return False
 
 
-def _classify(acc: _Acc, event: Event, index: DeceptionIndex) -> Trip | None:
+def canary_header_attempt(event: Event, index: DeceptionIndex) -> str | None:
+    """Value of the canary header when it carries no known canary value (#30), else None.
+
+    The header name only appears in the canary text (and this project's docs); legitimate clients do not send
+    it. A client sending it with a mangled value (typo, escaping, truncation) tried to follow the instruction.
+    """
+    h = event.http
+    if h is None or not index.canary_attempts:
+        return None
+    value = next((v for k, v in h.headers.items() if k.lower() == index.canary_header), "").strip()
+    if not value or value.startswith("[REDACTED"):
+        return None
+    for v in index.find_tokens(_unescape(value)):
+        ref = index.tokens.get(v)
+        if ref is not None and ref.slot == Slot.CANARY:
+            return None
+    return value
+
+
+def _provenance(trip_type: TripType, matches: list[TokenMatch], induced: list[str]) -> Provenance:
+    if induced:
+        return Provenance.INDUCED
+    if trip_type in CANARY_TRIP_TYPES and all(field_is_link_reachable(m.field) for m in matches):
+        return Provenance.PASSIVE  # a link / <img> / form / link-preview bot can produce this (#133)
+    return Provenance.DIRECT
+
+
+def _classify(acc: _Acc, event: Event, index: DeceptionIndex, induced: list[str]) -> Trip | None:
     kinds: set[TripType] = set()
     for m in acc.matches:
         if m.slot == Slot.CANARY:
@@ -296,7 +386,8 @@ def _classify(acc: _Acc, event: Event, index: DeceptionIndex) -> Trip | None:
         kinds.add(TripType.LABYRINTH if acc.asset.kind == DeceptionKind.LABYRINTH else TripType.DECOY_PATH)
     for t in _PRIORITY:
         if t in kinds:
-            return Trip(acc.asset, t, acc.matches, acc.path_hit, acc.depth)
+            prov = _provenance(t, acc.matches, induced)
+            return Trip(acc.asset, t, acc.matches, acc.path_hit, acc.depth, prov, list(induced))
     return None
 
 
@@ -332,5 +423,8 @@ def match_event(event: Event, index: DeceptionIndex) -> list[Trip]:
                 for prefix, a in index.prefixes:
                     if a.id == asset.id:
                         acc.depth = labyrinth.depth_of(prefix, normalize_path(event.http.path))
-    trips = [_classify(acc, event, index) for acc in accs.values()]
+    if not accs:
+        return []
+    induced = induced_by(event) if index.downgrade_induced else []
+    trips = [_classify(acc, event, index, induced) for acc in accs.values()]
     return [t for t in trips if t is not None]

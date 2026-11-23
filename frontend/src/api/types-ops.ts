@@ -22,6 +22,50 @@ export type RetriageTier = "fast" | "deep";
 export interface AlertUpdate {
   status?: AlertStatus;
   tags?: string[];
+  /** status=false_positive only (#166): suppress recurrences. Omitted = server default (detection.fp_suppress_hours). */
+  suppress?: boolean | null;
+  suppress_hours?: number | null;
+  suppress_permanent?: boolean;
+  suppress_any_source?: boolean;
+  reason?: string | null;
+}
+
+/** schemas.alert_suppressions.AlertSuppressionKind / AlertSuppressionMode */
+export type AlertSuppressionKind = "false_positive" | "allowlist";
+export type AlertSuppressionMode = "suppress" | "downgrade";
+
+/** GET /alert-suppressions — schemas.alert_suppressions.AlertSuppression (#166 / #173) */
+export interface AlertSuppression {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  kind: AlertSuppressionKind;
+  mode: AlertSuppressionMode;
+  rule_id: string | null;
+  path_key: string | null;
+  source_cidr: string | null;
+  match: Record<string, unknown>;
+  max_severity: string | null;
+  reason: string;
+  created_by: string;
+  source_alert_id: string | null;
+  expires_at: string | null;
+  lifted_at: string | null;
+  lifted_by: string | null;
+  hits: number;
+  last_hit_at: string | null;
+  active: boolean;
+}
+
+/** POST /alert-suppressions — schemas.alert_suppressions.AlertSuppressionIn */
+export interface AlertSuppressionIn {
+  kind?: AlertSuppressionKind;
+  mode?: AlertSuppressionMode;
+  source_cidr?: string | null;
+  rule_id?: string | null;
+  path?: string | null;
+  hours?: number | null;
+  reason?: string;
 }
 
 /** PATCH /incidents/{id} — schemas.alerts.IncidentUpdate */
@@ -43,9 +87,42 @@ export interface ActionProposal {
   proposed_by?: ActionProposer;
 }
 
+/** Optional part of reject / revert (audit #63): do not re-propose this type + target. */
+export interface SuppressOptions {
+  suppress_hours?: number;
+  suppress_permanent?: boolean;
+}
+
 /** POST /response/actions/{id}/reject */
-export interface ActionRejectBody {
+export interface ActionRejectBody extends SuppressOptions {
   reason?: string;
+}
+
+/** POST /response/actions/{id}/revert */
+export interface ActionRevertBody extends SuppressOptions {
+  reason?: string;
+}
+
+/** schemas.suppressions.SuppressionMode */
+export type SuppressionMode = "suppress" | "manual_only";
+
+/** GET /response/suppressions — schemas.suppressions.ResponseSuppression */
+export interface ResponseSuppression {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  action_type: ActionType;
+  target: string;
+  mode: SuppressionMode;
+  reason: string;
+  created_by: string;
+  source_action_id: string | null;
+  expires_at: string | null;
+  lifted_at: string | null;
+  lifted_by: string | null;
+  hits: number;
+  last_hit_at: string | null;
+  active: boolean;
 }
 
 /** POST /deception/assets — schemas.response.DeceptionAssetIn (PATCH accepts a subset) */

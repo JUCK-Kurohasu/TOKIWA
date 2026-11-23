@@ -17,8 +17,8 @@ Los sensores no se autentican con el inicio de sesión de un usuario, sino con u
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                    # Ámbitos por defecto: ingest + gate
-uv run tokiwa token create agent-web01 --scope ingest
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # para Gate: añada el ámbito gate explícitamente
+uv run tokiwa token create agent-web01            # ámbito por defecto: solo ingest
 ```
 
 | Ámbito | Qué permite |
@@ -30,6 +30,13 @@ uv run tokiwa token create agent-web01 --scope ingest
 - El token (`tkw_...`) se muestra **una sola vez, al crearlo**. En la base de datos solo se guarda su hash.
 - También pueden crearse y revocarse en **Settings → API tokens** (Configuración → Tokens de API) de la interfaz web (solo administradores).
 - Si se pasa como argumento de línea de comandos, otros usuarios pueden verlo con `ps`; páselo **mediante una variable de entorno o un archivo**.
+- `--sensor-id` / `--dataset` **vinculan** un token a IDs de sensor y datasets concretos (sin restricción si se omiten).
+  Si un token vinculado envía un dataset fuera de su lista, se rechaza el lote entero con 403; si declara otro ID de sensor,
+  se sustituye por uno permitido. Se recomienda vincular los tokens de los sensores que no son Gate
+  (p. ej. `--sensor-id web01 --dataset nginx.access --dataset 'host.*'`).
+- El servidor registra en cada evento el token que lo entregó, en las etiquetas `ingest.token` / `ingest.token_id`. Los datos
+  propios de Gate (`gate.*` / `deception.*`) enviados por un token sin el ámbito `gate` se etiquetan `ingest.trust=low`.
+  Para que eventos falsificados no hagan bloquear una IP inocente, ponga las IP de socios, CDN y de salida propias en `response.protected_cidrs`.
 
 ## TOKIWA Gate (sensor de tipo proxy inverso)
 
@@ -62,22 +69,37 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | upstream | `--upstream` | `http://127.0.0.1:3000` | Destino del reenvío. También admite un prefijo de ruta (`http://app/base`) |
 | listen | `--listen host:port` | `0.0.0.0:8080` | Dirección de escucha |
 | server_url | `--server` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
-| ingest_token | `--token` / `--token-file` | Ninguno | Requiere los ámbitos `ingest` y `gate` |
+| ingest_token | `--token-file` (evite `--token`: se ve en `ps`) | Ninguno | Requiere los ámbitos `ingest` y `gate`. También sirve la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo de la solicitud que se capturan (0 = no capturar) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
+| max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
+| forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Encabezados que normalmente se eliminan (ver abajo) y que se pasan sin cambios al upstream |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP); las que excedan reciben 429 (0 = sin límite) |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),
-`--preserve-host / --rewrite-host`, `--access-log`.
+`--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (límite de conexiones simultáneas; por encima, 503; sin límite por defecto).
 
 ### Comportamientos que conviene conocer
 
 - **Use `--trust-forwarded-for` solo detrás de un balanceador de carga de confianza**. Sin esta opción, los encabezados
   `X-Forwarded-*` enviados por el cliente se descartan y se sustituyen por los valores observados por Gate (para impedir la suplantación de la IP de origen).
+- Los demás encabezados que declaran una IP o un esquema de cliente (`X-Real-IP`, `Forwarded`, `True-Client-IP`, `CF-Connecting-IP`, ...) y `X-Original-URL` /
+  `X-Rewrite-URL` **no se pasan al upstream**. En su lugar, Gate pone en `X-Real-IP` y `Forwarded` la IP de cliente que ha determinado.
+  Si el upstream lee un encabezado que añade un proxy delante (por ejemplo, Cloudflare), inclúyalo en `forward_client_headers` (p. ej. `["cf-connecting-ip"]`).
+  Gate tampoco añade un `User-Agent` ni otros encabezados que el cliente no haya enviado.
+- Al comparar con los señuelos, las diferencias de mayúsculas, una `/` o un `.` final, lo que sigue a `;`, `%5c` (`\`) y la doble codificación cuentan como la misma ruta
+  (`/.ENV` y `/.env;x` también activan un señuelo `/.env`). Las rutas con estas variaciones llevan la etiqueta `gate:path_anomaly`.
+- Las respuestas que genera el propio Gate (403 de bloqueo, señuelos, 502/504 por fallos del upstream, ...) llevan `Cache-Control: no-store`. Si hay una CDN delante de Gate,
+  compruebe que no esté configurada para forzar la caché de los 404 y respuestas similares.
+- Los cuerpos de solicitud con `Content-Encoding: gzip` / `deflate` se registran descomprimidos (etiqueta `gate:req_encoded`; el upstream sigue recibiendo los bytes comprimidos).
+  br y zstd no se pueden descomprimir; solo queda la etiqueta `gate:req_encoding_unknown`.
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,
   valores de parámetros como `password=`, tokens, claves, direcciones de correo electrónico, etc.).
+- Los eventos conservan hasta 64 encabezados distintos. Los que se usan para la detección (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
+  se conservan siempre, estén donde estén; el resto queda indicado con la etiqueta `gate:headers_truncated` y el número de encabezados (label `gate.header_count`).
 - **fail-open**: aunque el servidor de TOKIWA se detenga, el proxy de Gate sigue funcionando (los eventos se acumulan temporalmente y se reenvían).
-- **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos").
+- **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos"). Aun así, el Gate respeta el vencimiento (TTL) de cada bloqueo: las entradas vencidas se levantan.
 - Comprobación de estado: `GET /__tokiwa/health` → `{"status":"ok"}`. Desde IP locales/privadas devuelve también estadísticas de envío, entre otros datos.
 - No soportado: WebSocket (devuelve 501), upstream HTTP/2, gRPC. Gate está pensado para funcionar como un único proceso.
 
@@ -104,6 +126,31 @@ uv run tokiwa agent run --server-url http://tokiwa.example.internal:8788 \
 - Para leer la información de procesos de otros usuarios pueden necesitarse privilegios equivalentes a root.
 - Los puertos en escucha encontrados en la primera instantánea se registran, por defecto (`agent.ports_first_snapshot: info`), con severidad "informativa"
   (con `learn` no se registran: solo se memorizan como línea base). A partir de ahí, se detecta cualquier nuevo puerto en escucha que aparezca.
+- **Líneas de comandos**: el agente enmascara los secretos de la línea de comandos de los procesos en escucha / conectados antes
+  de enviarla (argumentos cuyo nombre indica un secreto como `--password X` / `--api-key X`, opciones de herramientas comunes como
+  `mysql -pX`, `redis-cli -a X`, `sshpass -p X`, `curl -u user:X`, `smbclient -U user%X`, asignaciones de entorno como `*_KEY=X`,
+  credenciales en URL). Se conservan los nombres de programa, de opción y las rutas. Las contraseñas pasadas como argumentos
+  posicionales y similares pueden no enmascararse, por lo que en hosts que ponen secretos en argv recomendamos
+  `TOKIWA_AGENT__SEND_CMDLINE=false` (envía solo nombre, ejecutable y usuario). Los honeytokens pasados como argumentos también se
+  enmascaran y no los compara el engaño.
+- **Límite de conexiones nuevas**: cuando un ciclo tiene más conexiones nuevas que `agent.max_connections_per_cycle` (1000 por
+  defecto), se envían primero las establecidas, salientes y con proceso conocido, y el resto pasa al ciclo siguiente (no se descarta).
+  El exceso se ve en la etiqueta `connections_truncated` de la instantánea de puertos y en la detección `sensor.connections_truncated`
+  (media), contra la técnica de ocultar un C2 entre masas de conexiones falsas.
+- **Formato del log de nginx**: use `log_format ... escape=json` (`lab/nginx/tokiwa-json.conf`). Sin `escape=json`, `"` se escribe
+  como `\x22`, que no es JSON válido. El agente decodifica esas líneas, pero avisa.
+- **Hora de los logs**: lo más seguro son marcas con desplazamiento (ISO 8601 `+09:00` / `Z`, `$time_local`, ...). Las marcas sin
+  desplazamiento (formatos propios, `wall` de Caddy, ...) se interpretan en `agent.log_timezone` (p. ej. `Asia/Tokyo`, `+09:00`,
+  `UTC`). Sin configurar, se toman como UTC y se avisa de cuántas hubo (un log en JST quedaría desfasado 9 horas). Un valor no
+  válido falla al arrancar.
+- **Líneas que no se pudieron leer**: se cuentan las líneas que no son JSON válido y las horas que no se pueden interpretar; la primera
+  vez de inmediato y después como mucho cada `agent.health_report_seconds` (300 s por defecto), el agente registra un aviso y envía un
+  evento `agent.health`. Las líneas ilegibles generan la detección `sensor.log_parse_failures`. `agent.health` se acepta incluso
+  desde tokens restringidos a datasets.
+- **Dirección de las alertas de Suricata**: el `src_ip` de una alerta EVE sigue al paquete que coincidió. En alertas de dirección de
+  respuesta (`direction: to_client`, p. ej. ATTACK_RESPONSE), el lado que abrió la conexión pasa a ser el atacante (origen). El
+  `target` de la regla tiene prioridad, y si `metadata.attack_target` de ET es `Client_Endpoint` no se intercambia. La decisión queda
+  en las etiquetas `suricata.direction` / `suricata.attribution` / `suricata.swapped`; la dirección original queda en `raw`.
 
 ## API de ingesta (envío directo e integración con aplicaciones LLM)
 
@@ -125,6 +172,9 @@ curl -X POST http://127.0.0.1:8788/api/v1/ingest/events \
 
 - El encabezado de autenticación es `X-Tokiwa-Token: tkw_...` o `Authorization: Bearer tkw_...`. Se requiere el ámbito `ingest`.
 - Como máximo **5000 eventos** por solicitud. Si se omite `timestamp`, se usa la hora de recepción.
+- El cuerpo de la petición admite como máximo 32 MiB por defecto (`server.max_ingest_body_bytes`; si se supera, 413). Un campo de
+  texto de más de 65 536 caracteres se trunca conservando el principio, y el evento recibe la etiqueta `truncated` y el label
+  `tokiwa.truncated` (`campo:longitud original`). El evento no se rechaza; la detección usa los valores truncados.
 - Entre los valores de `kind` están `http` / `port_snapshot` / `connection` / `ids_alert` / `dns` / `process` / `auth` / `deception` /
   `llm_app` / `custom`, entre otros. Para los detalles del esquema, consulte la documentación de la API del servidor (`http://<server>:8788/api/docs`).
 - ⚠️ **La API de ingesta no aplica enmascaramiento en el servidor** (Gate y Agent enmascaran antes de enviar).

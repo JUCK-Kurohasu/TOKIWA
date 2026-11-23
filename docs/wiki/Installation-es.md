@@ -19,14 +19,15 @@ cp .env.example .env     # Descomente solo las líneas necesarias
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. Cree el primer administrador en <http://localhost:8788/setup> (con la CLI:
+1. Cree el primer administrador en <http://localhost:8788/setup>. La página pide un **Setup code** (código de configuración): está en el log de arranque (`docker compose -f deploy/compose.yaml logs tokiwa`, que muestra una URL con el código) o se obtiene con
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` (de un solo uso; con la CLI:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`; la contraseña se introduce de forma interactiva).
 2. Si usa un LLM, escriba `ANTHROPIC_API_KEY=...` en `.env` (si no se define, funciona con el LLM simulado, mock).
 3. Por defecto solo se publica en `127.0.0.1:8788`. Para exponerlo en la LAN se usa `TOKIWA_BIND=0.0.0.0` en `.env`, pero
    **no lo publique sin TLS**: coloque delante el proxy inverso que se describe más adelante.
 
-> ⚠️ **No habilite ajustes con un valor vacío**. Por ejemplo, `TOKIWA_SERVER__SECRET_KEY=` (vacío) se usaría como "clave de firma de cadena vacía".
-> Deje comentadas las opciones que no use. Si no se define, la clave de firma se genera automáticamente en el primer arranque.
+> ⚠️ **No habilite ajustes con un valor vacío** (lo que significa una cadena vacía depende del ajuste). Deje comentadas las opciones que no use.
+> La clave de firma `TOKIWA_SERVER__SECRET_KEY` se genera automáticamente en el primer arranque si no se define (o está vacía); una clave definida necesita al menos 32 caracteres.
 
 ### Ejecutar solo con docker
 
@@ -46,16 +47,20 @@ Si el primer argumento del contenedor es uno de `serve gate agent sim eval intel
 
 ```bash
 # Token de API para sensores (se muestra una sola vez)
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate (perfil gate de compose; defina TOKIWA_GATE__INGEST_TOKEN y TOKIWA_GATE__UPSTREAM en .env)
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # Sensor de host (usa los espacios de nombres de PID / red del host para ver sus puertos y procesos)
+# Pase el token en un archivo env con permisos 600, /etc/tokiwa/agent.env (una línea: TOKIWA_AGENT__INGEST_TOKEN=tkw_...)
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **No pase los tokens de API como argumentos de línea de comandos, como `--token tkw_...`.** Los argumentos son visibles para otros usuarios
+  del mismo host mediante `ps`, y para los administradores de Docker mediante `docker inspect`. Use `--token-file` para Gate (se vuelve a leer
+  cuando cambia) y la variable de entorno `TOKIWA_AGENT__INGEST_TOKEN` para Agent (`--env-file` o el `.env` de compose). Los pasos están en `docs/deploy.md` §4.
 - A los roles sin HTTP (agent / sim) se les añade `TOKIWA_HEALTHCHECK_URL=none`. La comprobación de estado de Gate es
   `http://127.0.0.1:8080/__tokiwa/health`.
 - Agent puede necesitar privilegios equivalentes a root para leer la información de procesos de otros usuarios (la imagen no se ejecuta como root).
@@ -127,6 +132,7 @@ se autentican con tokens de API: excluya esas rutas o haga que los sensores apun
 
 Hay que guardar dos cosas: la **base de datos** y la **clave de firma `secret.key`** (ambas en `/data`). Si se pierde `secret.key`,
 las sesiones iniciadas dejan de ser válidas (los tokens de API no se ven afectados, porque se guardan como hashes en la base de datos).
+Guarde también el anillo de claves de engaño `deception.key` (también en `/data`). Si se pierde, cambian las credenciales falsas y los valores de canario de los señuelos, y los valores que un atacante ya obtuvo dejan de detectarse ([Engaño](Deception-es)).
 
 SQLite funciona en modo WAL, así que no copie el archivo directamente mientras está en funcionamiento; use la API de copia de seguridad en línea.
 
@@ -136,6 +142,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -145,11 +152,12 @@ Para restaurar, reemplace los archivos con el servicio detenido.
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-Con PostgreSQL, use `pg_dump -Fc` / `pg_restore` y guarde `secret.key` por separado.
+Con PostgreSQL, use `pg_dump -Fc` / `pg_restore` y guarde `secret.key` y `deception.key` por separado.
 
 ## Actualización
 

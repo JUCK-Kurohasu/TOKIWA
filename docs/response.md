@@ -21,22 +21,57 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
 | 取り消し | analyst 以上 | `revert_action()`（`active` かつ reversible のみ） |
 | 期限切れ | `@periodic("response.expiry", 30s)` | `expire_due_actions()`（`active` のみ。何も実行しない） |
 
-- すべての遷移を `record_audit` に記録（`response.propose / propose_duplicate / propose_rejected / approve /
-  execute / execute_failed / reject / revert / revert_failed / expire`）。
+- すべての遷移を `record_audit` に記録（`response.propose / propose_duplicate / propose_rejected / propose_suppressed /
+  auto_approve_suppressed / approve / execute / execute_failed / reject / revert / revert_failed / expire / suppress /
+  suppression_lift`）。
 - バス: 新規提案で `action.proposed`、以降の変化（重複マージ含む）は `action.updated`。
-- 重複: 同一 `(action_type, 正規化 target)` が `proposed / approved / active` なら新規作成せず、理由を追記して既存を返す。
+- 重複: 同一 `(action_type, 正規化 target)` が `proposed / approved / active` なら新規作成せず既存を返す。`proposed` なら理由を追記
+  （incident_id / alert_id が空なら補完）。**`approved` / `active` の行の `reason` は書き換えない**（監査 #130）: 後続の提案は
+  `notes`（`[{at, proposed_by, by, reason, incident_id, alert_id}]`、同文は積まない、最新 50 件・各 2000 文字まで）に積む。
+- 承認時に `result.approval_snapshot`（type・target・params・TTL・reason・incident/alert ID・提案元・`proposed_by_user`・承認者・時刻・
+  `self_approval`）を保存し、監査 `response.approve` の details にも同じ内容（reason は 1000 文字まで）を残す。
+- API からの提案は行の `proposed_by_user` に提案者のユーザー名を残す（rule / llm / policy は null）。承認者と同じなら
+  UI に「自己承認」と表示する（二人承認の強制はまだ無い）。
 - 起動時、`approved` のまま `executed_at` が無い行（実行中にプロセス停止）は `failed` にする（**自動再実行しない**）。
+- 却下・取り消しは **抑止**（下記 1.1）を記録する。抑止中の対象は再提案されない／自動承認されない。
 - 実行直前に現在の設定で **再検証** する（提案後に protected_cidrs を追加した場合などは `failed`）。
+- **有効な対処も現在の設定で再検証する**（監査 #64）。Gate ポリシーは配信のたびに各 `active` 行を
+  `validate_network_target` に通し、不合格（後から protected_cidrs に追加した範囲・サーバー自身・min_prefix・
+  block_private_targets）は配信しない。行は期限切れジョブ（30 秒ごと）と起動時に `reverted` にし
+  （監査 `response.auto_revert`、actor `system:settings`、`result.auto_reverted.reason`）、executor の revert を呼ぶ
+  （nftables_block の要素もここで消える）。`GET /gate/status` も同じ行の集合で反映状況を数える。
 - 取り消しは先に状態を `reverted` にしてから executor.revert を呼ぶ（Gate は次のポーリングで即解除）。
   revert が失敗したら `active` に戻し `result.revert_error` を記録、API は 502。
 - 期限切れは状態を `expired` にしてから revert。revert 失敗は `result.revert_error` に記録（nft 要素はカーネル側 timeout でも消える）。
+
+### 1.1 抑止（suppression、監査 #63）
+
+重複判定は未完了の行（proposed / approved / active）しか見ないので、以前は却下・取り消しした `(型, 対象)` が次のアラートの
+トリアージで再提案され、自動承認が有効な型では取り消した誤遮断がすぐ再適用されていた。人間の判断を `response_suppressions`
+テーブル（`respond/suppress.py`）に残し、`create_proposal` が同じトランザクション内で照合する。
+
+| mode | いつ作られるか | 提案元 rule / llm / policy | 提案元 user（API） |
+|---|---|---|---|
+| `suppress` | 却下・取り消しで「N 時間 / 恒久的に再提案しない」を選んだとき、`POST /response/suppressions` | **作らない**（行・バス・承認依頼通知なし。監査 `response.propose_suppressed`、`hits` 加算） | 作るが **自動承認しない**（`result.suppression`） |
+| `manual_only` | 上記の指定がない却下・取り消し **すべて**（`response.auto_approve_cooldown_minutes`、既定 1440 分。0 で無効） | 作るが自動承認しない | 同左 |
+
+- 照合: 型が同じで、対象が一致（IP / CIDR は **重なり**: 抑止した /24 の中のホスト、抑止したホストを含む広い CIDR も該当）。
+  型が違えば別扱い（block_ip を抑止しても rate_limit は提案される）。期限切れ・解除済みは無視。
+- 自動承認されなかった場合は `response.auto_approve_suppressed`（自動承認が許可されている型のときだけ）。
+- 監査 #133: 提案の根拠（`alert_id` のアラート、なければ `incident_id` の全アラート）が、`details.provenance` が `passive` / `induced` の
+  `deception.*` か、証拠イベントがすべてブラウザ誘発（`deception.provenance.induced_by`。第三者ページの `<img src=/.env>` で立つ
+  `web.sensitive_file_probe` など）のアラートだけなら、自動承認しない（`response.auto_approve_withheld`、details に該当アラート ID）。
+  クライアントは `Sec-Fetch-*` を自分で付けられるので、重大度は下げず提案も残す（人間が判断する）。
+- 一覧 `GET /response/suppressions`、解除 `POST /response/suppressions/{id}/lift`（analyst）。対処画面の「抑止」タブから解除できる。
+- 取り消しの executor が失敗して `active` に戻っても抑止は残る（抑止は提案を止めるだけで何も実行しない）。
+- 期限切れ（TTL）は人間の判断ではないので抑止を作らない。
 
 ## 2. 安全性（FR-12）
 
 1. **承認なしに実行されない**。`_execute()` は DB の行が `approved` かつ `approved_by` / `approved_at` 付きでなければ拒否。
    `approved` にするのは `approve_action()` だけで、呼び出し元は
    (a) `POST /response/actions/{id}/approve`（`AnalystUser`）と
-   (b) `create_proposal()` 内の `if auto_approve_allowed(...)` のみ。
+   (b) `create_proposal()` 内の `if auto_approve_allowed(...) and hold is None`（一致する抑止が無いとき）のみ。
 2. 自動承認は **2 キー**: `response.auto_approve_enabled = true` **かつ** 型が `response.auto_approve_actions` に含まれる。
    既定は off / 空。承認者は `approved_by = "policy"`。
 3. executor が受け取るのは `ExecutionRequest`（正規化 IP/CIDR・パス・識別子、許可キーの型付き params、TTL 秒、
@@ -64,6 +99,11 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
 | deploy_canary | 絶対パス `/[A-Za-z0-9._~/-]*`（`..` `//` 不可） | `kind` ∈ decoy_path / honeytoken / ai_canary（既定 decoy_path） | 同上 |
 | notify | IP / CIDR（正規化のみ）または識別子 `[A-Za-z0-9][A-Za-z0-9._:/@-]*` | `channel_id`（32 hex または `default`、任意） | なし（指定は無視・note） |
 | webhook | IP / CIDR（ネットワーク対象と同じ保護チェック）または識別子 | `endpoint` = `response.webhook_urls` のキー（既定 `default`） | なし |
+
+tarpit は **防御側の資源も消費する**（Gate は要求ごとに接続とタスクを最大 30 秒保持する）。Gate は同時に保持する数を
+`gate.tarpit_max_concurrent`（既定 256）/ `gate.tarpit_max_per_client`（同じ IP、既定 8）で制限し、超えた分には 429 を返す。
+待っている間にクライアントが切断すれば保持をやめる（監査 #99。docs/gate.md §2）。共有 IP（NAT）や大量の IP に tarpit を
+かけるより、rate_limit / block_ip の方が安い場面が多い。
 
 ネットワーク対象の拒否条件:
 - IP/CIDR として解釈できない（ホスト名・空白・`;`・スコープ ID `%` 等）。
@@ -109,8 +149,13 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
   期限切れジョブ実行前でも期限を過ぎたものは含めない。
 - `blocked` / `deceive`: アドレスファミリごとに `ipaddress.collapse_addresses`（重複・内包・隣接を統合）、v4 → v6 の昇順。
 - `rate_limited`: 同一キーは最小 rpm（厳しい方）。`tarpit`: 同一キーは最大 ms（上限 30000）。
-- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。例外時はデコイ無しで配信（遮断は止めない）。
-- `version`: 上記内容（`generated_at` を除く）の正規化 JSON の SHA-256。内容が同じなら同じ値。
+- `decoys` / `html_injection`: `tokiwa.deception.policy.build_gate_decoys()` の結果。`html_injection_positions`: `deception.policy.html_injection_positions()`（挿入があるときだけ。version に含む）。例外時はデコイ無しで配信（遮断は止めない）。
+- `entry_expires_at`（監査 #64）: `{"blocked"|"rate_limited"|"tarpit"|"deceive": {エントリ: expires_at}}`。
+  統合されたエントリは寄与した行の **最も遅い** 期限、期限なしの行が 1 つでもあればエントリごと省略（期限なし）。
+  Gate は `受信時刻 + (expires_at - generated_at)`（単調時計）でエントリを外すので、サーバーに届かない間
+  （fail-static）も、Gate の時計がずれていても TTL を超えて強制しない。古い Gate はこのフィールドを無視する。
+- `version`: 上記内容（`generated_at` を除く。`entry_expires_at` は空でなければ、`html_injection_positions` は挿入があるときに含む）の
+  正規化 JSON の SHA-256。内容が同じなら同じ値。同じエントリの期限だけが延びた場合も変わる。
 - `ETag: "<version>"` を返す。`If-None-Match` が一致すれば 304（本文なし）。Gate は使わなくてもよい。
 
 ## 6. 通知（`notify/`）
@@ -134,14 +179,35 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | kind | config | ペイロード |
 |---|---|---|
 | webhook | `url`, `headers`（任意、値は秘密） | `{source:"tokiwa", kind, severity, title, text, url, fields, data, sent_at}` |
-| slack | `url`（Incoming Webhook） | `{text, blocks:[header, section(mrkdwn), section(fields), context(link)]}`。`< > &` をエスケープ（`<!channel>` 等を無効化） |
-| discord | `url` | `{username:"TOKIWA", embeds:[{title, description, url, color, fields, timestamp}], allowed_mentions:{parse:[]}}` |
+| slack | `url`（Incoming Webhook） | `{text, mrkdwn:false, blocks:[header, section(plain_text), section(plain_text fields), context(link)]}`。`< > &` をエスケープ（`<!channel>` 等を無効化） |
+| discord | `url` | `{username:"TOKIWA", embeds:[{title, description, url, color, fields, timestamp}], allowed_mentions:{parse:[]}}`。title・description・field 値は Markdown をバックスラッシュでエスケープ |
 | email | `host, port(587), from_addr, to_addrs[], username?, password? / password_env?, starttls(true), ssl(false), timeout_seconds` | text/plain。smtplib を `asyncio.to_thread` で実行 |
 
+- **非信頼テキスト（監査 #128 / #168）**: タイトル・本文・フィールド値には攻撃者が制御できる断片（パス、IDS の message、LLM が書いた
+  理由）が入りうる。人が読むチャネル（Slack・Discord・メール）では本文中の URL を無害化（`https://` → `hxxps://`、自動リンクさせない）、
+  Discord は Markdown（マスクリンク `[文言](URL)`・強調・見出し）をエスケープ、Slack は `plain_text` で送る。TOKIWA 自身の UI リンク
+  （`notify.public_ui_url`）だけはリンクのまま。Webhook は機械向けなので生の文字列。双方向制御文字・ゼロ幅文字は全チャネルで除去。
+  TODO(verify): Discord の embed タイトルで Markdown が描画されるか（されなければバックスラッシュが見える）、Slack の plain_text で
+  `&amp;` が復号されるか・スキーム無しのドメインが自動リンクされるか、Incoming Webhook が最上位の `mrkdwn:false` を解釈するか。
+- **LLM の自由文**（インシデント要約・対処の `reason`）は `notify.include_summary=true` のときだけ載せる（既定 false。承認依頼は
+  種類・対象・TTL・提案元・状態と UI リンクのみ）。`notify.include_source_ip=false` で送信元 IP と IP / CIDR の対処対象を `(hidden)` に
+  （Webhook の `data` からも外す。重複抑制のキーには内部で使う）。
 - 秘密のマスク: `url` → `https://<host>/********`、`password` → `********`、`headers` の値 → `********`。
-  PATCH でマスク値をそのまま返すと既存の秘密を保持する。エラーメッセージに URL のパス（トークン）を含めない。
-- メールのパスワードは `password_env`（環境変数名）推奨（DB に秘密を置かないため）。
-- SMTP にはプライベート宛先拒否を適用しない（社内リレーが一般的なため）。
+  PATCH でマスク値をそのまま返すと既存の秘密を保持する。ただし **宛先が同じときだけ**（監査 #118）: メールは host / port /
+  username、webhook は url が変わったらマスク値の秘密は引き継がず 422（再入力を求める）。エラーメッセージに URL のパス（トークン）を含めない。
+- 監査ログ: チャネルの作成・削除に `destination`（`scheme://host[:port]` / `smtp://host:port`）、更新で宛先が変わったら
+  `destination: {before, after}`。
+- メールのパスワードは `password_env`（環境変数名）推奨（DB に秘密を置かないため）。**使える名前は `TOKIWA_NOTIFY_SMTP_*` /
+  `TOKIWA_SMTP_PASSWORD*` と `notify.smtp_password_envs` に列挙したものだけ**（#118。以前は任意の環境変数を読めたため、
+  admin セッションから `ANTHROPIC_API_KEY` や `TOKIWA_DATABASE__URL` を任意の SMTP サーバーへ送らせられた）。
+  `TOKIWA_<セクション>__*`（TOKIWA 自身の設定）と `ANTHROPIC_` / `OPENAI_` / `AWS_` / `AZURE_` / `GOOGLE_` / `GCP_` / `GITHUB_` /
+  `GH_` / `HF_` / `HUGGING` / `NVD_` / `DATABASE_` / `POSTGRES` / `PG` で始まる名前は列挙しても拒否。保存時は 422、
+  許可リスト導入前に保存されたチャネルは送信時に理由付きで失敗（ログイン・接続をしない）。
+- ユーザー名付き（SMTP AUTH）は `starttls` か `ssl` が必須（`notify.smtp_allow_plaintext_auth=true` で平文 AUTH を許可）。
+- SMTP ホストの制限: `notify.smtp_allowed_hosts`（空なら制限なし）、`notify.smtp_block_private`（既定 false。社内リレーが
+  一般的なため）。名前解決結果への接続固定はしていない（webhook と同じく DNS リバインディングは残存リスク）。
+- 送信エラーは種類だけ返す（`SMTP connection failed` / `SMTP authentication failed` / `SMTP error`）。例外型を返すと
+  テスト送信ボタンが内部ポートの探索に使えるため。
 
 ### SSRF ガード（webhook / slack / discord / webhook executor 共通: `notify/outbound.py`）
 
@@ -158,8 +224,9 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | キー | 既定 | 意味 |
 |---|---|---|
 | auto_approve_enabled / auto_approve_actions | false / [] | 自動承認の 2 キー |
+| auto_approve_cooldown_minutes | 1440 | 人間が却下・取り消した型 + 対象は、この時間自動承認しない（0 で無効。§1.1） |
 | default_ttl_minutes / max_ttl_minutes | 60 / 10080 | TTL 既定と上限（超過は切り詰め、`result.validation_notes` に記録） |
-| protected_cidrs | 127.0.0.0/8, ::1/128 | 絶対に対象にしない範囲（管理端末・監視系・上流 LB を足す） |
+| protected_cidrs | 127.0.0.0/8, ::1/128 | 絶対に対象にしない範囲（管理端末・監視系・上流 LB を足す）。追加すると **有効な対処からも** 次の配信で外れ、30 秒以内（または再起動時）に `reverted` |
 | protect_server_addresses | true | サーバー自身の IP を保護 |
 | block_private_targets | false | プライベート宛を拒否（本番の管理網保護） |
 | min_prefix_v4 / min_prefix_v6 | 16 / 48 | 広すぎる CIDR の拒否 |
@@ -169,8 +236,10 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 | nftables_enabled / nftables_binary | false / nft | nft executor |
 
 `notify.*`（`NotifySettings`）: `default_webhook_url`, `default_min_severity`, `public_ui_url`, `language`（both）,
-`dedup_minutes`（10）, `notify_action_proposals`（true）, `allowed_hosts`, `block_private_destinations`（true）,
-`http_timeout_seconds`（10）。
+`dedup_minutes`（10）, `notify_action_proposals`（true）, `include_summary`（false）, `include_source_ip`（true）,
+`allowed_hosts`, `block_private_destinations`（true）,
+`http_timeout_seconds`（10）, `smtp_password_envs`（[]）, `smtp_allowed_hosts`（[]）, `smtp_block_private`（false）,
+`smtp_allow_plaintext_auth`（false）。
 
 ## 8. API
 
@@ -182,7 +251,9 @@ TODO(verify): 対象ディストリの nft バージョンで上記構文と、�
 
 ## 9. 既知の制約・今後
 
-- 二人承認（提案者と別人の承認）は未実装。必要なら `approve_action` で `actor != 提案者` を強制する。
+- 二人承認（提案者と別人の承認）は未実装。自己承認は `proposed_by_user == approved_by`（UI のバッジ・
+  `approval_snapshot.self_approval`）で見えるようにした（#130）。強制するなら `approve_action` で `actor != proposed_by_user` を拒否する。
 - deception の `create_asset` / `delete_asset` の正式な関数名は deception モジュールと要合意（現状はダックタイピング）。
 - 通知の重複抑制・インシデント重大度の記憶はプロセス内メモリ（複数プロセス構成では共有されない）。
-- `action.proposed` の承認依頼に含める提案理由（LLM 由来の可能性あり）は人間向け表示のみ。エスケープ・長さ制限済み。
+- `action.proposed` の承認依頼に提案理由（LLM 由来の可能性あり）を含めるのは `notify.include_summary=true` のときだけ。
+  含める場合もチャネルごとにエスケープ・URL 無害化・長さ制限済み。

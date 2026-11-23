@@ -14,6 +14,7 @@ from tokiwa.db.models.core import AuditRow, UserRow
 from tokiwa.db.models.response import ResponseActionRow
 from tokiwa.db.session import session_scope
 from tokiwa.llm.mock import MockProvider
+from tokiwa.triage.prompts import TRIAGE_INCIDENT
 from tokiwa.util import new_id, utcnow
 
 AddAlert = Callable[..., Awaitable[Any]]
@@ -204,7 +205,7 @@ async def test_incidents_api(
 
     r = await client.post(f"/api/v1/incidents/{inc.id}/triage", headers=admin_headers)
     assert r.status_code == 200, r.text
-    assert r.json()["triage"]["prompt_version"] == "triage.incident@1"
+    assert r.json()["triage"]["prompt_version"] == TRIAGE_INCIDENT.ref
     assert r.json()["status"] == "investigating"  # triage never changes the analyst-owned status
     assert "incident.triage" in await _audit_actions()
     viewer = await _viewer_headers()

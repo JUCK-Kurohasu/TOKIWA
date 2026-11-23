@@ -10,13 +10,108 @@ them to the LLM without :mod:`tokiwa.llm.redact` + the untrusted-data envelope i
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tokiwa.util import new_id, utcnow
+
+# --- size caps (audit #57) -------------------------------------------------------------------------------
+# Every string in an event (including header values, label values and list items) is cut to this many
+# characters. Oversized values are *truncated, not rejected*, so one absurd field never costs the rest of the
+# event (or the batch) its detection. The cap must stay >= every detector's per-field inspection window, or
+# the truncation itself becomes a way to push a payload out of view (audit #21): Sigma matches up to 65,536
+# chars per field (tokiwa.detect.sigma.evaluator.MAX_MATCH_CHARS), detect-web up to
+# ``detection.web.max_inspect_chars`` (default 8192). tests/core/test_event_limits.py pins this relation.
+EVENT_FIELD_MAX_CHARS = 65_536
+# ``raw`` (kept for forensics only) is capped by its JSON size; adapters already keep 4 KiB
+# (tokiwa.sensors.normalize.truncate_raw) and the oversized form below is the same shape they use.
+EVENT_RAW_MAX_BYTES = 65_536
+# Marks on a truncated event: a tag for filtering, and a label listing "<field>:<original length>".
+TRUNCATED_TAG = "truncated"
+TRUNCATED_LABEL = "tokiwa.truncated"
+_TRUNCATED_LABEL_MAX = 1024
+
+
+def _cut(value: str, path: str, clipped: list[str]) -> str:
+    clipped.append(f"{path}:{len(value)}")
+    return value[:EVENT_FIELD_MAX_CHARS]
+
+
+# The walkers below run on every Event validation (5000 per ingest request), so they avoid per-field function
+# calls and string formatting unless something actually has to be cut.
+
+
+def _clip_model(model: BaseModel, prefix: str, clipped: list[str], skip: str | None = None) -> None:
+    fields = model.__dict__
+    for (
+        name,
+        item,
+    ) in fields.items():  # values of existing keys are replaced in place: no resize while iterating
+        if isinstance(item, str):
+            if len(item) > EVENT_FIELD_MAX_CHARS:
+                fields[name] = _cut(item, prefix + name, clipped)
+        elif isinstance(item, BaseModel):
+            _clip_model(item, f"{prefix}{name}.", clipped)
+        elif isinstance(item, list | dict) and item and name != skip:
+            new = _clip_container(item, prefix + name, clipped)
+            if new is not item:
+                fields[name] = new
+
+
+def _clip_container(value: list[Any] | dict[Any, Any], path: str, clipped: list[str]) -> Any:
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            if isinstance(item, str):
+                if len(item) > EVENT_FIELD_MAX_CHARS:
+                    value[i] = _cut(item, path + "[]", clipped)
+            elif isinstance(item, BaseModel):
+                _clip_model(item, path + "[].", clipped)
+            elif isinstance(item, list | dict) and item:
+                value[i] = _clip_container(item, path + "[]", clipped)
+        return value
+    changed = False
+    out: dict[Any, Any] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and len(key) > EVENT_FIELD_MAX_CHARS:
+            key = _cut(key, path + "{}", clipped)
+            changed = True
+        if isinstance(item, str):
+            if len(item) > EVENT_FIELD_MAX_CHARS:
+                item = _cut(item, path + "{}", clipped)
+                changed = True
+        elif isinstance(item, BaseModel):
+            _clip_model(item, path + "{}.", clipped)
+        elif isinstance(item, list | dict) and item:
+            new = _clip_container(item, path + "{}", clipped)
+            changed = changed or new is not item
+            item = new
+        out[key] = item
+    return out if changed else value
+
+
+def _clip_raw(raw: dict[str, Any], clipped: list[str]) -> dict[str, Any]:
+    text_field = raw.get("text")
+    if (
+        raw.get("_truncated") is True
+        and set(raw) <= {"_truncated", "_bytes", "text"}
+        and isinstance(text_field, str)
+        and len(text_field.encode("utf-8")) <= EVENT_RAW_MAX_BYTES
+    ):
+        return raw  # already in the truncated form (re-validation of a stored event): keep it as is
+    try:
+        text = json.dumps(raw, ensure_ascii=False, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):  # e.g. circular references from an in-process caller
+        text = repr(raw)
+    size = len(text.encode("utf-8"))
+    if size <= EVENT_RAW_MAX_BYTES:
+        return raw
+    clipped.append(f"raw:{size}")
+    head = text.encode("utf-8")[:EVENT_RAW_MAX_BYTES].decode("utf-8", errors="ignore")
+    return {"_truncated": True, "_bytes": size, "text": head}
 
 
 class EventKind(StrEnum):
@@ -157,6 +252,24 @@ class Event(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     # Original record (truncated) for forensics. Never sent to the LLM as-is.
     raw: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _cap_sizes(self) -> Self:
+        """Truncate oversized strings / ``raw`` (see EVENT_FIELD_MAX_CHARS) and mark the event when it happens.
+
+        Runs on every validation (ingest, in-process construction, DB reads); it is idempotent, and an event that
+        needed no cut is left untouched, so a mark stored at ingest survives re-reads. Tags and labels are
+        sender-controlled, so the mark is informational, not proof.
+        """
+        clipped: list[str] = []
+        _clip_model(self, "", clipped, skip="raw")
+        if self.raw:
+            self.raw = _clip_raw(self.raw, clipped)
+        if clipped:
+            if TRUNCATED_TAG not in self.tags:
+                self.tags.append(TRUNCATED_TAG)
+            self.labels[TRUNCATED_LABEL] = ",".join(clipped)[:_TRUNCATED_LABEL_MAX]
+        return self
 
     @property
     def source_ip(self) -> str | None:

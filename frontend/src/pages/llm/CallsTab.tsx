@@ -12,7 +12,7 @@ import { ApiErrorState, LoadingRows, QueryView } from "@/components/common/Query
 import { useCan } from "@/components/common/RoleGate";
 import { useUrlParams } from "@/components/common/urlState";
 import { Badge, Card, Dialog, EmptyState, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
-import { formatDateTime, formatNumber, formatUsd, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatDateTime, formatNumber, formatUsd, timeAgo } from "@/lib/format";
 import { useLang, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -27,12 +27,16 @@ const strings = {
     model: "モデル",
     tokens: "トークン（入力 / 出力）",
     cost: "費用",
+    estimated: "見積もり: 料金表にないモデル",
+    estimatedHint: "料金表にないモデルのため、最も高い既知単価で見積もった費用です（llm.pricing で設定）",
     latency: "応答時間",
     related: "関連",
     empty: "LLM 呼び出しの記録はありません",
     detail: "LLM 呼び出しの詳細",
     adminOnly: "入力・出力の詳細は管理者のみ閲覧できます。",
     provider: "プロバイダ",
+    mock: "mock（LLM 未使用）",
+    mockRequested: "mock が応答（LLM 未使用）。設定上のモデル: {model}",
     promptVersion: "プロンプト版",
     cache: "キャッシュ（読込 / 書込）",
     webSearch: "Web 検索回数",
@@ -50,12 +54,17 @@ const strings = {
     model: "Model",
     tokens: "Tokens (in / out)",
     cost: "Cost",
+    estimated: "estimate: model not in the pricing table",
+    estimatedHint:
+      "Model not in the pricing table: cost estimated at the highest known rates (set llm.pricing)",
     latency: "Latency",
     related: "Related",
     empty: "No LLM calls recorded",
     detail: "LLM call detail",
     adminOnly: "Request/response details are visible to administrators only.",
     provider: "Provider",
+    mock: "mock (no LLM used)",
+    mockRequested: "Answered by mock (no LLM used). Configured model: {model}",
     promptVersion: "Prompt version",
     cache: "Cache (read / write)",
     webSearch: "Web searches",
@@ -179,11 +188,21 @@ function CallDetailDialog({ id, row, onClose }: { id: string; row?: LLMCall; onC
                 [L.provider, c.provider],
                 [
                   L.model,
-                  <span key="m" className="font-mono text-xs">
-                    {c.model}
-                  </span>,
+                  c.provider === "mock" ? (
+                    <span
+                      key="m"
+                      className="text-xs text-sev-medium"
+                      title={L.mockRequested.replace("{model}", c.model)}
+                    >
+                      {L.mock}
+                    </span>
+                  ) : (
+                    <span key="m" className="font-mono text-xs">
+                      {c.model}
+                    </span>
+                  ),
                 ],
-                [L.tier, c.tier],
+                [L.tier, c.provider === "mock" ? "-" : c.tier],
                 [
                   L.promptVersion,
                   <span key="p" className="font-mono text-xs">
@@ -193,7 +212,12 @@ function CallDetailDialog({ id, row, onClose }: { id: string; row?: LLMCall; onC
                 [L.tokens, `${formatNumber(c.input_tokens)} / ${formatNumber(c.output_tokens)}`],
                 [L.cache, `${formatNumber(c.cache_read_tokens)} / ${formatNumber(c.cache_write_tokens)}`],
                 [L.webSearch, formatNumber(c.web_search_requests)],
-                [L.cost, formatUsd(c.cost_usd)],
+                [
+                  L.cost,
+                  c.cost_basis === "unpriced"
+                    ? `${formatUsd(c.cost_usd)} (${L.estimated})`
+                    : formatUsd(c.cost_usd),
+                ],
                 [L.latency, `${formatNumber(Math.round(c.latency_ms))} ms`],
                 [L.related, <RelatedChips key="r" related={c.related} />],
               ] as const
@@ -305,7 +329,7 @@ export function CallsTab() {
                 <TBody>
                   {page.items.map((c) => (
                     <TR key={c.id} className="cursor-pointer" onClick={() => update({ call: c.id })}>
-                      <TD className="whitespace-nowrap text-xs" title={formatDateTime(c.created_at)}>
+                      <TD className="whitespace-nowrap text-xs" title={dateTimeTitle(c.created_at)}>
                         <button
                           type="button"
                           className="hover:text-accent hover:underline"
@@ -318,10 +342,24 @@ export function CallsTab() {
                         </button>
                       </TD>
                       <TD className="text-xs">{c.purpose}</TD>
+                      {/* #151: a mock answer must not read as "deep / <real model> / ok". */}
                       <TD>
-                        <Badge tone={c.tier === "deep" ? "ai" : "neutral"}>{c.tier}</Badge>
+                        {c.provider === "mock" ? (
+                          <Badge tone="warn">mock</Badge>
+                        ) : (
+                          <Badge tone={c.tier === "deep" ? "ai" : "neutral"}>{c.tier}</Badge>
+                        )}
                       </TD>
-                      <TD className="font-mono text-[11px]">{c.model}</TD>
+                      {c.provider === "mock" ? (
+                        <TD
+                          className="text-[11px] text-sev-medium"
+                          title={L.mockRequested.replace("{model}", c.model)}
+                        >
+                          {L.mock}
+                        </TD>
+                      ) : (
+                        <TD className="font-mono text-[11px]">{c.model}</TD>
+                      )}
                       <TD>
                         <CallStatusBadge status={c.status} />
                       </TD>
@@ -333,7 +371,13 @@ export function CallsTab() {
                           </div>
                         )}
                       </TD>
-                      <TD className="text-right text-xs tabular-nums">{formatUsd(c.cost_usd)}</TD>
+                      <TD
+                        className="text-right text-xs tabular-nums"
+                        title={c.cost_basis === "unpriced" ? L.estimatedHint : undefined}
+                      >
+                        {formatUsd(c.cost_usd)}
+                        {c.cost_basis === "unpriced" && <span className="text-sev-medium">*</span>}
+                      </TD>
                       <TD className="text-right text-xs tabular-nums">
                         {formatNumber(Math.round(c.latency_ms))} ms
                       </TD>

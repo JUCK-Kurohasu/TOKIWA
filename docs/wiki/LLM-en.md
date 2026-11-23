@@ -36,8 +36,21 @@ You can also enter it under **LLM → Settings** in the Web UI (write-only; it i
 **stored in plain text in the DB**. Be careful with how you handle DB backups, and use the environment variable if you can.
 The key is never written to logs, the audit log, or LLM input.
 
+**Limits when the endpoint URL (`llm.anthropic_base_url` / `llm.openai_base_url`) is changed from the UI or API**: `https://` is
+required; `http://` is allowed only for `localhost` / `127.0.0.1` / `::1`. Link-local addresses (`169.254.0.0/16`, `fe80::/10`) and
+cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`, … including decimal and hex spellings) are refused.
+**An API key is bound to the endpoint it was entered for**: changing the URL in the UI invalidates the stored key, and no key
+(not even the one from the environment) is sent until you enter the key for the new endpoint. You can enter the URL and the key
+in the same save. To use plain HTTP to a host other than localhost (e.g. `http://ollama:11434/v1`), set it through an environment
+variable or `tokiwa.yaml` (static settings are not restricted).
+
 After setting it, you can check it with **LLM → Settings → Connection test** (it makes one minimal structured call per tier, fast and deep, which counts against the budget and is audited).
 If the result's **Provider** is `mock`, no real API was called (the provider setting may still be `mock`). "Current status" shows the provider actually in use as well as the configured one.
+
+While the provider actually in use is `mock` (including the fallback of `auto` when no API key is set) or the provider is unavailable,
+a **"No LLM is in use"** strip is always shown at the top of every screen. Triage results returned by the mock show **mock (no LLM used)**
+instead of a model name and tier in the alert / incident "LLM triage" panel and in the LLM **Calls** log. Response proposals made from a mock verdict
+are labelled **Rule** instead of **LLM** (proposals created before this change keep their label).
 
 ## Models and tiers
 
@@ -70,7 +83,14 @@ Only alerts at or above `triage.min_severity_for_llm` (default medium) are sent 
 - **LLM → Usage** shows cost and call counts by day and by purpose. The Dashboard also shows today's cost.
 - Actual cost depends heavily on traffic volume, the severity distribution of alerts, and model settings. We recommend that you **start with a small budget,
   measure actual usage on the Usage page,** and then adjust (cost with a real LLM has not been evaluated yet).
-- You can override the price table used for cost calculation with `llm.pricing`.
+- You can override or extend the price table used for cost calculation with `llm.pricing` (USD per 1M tokens, e.g.
+  `{"my-model": {"input": 3, "output": 15}}`). Dated snapshot IDs (`claude-opus-5-5-20261001`, `claude-opus-4-5@20251101`) and
+  Bedrock-style IDs (`us.anthropic.…-v1:0`) are priced like the base model.
+- **A model missing from the price table is not free**. So that the budget always applies, it is estimated at the highest
+  rate in the table and counted as "calls to models not in the pricing table" under **LLM → Usage** (the settings page warns too).
+  For a **free local LLM** (Ollama etc. through `openai_compat`), register it at zero in `llm.pricing`
+  (e.g. `{"llama3.1:8b": {"input": 0, "output": 0}}`) or set `llm.daily_budget_usd: 0` (no budget). Otherwise the estimated cost
+  reaches the daily budget and TOKIWA switches to rule-based decisions.
 
 ## Designed for safety
 

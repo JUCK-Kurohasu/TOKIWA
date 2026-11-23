@@ -13,7 +13,7 @@ from tokiwa.detect.context import DetectionContext
 from tokiwa.eval.dataset import Truth, generate_events, read_dataset, split_truth, write_dataset
 from tokiwa.eval.harness import ReplayOptions, RunResults, make_batches
 from tokiwa.eval.metrics import compute_metrics, percentile, roc_auc
-from tokiwa.eval.profiles import PROFILES
+from tokiwa.eval.profiles import TUNED_PROFILES
 from tokiwa.eval.report import compare_runs, run_evaluation
 from tokiwa.schemas.alerts import AlertCategory, AlertDraft
 from tokiwa.schemas.common import Severity
@@ -47,7 +47,8 @@ class _EvalQuoteDetector(Detector):
 @pytest.fixture
 async def small_dataset(tmp_path: Path) -> Path:
     path = tmp_path / "ds.jsonl"
-    write_dataset(path, await generate_events(dict.fromkeys(PROFILES, 1), seed=21), {"seed": 21})
+    # the five scripted profiles only: the holdout ones (#127) are deliberately harder
+    write_dataset(path, await generate_events(dict.fromkeys(TUNED_PROFILES, 1), seed=21), {"seed": 21})
     return path
 
 
@@ -79,6 +80,12 @@ async def test_eval_run_end_to_end(settings: Settings, small_dataset: Path, tmp_
     doc2 = await run_evaluation(small_dataset, run2, ReplayOptions(detector_overrides=all_off), compare=run1)
     cmp_doc = doc2["comparison"]
     assert cmp_doc["has_regression"] and "detection.attack_session_rate" in cmp_doc["regressions"]
+    # ...but the two runs differ in their enabled detectors, so the pair is flagged as not comparable (#178)
+    assert not cmp_doc["comparable"]
+    assert any(m.startswith("detectors_enabled:") for m in cmp_doc["mismatches"])
+    assert doc["comparability"]["dataset_sha256"] == doc2["comparability"]["dataset_sha256"]
+    assert doc["comparability"]["dataset_seed"] == 21
+    assert doc["comparability"]["sigma_rules_loaded"] == m["pipeline"]["sigma_rules_loaded"] >= 20
     assert "Regression check" in (run2 / "report.md").read_text(encoding="utf-8")
     assert json.loads((run2 / "metrics.json").read_text())["comparison"]["previous_run"] == "r1"
 
@@ -192,8 +199,27 @@ def test_metrics_attribution_and_llm_agreement() -> None:
     ai = m["ai_attribution"]
     assert (ai["tp"], ai["fp"], ai["fn"]) == (1, 0, 0) and ai["auc"] == 1.0
     assert ai["confusion"]["ai_agent"] == {"ai_agent": 1}
-    assert m["llm"]["actor_agreement"] == 1.0 and m["llm"]["by_tier"] == {"fast": 1}
+    assert m["llm"]["actor_agreement"] == 1.0 and m["llm"]["by_tier_requested"] == {"fast": 1}
+    # RunResults defaults to the mock provider: every tier is the rule fallback (#176)
+    assert m["llm"]["by_tier"] == {"rules(mock)": 1} and m["llm"]["measures_llm"] is False
     assert m["cost"]["cost_per_alert_usd"] == round(0.01 / 3, 6)
+    # #175: alert z reached its session only through source_ip; every rate has x / n and an interval
+    assert m["alerts"]["attributed_by_ip_fallback"] == 1
+    assert {r["rule_id"]: r["ip_fallback"] for r in m["per_detector"]} == {
+        "r.sqli": 0,
+        "r.noise": 0,
+        "r.ip": 1,
+    }
+    assert m["detection"]["attack_session_rate_medium_plus"] == 1.0  # high (ai) + medium (hum)
+    iv = m["intervals"]
+    assert (iv["detection.attack_session_rate"]["x"], iv["detection.attack_session_rate"]["n"]) == (2, 2)
+    assert (
+        iv["detection.benign_session_fpr"]["ci_low"] == 0.025
+        and iv["detection.benign_session_fpr"]["reference_only"]
+    )
+    assert iv["detection.event_recall"]["clustered"] is True
+    assert (iv["detection.event_recall"]["x"], iv["detection.event_recall"]["n"]) == (1, 3)
+    assert iv["per_profile.human.detection_rate_medium_plus"]["x"] == 1
     assert m["latency"]["batch_p50_ms"] == 2.0
 
 
@@ -220,3 +246,99 @@ async def test_dataset_roundtrip(tmp_path: Path) -> None:
     info = write_dataset(path, events, {"seed": 2})
     assert (tmp_path / "x.meta.json").is_file() and info["summary"]["sessions"] == 1
     assert [e.id for e in read_dataset(path)] == [e.id for e in events]
+
+
+def test_mock_llm_is_labelled_and_priced_as_an_estimate() -> None:
+    """#176: mock runs say they do not measure an LLM and price the estimated tokens; live runs keep raw tiers."""
+    from tokiwa.llm.base import LLMUsage
+    from tokiwa.llm.pricing import estimate_cost
+
+    truth = Truth.from_events([_ev("a1", "ai", "ai_agent", "sqli", "203.0.113.1")])
+    triage = {
+        "tier": "deep",
+        "result": {"actor_type": "ai_agent", "confidence": 0.9, "ai_agent_likelihood": 0.9},
+    }
+    calls = [
+        {
+            "model": "claude-opus-5-5",
+            "input_tokens": 4000,
+            "output_tokens": 200,
+            "status": "ok",
+            "purpose": "triage",
+        },
+        {
+            "model": "claude-haiku-5-5",
+            "input_tokens": 1000,
+            "output_tokens": 200,
+            "status": "ok",
+            "purpose": "triage",
+        },
+    ]
+    alerts = [{"id": "x", "rule_id": "r", "severity": "high", "evidence_event_ids": ["a1"], "triage": triage}]
+    mock = compute_metrics(truth, RunResults(alerts=alerts, llm_calls=calls, llm_provider="mock"))
+    expected = estimate_cost(
+        "claude-opus-5-5", LLMUsage(input_tokens=4000, output_tokens=200)
+    ) + estimate_cost("claude-haiku-5-5", LLMUsage(input_tokens=1000, output_tokens=200))
+    assert mock["cost"]["cost_usd"] == 0.0
+    assert mock["cost"]["estimated_cost_usd"] == round(expected, 6) and expected > 0
+    assert set(mock["cost"]["estimated_cost_by_model_usd"]) == {"claude-opus-5-5", "claude-haiku-5-5"}
+    assert mock["llm"]["by_tier"] == {"rules(mock)": 1} and mock["llm"]["by_tier_requested"] == {"deep": 1}
+    assert "not LLM quality" in mock["llm"]["caveat"]
+    # price overrides from llm.pricing are honoured
+    cheap = RunResults(
+        alerts=alerts,
+        llm_calls=calls,
+        llm_provider="mock",
+        llm_pricing={
+            "claude-opus-5-5": {"input": 0.0, "output": 0.0},
+            "claude-haiku-5-5": {"input": 0.0, "output": 0.0},
+        },
+    )
+    assert compute_metrics(truth, cheap)["cost"]["estimated_cost_usd"] == 0.0
+
+    live = compute_metrics(truth, RunResults(alerts=alerts, llm_calls=calls, llm_provider="anthropic"))
+    assert live["llm"]["by_tier"] == {"deep": 1} and live["llm"]["measures_llm"] is True
+    assert live["cost"]["estimated_cost_usd"] is None and live["llm"]["caveat"] is None
+
+
+def _pev(eid: str, session: str, actor: str, profile: str, ip: str) -> Event:
+    return Event(
+        id=eid,
+        kind=EventKind.HTTP,
+        dataset="gate.http",
+        source={"ip": ip},  # type: ignore[arg-type]
+        labels={"actor": actor, "profile": profile, "session": session, "attack": "sqli"},
+    )
+
+
+def test_metrics_split_by_generator() -> None:
+    """#174: scripted vs holdout vs imported sessions are reported separately."""
+    truth = Truth.from_events(
+        [
+            _pev("s1", "ai-1", "ai_agent", "ai_agent", "203.0.113.1"),
+            _pev("h1", "api-1", "ai_agent", "api_only_agent", "203.0.113.2"),
+            _pev("h2", "slow-1", "ai_agent", "slow_rotating_agent", "203.0.113.3"),
+            _pev("a1", "artex:gate", "ai_agent", "artex", "198.51.100.200"),
+            _pev("b1", "ben-1", "benign", "benign_browser", "203.0.113.4"),
+        ]
+    )
+    res = RunResults(
+        events=[{"id": e, "session_id": f"P{e}"} for e in ("s1", "h1", "h2", "a1", "b1")],
+        alerts=[
+            {"id": "x", "rule_id": "r", "severity": "high", "evidence_event_ids": ["s1"], "ai_score": 0.9},
+            {"id": "y", "rule_id": "r", "severity": "low", "evidence_event_ids": ["h1"], "ai_score": 0.2},
+        ],
+        sessions=[{"id": "Pa1", "ai_score": 0.8, "classification": "ai_agent", "request_count": 1}],
+    )
+    m = compute_metrics(truth, res, ai_threshold=0.7)
+    g = m["by_generator"]
+    assert set(g) == {"scripted", "holdout", "artex"}
+    assert (g["scripted"]["ai_recall"]["x"], g["scripted"]["ai_recall"]["n"]) == (1, 1)
+    assert (g["scripted"]["ai_fpr"]["x"], g["scripted"]["ai_fpr"]["n"]) == (0, 1)  # the benign session
+    assert (g["holdout"]["ai_recall"]["x"], g["holdout"]["ai_recall"]["n"]) == (0, 2)
+    # the holdout api agent only got a low alert: not a medium+ detection
+    assert g["holdout"]["attack_detection_medium_plus"]["x"] == 0
+    assert (g["artex"]["ai_recall"]["x"], g["artex"]["ai_recall"]["n"]) == (1, 1)
+    pp = m["ai_attribution"]["per_profile"]
+    assert pp["api_only_agent"]["holdout"] and not pp["ai_agent"]["holdout"]
+    assert pp["ai_agent"]["predicted_ai_rate"] == 1.0 and pp["api_only_agent"]["predicted_ai"] == 0

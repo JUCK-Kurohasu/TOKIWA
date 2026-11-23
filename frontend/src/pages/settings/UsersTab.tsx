@@ -1,11 +1,13 @@
-/** Users: list, create, delete (GET/POST /users, DELETE /users/{id}; admin). */
+/** Users: list, create, delete, revoke sessions (GET/POST /users, DELETE /users/{id},
+ * POST /users/{id}/revoke-sessions; admin). */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, KeySquare, Trash2, UserPlus, Users } from "lucide-react";
+import { Eye, EyeOff, KeySquare, LogOut, Trash2, UserPlus, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api } from "@/api/client";
 import { ROLES, type Role, type User, type UserCreate, type UserUpdate } from "@/api/types-core";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -24,7 +26,7 @@ import {
 } from "@/components/ui";
 import { errorMessage, useApiQuery } from "@/hooks/useApi";
 import { useCurrentUserId } from "@/hooks/useRole";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { type Flash, MutationError, RoleBadge } from "./shared";
 
@@ -48,6 +50,10 @@ const strings = {
     roleChanged: "ロールを変更しました",
     selfRole: "自分自身のロールはここでは変更できません",
     resetPw: "パスワード再設定",
+    revoke: "セッション失効",
+    revokeHint:
+      "このユーザーのログインをすべての端末で無効にします（パスワード・ロールの変更でも自動で失効します）",
+    revoked: "このユーザーのセッションを失効させました",
     newPassword: "新しいパスワード",
     pwChanged: "パスワードを変更しました",
     save: "保存",
@@ -83,6 +89,9 @@ const strings = {
     roleChanged: "Role updated",
     selfRole: "You cannot change your own role here",
     resetPw: "Reset password",
+    revoke: "Revoke sessions",
+    revokeHint: "Sign this user out on every device (changing the password or role does this too)",
+    revoked: "Sessions revoked",
     newPassword: "New password",
     pwChanged: "Password changed",
     save: "Save",
@@ -233,6 +242,11 @@ export function UsersTab({ flash }: { flash: Flash }) {
     },
     onError: (e) => flash(errorMessage(e), "danger"),
   });
+  const revoke = useMutation({
+    mutationFn: (id: string) => api.post<unknown>(`/users/${id}/revoke-sessions`),
+    onSuccess: () => flash(L.revoked),
+    onError: (e) => flash(errorMessage(e), "danger"),
+  });
   const setRole = useMutation({
     mutationFn: (v: { id: string; role: Role }) =>
       api.patch<User>(`/users/${v.id}`, { role: v.role } satisfies UserUpdate),
@@ -272,7 +286,7 @@ export function UsersTab({ flash }: { flash: Flash }) {
               <TH>{L.role}</TH>
               <TH className="hidden md:table-cell">{L.created}</TH>
               <TH>{L.lastLogin}</TH>
-              <TH className="w-[260px]" />
+              <TH className="w-[380px]" />
             </tr>
           </THead>
           <TBody>
@@ -308,9 +322,9 @@ export function UsersTab({ flash }: { flash: Flash }) {
                   )}
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
-                  {formatDateTime(u.created_at)}
+                  <Time iso={u.created_at} />
                 </TD>
-                <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(u.last_login)}>
+                <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(u.last_login)}>
                   {u.last_login ? timeAgo(u.last_login) : L.never}
                 </TD>
                 <TD className="whitespace-nowrap text-right">
@@ -318,6 +332,16 @@ export function UsersTab({ flash }: { flash: Flash }) {
                     <KeySquare className="h-3.5 w-3.5" />
                     {L.resetPw}
                   </Button>
+                  {u.id !== me && (
+                    <ConfirmButton
+                      onConfirm={() => revoke.mutate(u.id)}
+                      busy={revoke.isPending && revoke.variables === u.id}
+                      title={L.revokeHint}
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      {L.revoke}
+                    </ConfirmButton>
+                  )}
                   <ConfirmButton
                     onConfirm={() => del.mutate(u.id)}
                     disabled={u.id === me}

@@ -109,3 +109,46 @@ async def test_live_mode_refuses_public_targets_and_caps_requests() -> None:
             plans, target="http://127.0.0.1", time_scale=0.0, max_rps=0, max_requests=15, client=client
         )
     assert len(exchanges) == 15
+
+
+async def test_holdout_profiles_shapes_and_labels() -> None:
+    """#127: real-tool-shaped AI profiles that skip the scripted ai_agent hypotheses."""
+    import ipaddress
+
+    from tokiwa.eval import payloads as P
+    from tokiwa.eval.profiles import DEFAULT_MIX, HOLDOUT_PROFILES, ROTATION_POOL
+
+    assert {"api_only_agent", "slow_rotating_agent"} == HOLDOUT_PROFILES
+    assert not HOLDOUT_PROFILES & set(DEFAULT_MIX)  # existing seeds keep producing the same files
+    assert set(parse_mix("mixed", default_count=1)) == set(PROFILES) - HOLDOUT_PROFILES
+    assert set(parse_mix("all", default_count=1)) == set(PROFILES)
+
+    events = await generate_events(
+        {"api_only_agent": 2, "slow_rotating_agent": 2, "benign_browser": 2}, seed=9
+    )
+    planned_ips = {e.source_ip for e in events if e.labels["profile"] == "benign_browser"}
+    nl_markers = [*P.NL_PROBE_VALUES, *P.NL_COMMENTS]
+    for prof in sorted(HOLDOUT_PROFILES):
+        sessions = sorted({e.labels["session"] for e in events if e.labels["profile"] == prof})
+        assert len(sessions) == 2
+        for sess in sessions:
+            evs = [e for e in events if e.labels["session"] == sess]
+            assert {e.labels["actor"] for e in evs} == {"ai_agent"}
+            attacks = Counter(e.labels["attack"] for e in evs)
+            assert set(attacks) - {"none", "recon", "idor"}, attacks  # at least one exploit family
+            assert "ai_canary_follow" not in attacks
+            paths = {e.http.path for e in evs if e.http}
+            assert "/robots.txt" not in paths and "/api/internal/debug" not in paths
+            bodies = " ".join(f"{e.http.query or ''} {e.http.request_body or ''}" for e in evs if e.http)
+            assert not any(m in bodies for m in nl_markers)  # no detector vocabulary
+            gaps = [b - a for a, b in itertools.pairwise(e.timestamp.timestamp() for e in evs)]
+            if prof == "api_only_agent":
+                assert "/" not in paths and min(gaps) >= 2.5  # API only, one call per model turn
+                assert all("Mozilla" not in (e.http.user_agent or "") for e in evs if e.http)
+            else:
+                assert all("Chrome/" in (e.http.user_agent or "") for e in evs if e.http)
+                ips = {e.source_ip for e in evs}
+                rotated = ips - {evs[0].source_ip}
+                assert rotated and all(ipaddress.ip_address(ip) in ROTATION_POOL for ip in rotated)
+                assert not rotated & planned_ips
+                assert statistics.median(g for g in gaps if g > 1.0) > 8.0  # long reasoning pauses

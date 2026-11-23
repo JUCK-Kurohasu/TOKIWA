@@ -50,6 +50,7 @@ AI 自律型ペネトレーションテストシステム **ARTEX** と対をな
 | デコイや AI カナリアを使いたい | [デセプション（Mirage）](Deception) |
 | 0day・脆弱性情報を資産と照合したい | [脆弱性インテリジェンス](Threat-Intel) |
 | 攻撃シミュレータや ARTEX で試験したい | [ラボと評価](Lab-and-Evaluation) |
+| 何を収集・保存・外部送信し、誰が見られるかを確認したい | [データの取扱い](Data-Handling) |
 | 設定項目・コマンドを調べたい | [設定リファレンス](Configuration) / [CLI リファレンス](CLI) |
 | うまく動かない | [トラブルシューティング](Troubleshooting) |
 

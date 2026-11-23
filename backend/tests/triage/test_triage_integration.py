@@ -14,6 +14,7 @@ from tokiwa.llm.mock import MockProvider
 from tokiwa.schemas.alerts import AlertCategory, AlertDraft
 from tokiwa.schemas.common import Severity
 from tokiwa.schemas.events import Event, EventKind
+from tokiwa.triage.prompts import TRIAGE_INCIDENT
 
 PROBE = "/__triage_probe"
 
@@ -79,7 +80,7 @@ async def test_ingest_to_triaged_incident(
     assert inc["severity"] == "critical"  # high + AI boost (ai_score 0.9 >= 0.7)
     assert inc["actor_type"] == "ai_agent"
     assert inc["kill_chain"] == ["initial_access"]
-    assert inc["triage"] is not None and inc["triage"]["prompt_version"] == "triage.incident@1"
+    assert inc["triage"] is not None and inc["triage"]["prompt_version"] == TRIAGE_INCIDENT.ref
     assert [a["id"] for a in inc["alerts"]] == [alert["id"]]
 
     # every LLM call wrapped telemetry: the injection string never appears unescaped in a prompt

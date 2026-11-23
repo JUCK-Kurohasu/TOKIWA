@@ -5,8 +5,10 @@ import { Link, useNavigate } from "react-router";
 import type { ActorSession, ActorType, Page } from "@/api/types";
 import { ActorBadge, AiScore, Mono, PageHeader } from "@/components/common";
 import { DataState, RowsSkeleton } from "@/components/common/DataState";
+import { escapeInvisible } from "@/components/common/invisible";
 import { formatMs } from "@/components/common/numfmt";
 import { PagerBar } from "@/components/common/PagerBar";
+import { SafeText } from "@/components/common/SafeText";
 import { Button, Card, Input, Label, Select, Table, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
 import { useSearchState } from "@/hooks/useSearchState";
@@ -240,8 +242,15 @@ export function SessionsListPage() {
                         </Link>
                       </TD>
                       <TD className="hidden max-w-[280px] lg:table-cell">
-                        <div className="truncate text-xs" title={s.user_agent ?? undefined}>
-                          {s.user_agent || <span className="text-muted">{L.noUa}</span>}
+                        <div
+                          className="truncate text-xs"
+                          title={s.user_agent ? escapeInvisible(s.user_agent) : undefined}
+                        >
+                          {s.user_agent ? (
+                            <SafeText text={s.user_agent} />
+                          ) : (
+                            <span className="text-muted">{L.noUa}</span>
+                          )}
                         </div>
                         <Mono className="text-[10px] text-muted">{s.client_fingerprint.slice(0, 12)}</Mono>
                       </TD>

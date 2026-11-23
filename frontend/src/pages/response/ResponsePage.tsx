@@ -7,12 +7,13 @@
  * still renders correctly.
  */
 import { useQueries } from "@tanstack/react-query";
-import { History, Play, RefreshCw, ShieldCheck, ShieldPlus, Sparkles } from "lucide-react";
+import { BellOff, History, Play, RefreshCw, ShieldCheck, ShieldPlus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api } from "@/api/client";
 import type { ActionStatus, Page, ResponseAction } from "@/api/types";
 import { KpiCard, Mono, PageHeader } from "@/components/common";
+import { GATE_ACTION_TYPES, GateStatusNotice } from "@/components/common/GateStatus";
 import { TableSkeleton } from "@/components/common/OpsKit";
 import { formatTtl, useCanOperate } from "@/components/common/opsLabels";
 import {
@@ -22,6 +23,7 @@ import {
   ApprovalNotice,
   ProposeActionDialog,
   ProposerBadge,
+  SelfApprovedBadge,
 } from "@/components/common/ResponseActions";
 import { useOpsLive } from "@/components/common/useOpsLive";
 import {
@@ -38,13 +40,14 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { SuppressionsPanel } from "./SuppressionsPanel";
 
-type TabKey = "pending" | "active" | "history";
+type TabKey = "pending" | "active" | "history" | "suppressions";
 
-const TAB_STATUSES: Record<TabKey, ActionStatus[]> = {
+const TAB_STATUSES: Record<Exclude<TabKey, "suppressions">, ActionStatus[]> = {
   pending: ["proposed"],
   active: ["approved", "active"],
   history: ["expired", "reverted", "rejected", "failed"],
@@ -85,6 +88,7 @@ const strings = {
     pending: "承認待ち",
     active: "実行中",
     history: "履歴",
+    suppressions: "抑止",
     llmPending: "うち LLM 提案",
     kpiPendingHint: "承認されるまで何も実行されません",
     kpiActiveHint: "TTL 経過で自動解除",
@@ -117,6 +121,7 @@ const strings = {
     pending: "Awaiting approval",
     active: "Active",
     history: "History",
+    suppressions: "Suppressions",
     llmPending: "of which LLM-proposed",
     kpiPendingHint: "Nothing runs until approved",
     kpiActiveHint: "Lifted automatically when the TTL ends",
@@ -162,7 +167,8 @@ export function ResponsePage() {
   const canOperate = useCanOperate();
   const [sp, setSp] = useSearchParams();
   const tabParam = sp.get("tab");
-  const tab: TabKey = tabParam === "active" || tabParam === "history" ? tabParam : "pending";
+  const tab: TabKey =
+    tabParam === "active" || tabParam === "history" || tabParam === "suppressions" ? tabParam : "pending";
   const setTab = (v: TabKey) =>
     setSp(
       (prev) => {
@@ -271,11 +277,22 @@ export function ResponsePage() {
                 </span>
               ),
             },
+            {
+              value: "suppressions",
+              label: (
+                <span className="flex items-center gap-1.5">
+                  <BellOff className="h-3.5 w-3.5" aria-hidden />
+                  {L.suppressions}
+                </span>
+              ),
+            },
           ]}
         />
 
         <div className="pt-4">
-          {current.error ? (
+          {tab === "suppressions" ? (
+            <SuppressionsPanel />
+          ) : current.error ? (
             <div className="space-y-2">
               <ErrorState error={current.error} />
               <Button size="sm" variant="outline" onClick={current.refetch}>
@@ -305,6 +322,7 @@ export function ResponsePage() {
           ) : tab === "active" ? (
             activeSorted.length ? (
               <div className="space-y-2">
+                {activeSorted.some((a) => GATE_ACTION_TYPES.has(a.action_type)) && <GateStatusNotice />}
                 <p className="text-xs text-muted">{L.activeOrder}</p>
                 <div className="grid gap-3 xl:grid-cols-2">
                   {activeSorted.map((a) => (
@@ -376,14 +394,17 @@ export function ResponsePage() {
                         <TD>
                           <ProposerBadge proposer={a.proposed_by} />
                         </TD>
-                        <TD className="text-xs">{a.approved_by ?? <span className="text-muted">-</span>}</TD>
+                        <TD className="text-xs">
+                          {a.approved_by ?? <span className="text-muted">-</span>}
+                          <SelfApprovedBadge action={a} />
+                        </TD>
                         <TD
                           className="whitespace-nowrap text-xs text-muted"
-                          title={formatDateTime(a.created_at)}
+                          title={dateTimeTitle(a.created_at)}
                         >
                           {timeAgo(a.created_at)}
                         </TD>
-                        <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(ended)}>
+                        <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(ended)}>
                           {timeAgo(ended)}
                         </TD>
                         <TD className="max-w-[220px] text-xs">

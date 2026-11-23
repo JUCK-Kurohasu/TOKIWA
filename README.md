@@ -35,7 +35,7 @@ TOKIWA（常磐）は、AI 自律型ペネトレーションテストシステ�
 # backend
 cd backend
 uv sync
-uv run tokiwa serve --reload        # http://localhost:8788 （初回は /setup で管理者作成）
+uv run tokiwa serve --reload        # http://localhost:8788 （初回は /setup で管理者作成。セットアップコードは起動ログに出る）
 
 # frontend（別ターミナル）
 cd frontend
@@ -51,9 +51,10 @@ export ANTHROPIC_API_KEY=...        # または UI の「LLM」設定から（�
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1                        # API トークン（一度だけ表示）
-uv run tokiwa gate run --upstream http://127.0.0.1:3000 --token tkw_...   # Gate
-uv run tokiwa agent run --token tkw_...                  # ホストセンサー
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # Gate 用 API トークン（一度だけ表示）
+uv run tokiwa token create agent-1                      # ホストセンサー用（既定 scope ingest のみ）
+uv run tokiwa gate run --upstream http://127.0.0.1:3000 --token-file gate.token   # Gate（--token は ps に見えるので使わない）
+TOKIWA_AGENT__INGEST_TOKEN="$(cat agent.token)" uv run tokiwa agent run          # ホストセンサー
 ```
 
 ラボ（Docker Compose）: `docker compose -f lab/compose.yaml up --build` — 詳細は `lab/README.md`。

@@ -50,6 +50,7 @@ An LLM triages detected alerts with supporting evidence and **proposes** respons
 | Use decoys and AI canaries | [Deception (Mirage)](Deception-en) |
 | Match 0-day and vulnerability information against your assets | [Vulnerability intelligence](Threat-Intel-en) |
 | Test with the attack simulator or ARTEX | [Lab & evaluation](Lab-and-Evaluation-en) |
+| Check what is collected, stored and sent outside, and who can see it | [Data handling](Data-Handling-en) |
 | Look up settings and commands | [Configuration reference](Configuration-en) / [CLI reference](CLI-en) |
 | Something isn't working | [Troubleshooting](Troubleshooting-en) |
 

@@ -78,8 +78,12 @@ curl -fsS -o /dev/null "${BASE}${asset}" || fail "asset ${asset} not served"
 echo "ok (${asset})"
 
 step "admin setup + ingest round-trip"
+# The first-run setup needs the one-time code the server writes to its data dir (and log).
+setup_code="$(docker exec "$NAME" cat /data/setup-code)" || fail "setup code not written to /data/setup-code"
 curl -fsS -X POST "${BASE}/api/v1/auth/setup" -H 'content-type: application/json' \
-    -d '{"username":"admin","password":"smoke-test-password"}' >/dev/null || fail "auth setup failed"
+    -d "{\"username\":\"admin\",\"password\":\"smoke-test-password\",\"setup_code\":\"${setup_code}\"}" >/dev/null \
+    || fail "auth setup failed"
+docker exec "$NAME" test ! -e /data/setup-code || fail "setup code not removed after setup"
 token="$(docker exec "$NAME" tokiwa token create smoke --scope ingest)"
 case "$token" in tkw_*) ;; *) fail "unexpected token format" ;; esac
 event='{"events":[{"kind":"http","dataset":"smoke.http","source":{"ip":"203.0.113.9"},"http":{"method":"GET","path":"/","status":200}}]}'

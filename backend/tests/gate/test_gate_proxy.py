@@ -8,12 +8,15 @@ import pytest
 from tokiwa.gate.proxy import (
     UpstreamTarget,
     decode_content,
+    document_charset,
     encode_snippet,
+    forwarded_element,
     forwarded_request_headers,
     inject_before_body_close,
     raw_path_of,
     restrict_accept_encoding,
     strip_hop_by_hop,
+    stripped_client_headers,
 )
 
 
@@ -77,6 +80,69 @@ def test_trusted_chain_is_appended() -> None:
     assert out[b"x-forwarded-proto"] == b"https"
 
 
+SPOOF = [
+    (b"host", b"shop.example"),
+    (b"Forwarded", b"for=198.51.100.9;proto=https"),
+    (b"X-Real-IP", b"198.51.100.9"),
+    (b"True-Client-IP", b"198.51.100.9"),
+    (b"CF-Connecting-IP", b"198.51.100.9"),
+    (b"X-Client-IP", b"198.51.100.9"),
+    (b"X-Cluster-Client-IP", b"198.51.100.9"),
+    (b"Fastly-Client-IP", b"198.51.100.9"),
+    (b"X-Forwarded-Port", b"443"),
+    (b"X-Forwarded-Prefix", b"/admin"),
+    (b"X-Forwarded-Ssl", b"on"),
+    (b"X-Original-URL", b"/.env"),
+    (b"X-Rewrite-URL", b"/admin/config.php"),
+    (b"accept", b"*/*"),
+]
+
+
+def test_client_address_and_route_claims_are_replaced() -> None:
+    """Audit #138/#147: only the Gate's own view of the client reaches the upstream, whichever header it reads."""
+    out = _fwd(SPOOF)
+    removed = {k.lower() for k, _ in SPOOF} - {b"host", b"accept", b"forwarded", b"x-real-ip"}
+    assert not removed & set(out), removed & set(out)
+    assert out[b"x-real-ip"] == b"203.0.113.7"
+    assert out[b"forwarded"] == b"for=203.0.113.7;proto=http;host=shop.example"
+    assert out[b"x-forwarded-for"] == b"203.0.113.7" and out[b"accept"] == b"*/*"
+    assert stripped_client_headers(SPOOF, frozenset()) == sorted(
+        k.decode().lower() for k, _ in SPOOF if k.lower() not in (b"host", b"accept")
+    )
+
+
+def test_trusted_mode_keeps_the_xff_chain_and_never_builds_forwarded_from_it() -> None:
+    raw = [
+        (b"host", b"shop.example"),
+        (b"x-forwarded-for", b"1.2.3.4;proto=https;host=evil.example, 198.51.100.20"),
+        (b"x-forwarded-proto", b"https"),
+        (b"forwarded", b"for=6.6.6.6"),
+    ]
+    out = _fwd(raw, trust_forwarded_for=True, client_ip="198.51.100.20")
+    assert out[b"x-forwarded-for"] == b"1.2.3.4;proto=https;host=evil.example, 198.51.100.20, 203.0.113.7"
+    assert out[b"forwarded"] == b"for=198.51.100.20;proto=https;host=shop.example"
+    assert out[b"x-real-ip"] == b"198.51.100.20"
+
+
+def test_forwarded_element_quotes_ipv6_and_odd_hosts() -> None:
+    assert forwarded_element("2001:db8::1", "https", "shop.example:8443") == (
+        b'for="[2001:db8::1]";proto=https;host="shop.example:8443"'
+    )
+    assert (
+        forwarded_element(None, "http", 'x";for=1.1.1.1') == b'for=unknown;proto=http;host="x\\";for=1.1.1.1"'
+    )
+    assert forwarded_element("::ffff:192.0.2.1", "http", None) == b"for=192.0.2.1;proto=http"
+
+
+def test_pass_through_keeps_named_headers_from_a_trusted_front_proxy() -> None:
+    keep = frozenset({b"cf-connecting-ip", b"x-real-ip"})
+    out = _fwd(SPOOF, pass_through=keep)
+    assert out[b"cf-connecting-ip"] == b"198.51.100.9"
+    assert out[b"x-real-ip"] == b"198.51.100.9"  # the front proxy's value, the Gate adds none of its own
+    assert b"true-client-ip" not in out and b"x-original-url" not in out
+    assert "cf-connecting-ip" not in stripped_client_headers(SPOOF, keep)
+
+
 def test_rewrite_host_and_te_smuggling_hygiene() -> None:
     out = _fwd(
         [(b"host", b"shop.example"), (b"transfer-encoding", b"chunked"), (b"content-length", b"5")],
@@ -121,8 +187,34 @@ def test_inject_before_last_body_close() -> None:
 def test_encode_snippet_follows_charset() -> None:
     assert encode_snippet("注意", "text/html; charset=Shift_JIS") == "注意".encode("shift_jis")
     assert encode_snippet("注意", "text/html; charset=iso-8859-1") == b"&#27880;&#24847;"
-    assert encode_snippet("注意", "text/html; charset=bogus") == "注意".encode()
+    # unknown or missing charset: ASCII only, so the snippet reads the same in any ASCII-compatible page (#146)
+    assert encode_snippet("注意", "text/html; charset=bogus") == b"&#27880;&#24847;"
+    assert encode_snippet("注意", "text/html") == b"&#27880;&#24847;"
     assert encode_snippet("x", None) == b"x"
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        (b"<html><head><meta charset=shift_jis></head>", "shift_jis"),
+        (b'<html><head><META CHARSET="EUC-JP">', "euc_jp"),
+        (b'<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS">', "shift_jis"),
+        (b"<meta charset=utf-16>", "utf-8"),  # WHATWG: a meta declaring UTF-16 means UTF-8
+        (b"\xef\xbb\xbf<html><meta charset=shift_jis>", "utf-8"),  # BOM first
+        (b"<html><body>" + b" " * 1100 + b"<meta charset=shift_jis>", None),  # beyond the 1024-byte prescan
+        (b"<html><body>no declaration</body></html>", None),
+        (b"<meta charset=x-made-up>", None),
+    ],
+)
+def test_document_charset_sniffs_meta(html: bytes, expected: str | None) -> None:
+    assert document_charset("text/html", html) == expected
+
+
+def test_header_charset_wins_over_meta() -> None:
+    assert document_charset("text/html; charset=utf-8", b"<meta charset=shift_jis>") == "utf-8"
+    sjis_page = b"<html><head><meta charset=Shift_JIS></head><body></body></html>"
+    assert encode_snippet("注意", "text/html", sjis_page) == "注意".encode("shift_jis")
+    assert encode_snippet("注意", None, b"<html>") == b"&#27880;&#24847;"
 
 
 def test_decode_content() -> None:

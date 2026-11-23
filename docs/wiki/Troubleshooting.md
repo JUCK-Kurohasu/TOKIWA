@@ -10,7 +10,7 @@ UI がビルドされていないか、配信先が設定されていません�
 Docker イメージでは `TOKIWA_SERVER__STATIC_DIR` を上書きしていないか確認してください（既定 `/app/frontend/dist`）。
 
 **初回なのに管理者登録画面ではなくログイン画面が出る**
-初回の管理者登録画面（/setup）は、サーバーの DB にユーザーが 1 人もいないときだけ表示されます。まず状態を確認します。
+初回の管理者登録画面（/setup）は、そのサーバーで一度もセットアップしていないときだけ表示されます（一度セットアップすると、ユーザーが全員いなくなっても再表示されません）。まず状態を確認します。
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -23,9 +23,21 @@ curl -s http://localhost:8788/api/v1/auth/status
 - 接続できない → サーバーが動いていません（`cd backend && uv run tokiwa serve`）。古いバージョンの UI は、
   API に繋がらないときもログイン画面を表示していました（現在は「サーバーに接続できません」と表示されます）。
 
+**セットアップ画面で「missing or wrong setup code」になる**
+最初の管理者を作るには、サーバーが起動時にログと `data/setup-code`（Docker では `/data/setup-code`）に出す 1 回限りのコードが必要です。
+ログの `TOKIWA is not set up yet ...` の行にある URL を開くか、ファイルの内容を「セットアップコード」欄に入力します。ファイルが無い場合は、セットアップを試すと作り直されてログに出ます。
+誰も他に接続できないホストでは `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` で無効にもできます（[設定リファレンス](Configuration)）。
+
+**管理者が 1 人もいなくなった（起動ログに「no user has the admin role」）**
+サーバーと同じ設定で `uv run tokiwa user create <名前> --role admin` を実行して管理者を作ります（Docker では `docker compose ... exec tokiwa tokiwa user create ...`）。
+
+**ログインすると「too many failed attempts」（429）になる**
+同じユーザー名と送信元 IP で 5 回（`auth.login_max_failures`）、または同じ送信元 IP から 30 回（`auth.login_max_failures_per_ip`）失敗すると、15 分（`auth.login_lockout_minutes`）の窓で古い失敗が外れるまで拒否されます。正しいパスワードでも拒否されます。
+待つか、別の端末（送信元 IP）からログインしてください。失敗と成功は **設定 → システム** の監査ログに `auth.login.failure` / `auth.login.success`（送信元 IP 付き。パスワードは記録しません）として残ります。
+
 **管理者のパスワードを忘れた**
-サーバーと同じ設定で `uv run tokiwa user create <新しい名前> --role admin` を実行して別の管理者を作り、
-**設定 → ユーザー** の「パスワード再設定」で元のアカウントのパスワードを変更します。
+サーバーと同じ設定で `uv run tokiwa user reset-password <ユーザー名>` を実行し、新しいパスワードを設定します（Docker では `docker compose ... exec tokiwa tokiwa user reset-password <ユーザー名>`）。
+そのユーザーの既存のログインは無効になります。ログイン失敗で一時的に拒否（429）されている場合は、15 分ほどで解除されます。
 
 **再起動したらログアウトされた**
 署名鍵（`data/secret.key`）が失われた可能性があります。データディレクトリが永続化されているか確認してください。

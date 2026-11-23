@@ -62,8 +62,10 @@ def resolve_settings(
         update["server_url"] = server
     if token_file is not None:
         update["ingest_token"] = SecretStr(token_file.read_text(encoding="utf-8").strip())
+        update["token_file"] = token_file  # watched for rotation (gate.tokens.TokenSource)
     if token:
         update["ingest_token"] = SecretStr(token)
+        update["token_file"] = None  # an explicit --token wins and is not reloaded
     if sensor_id:
         update["sensor_id"] = sensor_id
     if capture_body_bytes is not None:
@@ -85,7 +87,9 @@ def run(
     listen: str | None = typer.Option(None, help="Listen address host:port (default 0.0.0.0:8080)"),
     server: str | None = typer.Option(None, help="TOKIWA server URL, e.g. http://127.0.0.1:8788"),
     token: str | None = typer.Option(None, help="API token (scopes ingest+gate). Prefer --token-file / env"),
-    token_file: Path | None = typer.Option(None, help="File containing the API token"),
+    token_file: Path | None = typer.Option(
+        None, help="File containing the API token; re-read when it changes (rotation without restart)"
+    ),
     sensor_id: str | None = typer.Option(None, help="Sensor id recorded on events (default gate-1)"),
     capture_body_bytes: int | None = typer.Option(None, help="Request body prefix to capture (bytes)"),
     trust_forwarded_for: bool | None = typer.Option(
@@ -104,6 +108,9 @@ def run(
         help="Forward the client Host header (default) or the upstream's",
     ),
     access_log: bool = typer.Option(False, help="Enable uvicorn access log (the gate captures anyway)"),
+    limit_concurrency: int | None = typer.Option(
+        None, help="Max concurrent connections+tasks before uvicorn answers 503 (default: unlimited)"
+    ),
     log_level: str | None = typer.Option(None, help="Log level (default from TOKIWA_LOG_LEVEL)"),
 ) -> None:
     """Run TOKIWA Gate in front of an upstream web app."""
@@ -114,6 +121,14 @@ def run(
     s = get_settings()
     level = (log_level or s.log_level).upper()
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if token:
+        # The gate is a long-running listener: its command line is visible to every local user (ps, /proc) and
+        # to Docker admins, and TOKIWA's own host sensor reports listening processes' command lines (#143).
+        typer.echo(
+            "warning: --token puts the API token on the command line (visible in ps / docker inspect); "
+            "use --token-file or TOKIWA_GATE__INGEST_TOKEN instead",
+            err=True,
+        )
     gate_settings = resolve_settings(
         s.gate,
         upstream=upstream,
@@ -146,4 +161,5 @@ def run(
         server_header=False,
         date_header=False,
         lifespan="on",
+        limit_concurrency=limit_concurrency,
     )

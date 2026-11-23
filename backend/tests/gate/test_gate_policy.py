@@ -97,7 +97,7 @@ async def test_policy_manager_swaps_only_on_version_change(fake_server: FakeServ
         assert manager.swaps == 2 and manager.errors == 0
 
 
-@pytest.mark.parametrize("failure", ["down", "500", "garbage", "missing"])
+@pytest.mark.parametrize("failure", ["down", "500", "403", "garbage", "missing"])
 async def test_policy_manager_keeps_last_policy_on_failure(fake_server: FakeServer, failure: str) -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(fake_server.handler)) as client:
         manager = PolicyManager(client, "http://tokiwa.test", "tkw", refresh_seconds=5)
@@ -108,6 +108,8 @@ async def test_policy_manager_keeps_last_policy_on_failure(fake_server: FakeServ
             fake_server.down = True
         elif failure == "500":
             fake_server.policy_status = 500
+        elif failure == "403":
+            fake_server.policy_status = 403  # ingest-only token (the default since audit #33)
         elif failure == "missing":
             fake_server.policy = None  # endpoint answers 404 (e.g. respond module not deployed yet)
         else:
@@ -117,5 +119,7 @@ async def test_policy_manager_keeps_last_policy_on_failure(fake_server: FakeServ
         assert manager.current.version == "v1"  # fail-static: last known policy stays enforced
         assert "198.51.100.1" in manager.current.blocked
         assert manager.errors == 1 and manager.last_error
+        if failure == "403":
+            assert "--scope ingest --scope gate" in manager.last_error  # actionable hint for the operator
         stats = manager.stats()
         assert stats["version"] == "v1" and stats["errors"] == 1

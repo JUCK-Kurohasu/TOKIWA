@@ -6,6 +6,9 @@ Fail-open / fail-static semantics (deliberate):
 - When the server is unreachable or returns garbage, the *last known* policy stays in force. Blocks are TTL'd
   server-side, so a stale policy can only be as old as the outage; dropping it would silently unblock an
   active attacker the moment they DoS the TOKIWA server.
+- ...but never past each entry's own expiry (``GatePolicy.entry_expires_at``, audit #64): an entry is lifted
+  locally at ``receive time + (expires_at - generated_at)`` on the monotonic clock, so neither an outage nor a
+  skewed Gate clock keeps a block alive longer than the server would.
 - A policy is swapped only when ``version`` changes, so an unchanged policy keeps its compiled tables (and the
   rate-limiter state keyed by client IP is never reset by a refresh).
 """
@@ -15,13 +18,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import unquote
 
 import httpx
 from pydantic import ValidationError
 
 from tokiwa.gate.netmatch import IpTable
+from tokiwa.gate.proxy import LEGACY_POSITIONS
+from tokiwa.gate.tokens import TokenSource
 from tokiwa.schemas.response import DecoyRoute, GatePolicy
 from tokiwa.util import utcnow
 
@@ -54,6 +63,61 @@ def normalize_path(path: str) -> str:
     return out
 
 
+_NTFS_STREAM = re.compile(r"::\$[a-z_]*$")
+
+
+def _segment_head(seg: str) -> str:
+    """What a lenient server keeps of one segment: before a NUL (C string APIs) and before ``;`` (Tomcat/Jetty/
+    Spring path parameters, so ``..;`` is ``..`` there too)."""
+    return seg.split("\x00", 1)[0].split(";", 1)[0]
+
+
+def match_key(path: str) -> str:
+    """Decoy-matching key: :func:`normalize_path` plus the variants other servers treat as the same file (#54).
+
+    ``path`` is ``scope['path']`` (percent-decoded once by the ASGI server). The upstream receives the raw target,
+    so whatever *some* upstream would resolve to a decoy must match it here too, else the variant reaches the
+    real application -- and the 200-decoy vs 404-variant difference tells an agent which paths are traps:
+
+    - a second percent-decoding (``%252e`` -> ``.``), ``\\`` as ``/`` (``%5c``, IIS / Windows);
+    - per segment, everything from a NUL or ``;`` on is dropped (``/.env;x``, ``/x/..;/.env``, ``.php%3b.css``);
+    - dot segments resolved (RFC 3986), then trailing dots / spaces and NTFS ``::$DATA`` streams dropped
+      (``/.env.``, ``/.env%20``; after resolution so ``..`` is not turned into an empty segment);
+    - lower-cased (case-insensitive file systems) and without a trailing ``/``.
+
+    The request is still forwarded unchanged; only the decision "is this a decoy?" uses the key.
+    """
+    s = unquote(path) if "%" in path else path
+    s = s.replace("\\", "/")
+    s = normalize_path("/".join(_segment_head(seg) for seg in s.split("/")))
+    segments = []
+    for seg in s.lower().split("/"):
+        seg = _NTFS_STREAM.sub("", seg).rstrip(". ")
+        if seg:
+            segments.append(seg)
+    return "/" + "/".join(segments)
+
+
+def path_anomalies(path: str) -> list[str]:
+    """Reasons ``path`` (``scope['path']``) only makes sense to a lenient server (event tag ``gate:path_anomaly``)."""
+    found = []
+    if "\x00" in path:
+        found.append("nul")
+    if ";" in path:
+        found.append("semicolon")
+    if "\\" in path:
+        found.append("backslash")
+    if "%" in path and unquote(path) != path:
+        found.append("double_encoding")
+    if "�" in path:
+        found.append("invalid_utf8")  # e.g. overlong %c0%ae (not decoded as "." here)
+    if any(seg != seg.rstrip(". ") and seg not in (".", "..") for seg in path.split("/")):
+        found.append("trailing_dot_or_space")
+    if "::$" in path:
+        found.append("ntfs_stream")
+    return found
+
+
 @dataclass(frozen=True, slots=True)
 class DecoyMatcher:
     exact: dict[str, DecoyRoute] = field(default_factory=dict)
@@ -68,28 +132,33 @@ class DecoyMatcher:
             raw = route.path.strip()
             if raw.endswith("*"):
                 prefix = raw[:-1]
-                norm = normalize_path(prefix)
-                if prefix.endswith("/") and norm != "/":
-                    norm = norm.rstrip("/") + "/"
+                key = match_key(prefix)
+                if prefix.endswith("/") and key != "/":
+                    key += "/"
                 # Guard: a catch-all decoy ("*", "/*") would replace the protected site for every visitor.
-                if norm in ("", "/"):
+                if key in ("", "/"):
                     rejected.append(route.path)
                     continue
-                prefixes.setdefault(norm, route)
+                prefixes.setdefault(key, route)
             else:
-                exact.setdefault(normalize_path(raw), route)
+                key = match_key(raw)
+                if key == "/":  # e.g. "/;x" or "/%2e": would answer the home page with a decoy
+                    rejected.append(route.path)
+                    continue
+                exact.setdefault(key, route)
         ordered = tuple(sorted(prefixes.items(), key=lambda kv: len(kv[0]), reverse=True))
         return cls(exact=exact, prefixes=ordered), rejected
 
     def match(self, path: str) -> DecoyRoute | None:
         if not self.exact and not self.prefixes:
             return None
-        norm = normalize_path(path)
-        hit = self.exact.get(norm)
+        key = match_key(path)
+        hit = self.exact.get(key)
         if hit is not None:
             return hit
+        slashed = key + "/"  # "/admin" and "/admin/" are both under an "/admin/*" decoy
         for prefix, route in self.prefixes:
-            if norm.startswith(prefix):
+            if slashed.startswith(prefix):
                 return route
         return None
 
@@ -108,6 +177,8 @@ class CompiledPolicy:
     decoys: DecoyMatcher
     html_injection: str | None
     invalid_entries: tuple[str, ...] = ()
+    # where html_injection goes (gate.proxy.inject_html); servers before audit #41 send none -> before </body>
+    html_injection_positions: tuple[str, ...] = LEGACY_POSITIONS
 
     @classmethod
     def empty(cls) -> CompiledPolicy:
@@ -150,6 +221,7 @@ class CompiledPolicy:
             decoys=decoys,
             html_injection=policy.html_injection or None,
             invalid_entries=invalid,
+            html_injection_positions=tuple(policy.html_injection_positions or LEGACY_POSITIONS),
         )
 
     def summary(self) -> dict[str, object]:
@@ -166,6 +238,20 @@ class CompiledPolicy:
         }
 
 
+def _without(policy: GatePolicy, expired: dict[str, set[str]]) -> GatePolicy:
+    """``policy`` minus the expired entries (same version: it is still the server's policy, trimmed)."""
+    return policy.model_copy(
+        update={
+            "blocked": [x for x in policy.blocked if x not in expired.get("blocked", set())],
+            "deceive": [x for x in policy.deceive if x not in expired.get("deceive", set())],
+            "rate_limited": {
+                k: v for k, v in policy.rate_limited.items() if k not in expired.get("rate_limited", set())
+            },
+            "tarpit": {k: v for k, v in policy.tarpit.items() if k not in expired.get("tarpit", set())},
+        }
+    )
+
+
 class PolicyManager:
     """Pulls ``GET /api/v1/gate/policy`` every ``refresh_seconds`` and swaps the compiled policy on change."""
 
@@ -173,17 +259,24 @@ class PolicyManager:
         self,
         client: httpx.AsyncClient,
         server_url: str,
-        token: str | None,
+        token: str | TokenSource | None,
         *,
         refresh_seconds: float = 5.0,
         timeout: float = 5.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client = client
         self._url = server_url.rstrip("/") + POLICY_PATH
-        self._token = token
+        self._tokens = TokenSource.of(token)
         self.refresh_seconds = max(0.5, refresh_seconds)
         self._timeout = timeout
         self._current = CompiledPolicy.empty()
+        self._clock = clock
+        # The installed policy (already trimmed of expired entries) and the pending local deadlines, soonest
+        # first: (monotonic deadline, section, entry).
+        self._source: GatePolicy | None = None
+        self._deadlines: list[tuple[float, str, str]] = []
+        self.expired_locally = 0
         self.fetches = 0
         self.errors = 0
         self.swaps = 0
@@ -193,31 +286,62 @@ class PolicyManager:
 
     @property
     def current(self) -> CompiledPolicy:
+        if self._deadlines and self._clock() >= self._deadlines[0][0]:
+            self._expire_entries()
         return self._current
 
     def apply(self, policy: GatePolicy) -> bool:
         """Install ``policy`` if its version differs from the current one. Returns True when swapped."""
         if policy.version == self._current.version:
             return False
+        received = self._clock()
+        deadlines: list[tuple[float, str, str]] = []
+        for section, entries in policy.entry_expires_at.items():
+            for key, expires_at in entries.items():
+                remaining = (expires_at - policy.generated_at).total_seconds()
+                deadlines.append((received + remaining, section, key))
+        deadlines.sort()
+        self._source = policy
+        self._deadlines = deadlines
         compiled = CompiledPolicy.compile(policy)
         self._current = compiled  # single reference assignment: requests see either old or new, never a mix
         self.swaps += 1
         log.info("gate policy updated: %s", compiled.summary())
+        if deadlines and received >= deadlines[0][0]:
+            self._expire_entries()  # already past (a policy generated long ago)
         return True
+
+    def _expire_entries(self) -> None:
+        """Drop entries whose deadline passed and recompile (normally the server's next policy does this)."""
+        now = self._clock()
+        expired: dict[str, set[str]] = {}
+        while self._deadlines and self._deadlines[0][0] <= now:
+            _, section, key = self._deadlines.pop(0)
+            expired.setdefault(section, set()).add(key)
+        if self._source is None or not expired:
+            return
+        self._source = _without(self._source, expired)
+        self._current = CompiledPolicy.compile(self._source)
+        count = sum(len(v) for v in expired.values())
+        self.expired_locally += count
+        log.info("gate policy %s: %d entries reached their expiry locally", self._source.version, count)
 
     async def refresh(self) -> bool:
         """Fetch once. Never raises (fail-open); returns True when a new policy was installed."""
         self.fetches += 1
-        headers = {"Accept": "application/json"}
-        if self._token:
-            headers["X-Tokiwa-Token"] = self._token
         try:
-            resp = await self._client.get(self._url, headers=headers, timeout=self._timeout)
+            resp = await self._get()
+            if resp.status_code == 401 and self._tokens.reload():
+                resp = await self._get()  # the token file was replaced (rotation): retry once right away
         except httpx.HTTPError as exc:
             self._failed(f"{type(exc).__name__}: {exc}")
             return False
         if resp.status_code != 200:
-            self._failed(f"HTTP {resp.status_code}")
+            reason = f"HTTP {resp.status_code}"
+            if resp.status_code == 403:
+                # `tokiwa token create` defaults to scope ingest only (audit #33): the gate scope is opt-in.
+                reason += " (token lacks the 'gate' scope? create it with --scope ingest --scope gate)"
+            self._failed(reason)
             return False
         try:
             policy = GatePolicy.model_validate_json(resp.content)
@@ -230,6 +354,13 @@ class PolicyManager:
         self.last_error = None
         self.last_success = utcnow()
         return self.apply(policy)
+
+    async def _get(self) -> httpx.Response:
+        headers = {"Accept": "application/json"}
+        token = self._tokens.get()
+        if token:
+            headers["X-Tokiwa-Token"] = token
+        return await self._client.get(self._url, headers=headers, timeout=self._timeout)
 
     def _failed(self, reason: str) -> None:
         self.errors += 1
@@ -254,6 +385,7 @@ class PolicyManager:
             "fetches": self.fetches,
             "errors": self.errors,
             "swaps": self.swaps,
+            "expired_locally": self.expired_locally,
             "last_error": self.last_error,
             "last_success": self.last_success.isoformat() if self.last_success else None,
         }

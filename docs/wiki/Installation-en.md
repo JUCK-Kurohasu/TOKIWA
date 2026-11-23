@@ -19,14 +19,15 @@ cp .env.example .env     # Uncomment only the lines you need
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. Create the first administrator at <http://localhost:8788/setup> (with the CLI:
+1. Create the first administrator at <http://localhost:8788/setup>. The page asks for a **Setup code**: find it in the startup log (`docker compose -f deploy/compose.yaml logs tokiwa`, which prints a URL containing the code) or with
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` (single use; with the CLI:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`; you enter the password interactively).
 2. To use an LLM, add `ANTHROPIC_API_KEY=...` to `.env` (if it is not set, TOKIWA runs with the mock LLM).
 3. By default, TOKIWA is exposed only on `127.0.0.1:8788`. To expose it on your LAN, set `TOKIWA_BIND=0.0.0.0` in `.env`, but
    **do not expose it without TLS**; put a reverse proxy (described below) in front of it.
 
-> ⚠️ **Do not enable a setting with an empty value**. For example, `TOKIWA_SERVER__SECRET_KEY=` (empty) ends up being used as
-> "a signing key that is an empty string". Leave settings you don't use commented out. If it is not set, the signing key is generated automatically on first start.
+> ⚠️ **Do not enable a setting with an empty value** (what an empty string means differs per setting). Leave settings you don't use commented out.
+> The signing key `TOKIWA_SERVER__SECRET_KEY` is generated automatically on first start when unset (or empty); a key you set needs at least 32 characters.
 
 ### Running with plain docker
 
@@ -46,16 +47,20 @@ If the first argument to the container is one of `serve gate agent sim eval inte
 
 ```bash
 # API token for a sensor (shown only once)
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate (the gate profile in compose; set TOKIWA_GATE__INGEST_TOKEN and TOKIWA_GATE__UPSTREAM in .env)
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # Host sensor (uses the host's PID / network namespaces so it can see the host's ports and processes)
+# Pass the token in an env file with mode 600, /etc/tokiwa/agent.env (one line: TOKIWA_AGENT__INGEST_TOKEN=tkw_...)
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **Do not pass API tokens as command-line arguments such as `--token tkw_...`.** Arguments are visible to other users on the same host
+  through `ps`, and to Docker administrators through `docker inspect`. Use `--token-file` for the Gate (re-read when it changes) and the
+  environment variable `TOKIWA_AGENT__INGEST_TOKEN` for the Agent (`--env-file` or compose's `.env`). The steps are in `docs/deploy.md` §4.
 - Roles without HTTP (agent / sim) need `TOKIWA_HEALTHCHECK_URL=none`. The Gate's health check is
   `http://127.0.0.1:8080/__tokiwa/health`.
 - The Agent may need root-equivalent privileges to read other users' process information (the image runs as non-root).
@@ -127,6 +132,7 @@ are authenticated with API tokens. Either exclude these paths, or point the sens
 
 There are two things to keep: the **DB** and the **signing key `secret.key`** (both in `/data`). If you lose `secret.key`,
 logged-in sessions become invalid (API tokens are not affected, because they are stored as hashes in the DB).
+Also keep the deception key ring `deception.key` (also in `/data`). If you lose it, the fake credentials and canary values inside decoys change, and values that an attacker already took are no longer detected ([Deception](Deception-en)).
 
 SQLite runs in WAL mode, so do not copy the files directly while it is running; use the online backup API instead.
 
@@ -136,6 +142,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -145,11 +152,12 @@ To restore, replace the files while the container is stopped.
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-For PostgreSQL, use `pg_dump -Fc` / `pg_restore`, and save `secret.key` separately.
+For PostgreSQL, use `pg_dump -Fc` / `pg_restore`, and save `secret.key` and `deception.key` separately.
 
 ## Upgrading
 

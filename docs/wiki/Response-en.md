@@ -15,7 +15,7 @@ proposed ──approve──▶ approved ──execution succeeds──▶ activ
 
 | Operation | Who | Notes |
 |---|---|---|
-| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, the reason is appended to it instead of creating a new one |
+| Propose | LLM (triage) / rules / users | If a proposal of the same type for the same target already exists, no new one is created. While it awaits approval the reason is appended; after approval the reason is left as approved and the new proposal is recorded separately ("proposals received after approval") |
 | Approve / reject | `analyst` or higher | Approving executes the action immediately |
 | Revert | `analyst` or higher | Actions that are `active` and revertible |
 | Expire | Automatic (checked every 30 seconds) | Lifted once the TTL has passed |
@@ -36,6 +36,21 @@ Every operation is recorded in the audit log.
 | `webhook` | — | Sends fixed-format JSON to a configured webhook |
 
 Response actions that involve the Gate take effect the next time the Gate pulls its policy (within 5 seconds by default).
+**An approved action shown as "Active" is not enforced until a Gate pulls the policy.** It also only affects requests that pass through a Gate;
+paths that bypass the Gate (log-ingestion-only setups, direct access around the Gate) are not blocked.
+
+Each card on the Response screen shows whether a Gate has applied the action.
+
+| Display | Meaning |
+|---|---|
+| No Gate to apply it | No Gate has pulled the policy. The action is not enforced |
+| Approved (not applied yet) | There is a Gate, but it has not pulled the policy since the approval |
+| Applied by n Gate(s) (hh:mm) | The number of Gates that pulled the policy after the approval, and the latest pull time |
+| … none has polled for over N min | Applied, but those Gates have stopped pulling the policy (they may be down) |
+
+The "Active" tab also shows the overall Gate status (how many Gates are pulling, which ones stopped). A Gate counts as stopped after
+`max(120 s, gate.policy_refresh_seconds × 12)` without a pull. The same information is available from `GET /api/v1/gate/status`.
+Gates are told apart by "token + source address", so several Gates behind one reverse proxy count as one.
 
 ## Safeguards
 
@@ -49,6 +64,7 @@ Response actions that involve the Gate take effect the next time the Gate pulls 
    - Anything that overlaps the **protected ranges** (`response.protected_cidrs`; default `127.0.0.0/8`, `::1/128`)
    - The server's own IP addresses (`response.protect_server_addresses`, on by default)
 4. Right before execution, the action is **validated again** against the current settings (for example, if you added a protected range after the proposal, it becomes `failed`).
+5. **Active actions are re-checked against the current settings too.** An action that falls in a range you later added to `response.protected_cidrs` (or similar) is dropped from the policy on the Gate's next pull and becomes `reverted` within 30 seconds (or at restart), with `response.auto_revert` in the audit log.
 
 > 💡 We strongly recommend adding the IPs of admin workstations, monitoring systems, and upstream load balancers to `response.protected_cidrs`.
 
@@ -69,7 +85,23 @@ response:
 
 The approver of an auto-approved response action is recorded as `policy`. Think carefully before auto-approving blocks (`block_ip`), because false positives have a large impact.
 
-> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase).
+If the only evidence is something a third party can make a browser trigger, the action stays pending even when auto-approval is on (audit log `response.auto_approve_withheld`). This covers deception trips that are "induced" (e.g. by an `<img>` on a third-party page) or "passive" (only values reachable through a link), and alerts whose evidence requests all look browser-induced (e.g. the sensitive-file probe raised by `<img src="…/.env">`).
+
+> "Two-person approval", which requires the proposer and the approver to be different people, is not yet enforced in v0.1 (planned as a setting in the next development phase). An action approved by the same user who proposed it in the UI is labelled "Self-approved", and what was approved (reason, target, TTL, etc.) is kept in the audit log and in the action's record.
+
+## Reject, revert and suppression (stopping re-proposals)
+
+The reject and revert dialogs let you choose what happens to "re-proposals for this target".
+
+| Choice | Rule / LLM proposals of the same type for the same target | Auto-approval |
+|---|---|---|
+| Don't suppress (default) | Still proposed | **Not for 24 hours** (`response.auto_approve_cooldown_minutes`, 0 disables) |
+| Don't re-propose for N hours / never | **Not created** (`response.propose_suppressed` in the audit log; no approval-request notification either) | No |
+
+- IP / CIDR targets match by overlap (an IP inside a suppressed /24, or a broader CIDR containing a suppressed IP, also matches). A different action type is treated separately.
+- A proposal a human makes manually is still created while suppressed (it is never auto-approved).
+- List and lift suppressions on the **Suppressions** tab of the Response page (API: `GET /api/v1/response/suppressions`, lift with `POST /api/v1/response/suppressions/{id}/lift`).
+- To suppress a shared NAT or monitoring-service IP in advance, use `POST /api/v1/response/suppressions`.
 
 ## Blocking with nftables (optional)
 
@@ -101,7 +133,9 @@ When you register Webhook / Slack / Discord / email under **Settings → Notific
 
 - The same content is sent at most once every 10 minutes (`notify.dedup_minutes`). However, it is sent if the severity increases.
 - The notification language is `notify.language` (`ja` / `en` / `both`). Links use `notify.public_ui_url`.
+- By default, approval requests carry only the action type, target, TTL, proposer and the link to the UI. Reasons written by the LLM and incident summaries can be steered by an attacker and may contain personal data, so they are included only with `notify.include_summary=true`. To leave source IPs out, set `notify.include_source_ip=false`. In Slack, Discord and email, URLs in the text are made non-clickable (`hxxps://`) and Discord formatting is disabled.
 - **SSRF protection**: Destinations must be http / https, and redirects are not followed. By default, a destination is rejected if its name resolves
   to a private address (loopback, internal network, cloud metadata, and so on). You can also restrict the allowed hosts with
   `notify.allowed_hosts`.
-- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead.
+- We recommend not storing email passwords in the DB and passing them through `password_env` (the name of an environment variable) instead. Only `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` names and the names listed in `notify.smtp_password_envs` are accepted (TOKIWA's own settings `TOKIWA_*__*` and API keys such as `ANTHROPIC_*` are refused even if listed). If you used another name before, rename the variable or add it to `notify.smtp_password_envs` (otherwise sending fails with an explanation).
+- A channel with a username (SMTP AUTH) requires STARTTLS or SSL. Re-enter the password when you change the host, port or username (and webhook header values when you change the URL).

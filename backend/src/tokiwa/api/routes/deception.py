@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from tokiwa.api.deps import AnalystUser, CurrentUser
+from tokiwa.api.visibility import project_events
 from tokiwa.deception import service
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.deception import DeceptionAssetUpdate, DeceptionPreview
@@ -71,7 +72,9 @@ async def list_trips(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[Event]:
-    return await service.list_trips(asset_id=asset_id, source_ip=source_ip, limit=limit, offset=offset)
+    page = await service.list_trips(asset_id=asset_id, source_ip=source_ip, limit=limit, offset=offset)
+    page.items = project_events(page.items, user)  # viewers: masked bodies / canary values (audit #157)
+    return page
 
 
 @router.get("/preview/{asset_id}", response_model=DeceptionPreview)

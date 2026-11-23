@@ -268,12 +268,20 @@ async def test_decoy_derived_canary_path_follow(
     canary = honey_values(DeceptionKind.DECOY_PATH, env["token"], derive_key())[Slot.CANARY]
     pv = (await client.get(f"{API}/preview/{env['id']}", headers=admin_headers)).json()
     assert canary in pv["body"] and f"/api/internal/{canary}*" in pv["extra_paths"]
-    ev = make_http_event(f"/api/internal/{canary}/users")
+    # path only: a link or an <img> can make anyone send this -> medium, not an AI verdict (#133)
+    ev = make_http_event(f"/api/internal/{canary}/users", ip="203.0.113.21")
+    # the canary header: only the client itself can set it -> decisive
+    hdr = make_http_event("/api/orders", ip="203.0.113.22", headers={"X-Debug-Auth": canary})
     r = await client.post(
-        "/api/v1/ingest/events", json={"events": [ev.model_dump(mode="json")]}, headers=ingest_headers
+        "/api/v1/ingest/events",
+        json={"events": [ev.model_dump(mode="json"), hdr.model_dump(mode="json")]},
+        headers=ingest_headers,
     )
-    alerts = [a for a in await _alerts(r.json()["alert_ids"]) if a.detector == "deception.trip"]
-    assert [a.category for a in alerts] == ["ai_agent"]
+    alerts = {a.source_ip: a for a in await _alerts(r.json()["alert_ids"]) if a.detector == "deception.trip"}
+    passive, direct = alerts["203.0.113.21"], alerts["203.0.113.22"]
+    assert (passive.category, passive.severity) == ("deception", "medium")
+    assert passive.details["provenance"] == "passive" and passive.details["ai_canary_followed"] is False
+    assert (direct.category, direct.severity) == ("ai_agent", "critical")
 
 
 async def test_respond_deploy_canary_contract(client: httpx.AsyncClient) -> None:

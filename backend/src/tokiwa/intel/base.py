@@ -36,6 +36,9 @@ class SourceResult:
     vulns: list[VulnRecord] = field(default_factory=list)
     items: list[IntelItemIn] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Advisories the feed has withdrawn (audit #132): never inserted, but already stored ones are marked and their
+    # package data dropped (``tokiwa.intel.store.apply_withdrawals``). ``data[<source>]["withdrawn_at"]`` is set.
+    withdrawn: list[VulnRecord] = field(default_factory=list)
 
 
 class IntelSource(ABC):

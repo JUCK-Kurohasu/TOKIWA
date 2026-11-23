@@ -4,7 +4,8 @@ Mapping: ``alert`` -> IDS_ALERT, ``http`` -> HTTP, ``flow`` -> CONNECTION, ``dns
 (stats, tls, fileinfo, anomaly ...) are skipped for now.
 
 Field names follow the EVE format documentation (``src_ip``/``dest_ip``/``proto``/``app_proto``,
-``alert.signature_id``/``alert.severity`` with 1 = most severe). DNS records changed shape across Suricata
+``alert.signature_id``/``alert.severity`` with 1 = most severe). For alerts, source/destination are the attacking
+and attacked side, not the packet direction (see :func:`_alert_attribution`). DNS records changed shape across Suricata
 versions (v1 one record per answer, v2 grouped ``answers``, v3 ``queries``/``answers`` arrays); all are read.
 TODO(verify): DNS v3 field layout against a Suricata 8 sample once the lab runs it.
 """
@@ -19,6 +20,7 @@ from tokiwa.sensors.normalize import (
     ParseContext,
     as_dict,
     clean_headers,
+    event_time,
     http_version,
     load_json_object,
     none_if_empty,
@@ -29,7 +31,6 @@ from tokiwa.sensors.normalize import (
     to_int,
     truncate_raw,
 )
-from tokiwa.util import utcnow
 
 DATASET = "suricata.eve"
 
@@ -98,6 +99,60 @@ def _dns_fields(dns: dict[str, Any]) -> dict[str, str]:
     return labels
 
 
+def _endpoint(obj: Any) -> Endpoint | None:
+    d = as_dict(obj)
+    ip = normalize_ip(d.get("ip"))
+    return Endpoint(ip=ip, port=to_int(d.get("port"))) if ip else None
+
+
+def _targets_client(alert: dict[str, Any]) -> bool:
+    """ET-style ``metadata.attack_target`` names the client side (e.g. ``Client_Endpoint``)."""
+    targets = as_dict(alert.get("metadata")).get("attack_target")
+    values = targets if isinstance(targets, list) else [targets]
+    return any(isinstance(v, str) and v.lower() == "client_endpoint" for v in values)
+
+
+def _alert_attribution(
+    rec: dict[str, Any], alert: dict[str, Any], src: Endpoint, dst: Endpoint, labels: dict[str, str]
+) -> tuple[Endpoint, Endpoint]:
+    """Event.source = the attacking side, Event.destination = the attacked side (audit #123).
+
+    In an alert record ``src_ip``/``dest_ip`` follow the *packet* that matched: for a server -> client packet
+    (``direction: to_client``, e.g. ET ATTACK_RESPONSE "uid=0" in a web server's reply) ``src_ip`` is the server.
+    Taking it as the attacker pointed correlation and block proposals at our own server. Order of evidence:
+
+    1. ``alert.source`` / ``alert.target`` — written when the rule uses ``target:src_ip|dest_ip``;
+    2. ``direction == "to_client"`` with ``metadata.attack_target`` naming a client (ET ``Client_Endpoint``):
+       a malicious server answering one of our clients — the packet source *is* the attacker;
+    3. other ``to_client`` alerts: the flow initiator (the packet's destination) is taken as the attacker — a
+       reply from a monitored server reveals what its client did to it;
+    4. otherwise the packet direction (``to_server``).
+
+    Verified against the Suricata sources (doc/userguide/output/eve/eve-json-format.rst, rules/meta.rst
+    ``target``, src/output-json-alert.c on master, 2026-11): ``direction`` is ``to_server``/``to_client`` by the
+    packet's flow direction, ``flow.src_ip`` is the flow initiator. TODO(verify): the release that added
+    ``direction`` to alerts (7.0?), and that ``metadata`` is only present when the eve alert ``metadata`` option
+    is on (case 2 then falls back to case 3).
+    """
+    direction = none_if_empty(rec.get("direction"))
+    if direction:
+        labels["suricata.direction"] = direction
+    attacker, victim = _endpoint(alert.get("source")), _endpoint(alert.get("target"))
+    if attacker is not None and victim is not None:
+        labels["suricata.attribution"] = "rule_target"
+        if attacker.ip != src.ip:
+            labels["suricata.swapped"] = "true"
+        return attacker, victim
+    if direction == "to_client":
+        if _targets_client(alert):
+            labels["suricata.attribution"] = "attack_target_client"
+            return src, dst
+        labels["suricata.attribution"] = "to_client"
+        labels["suricata.swapped"] = "true"
+        return dst, src
+    return src, dst
+
+
 def parse_eve_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
     etype = none_if_empty(rec.get("event_type"))
     if etype not in {"alert", "http", "flow", "dns"}:
@@ -112,7 +167,7 @@ def parse_eve_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
     if rec.get("in_iface"):
         labels["in_iface"] = str(rec["in_iface"])
     base: dict[str, Any] = {
-        "timestamp": parse_ts(rec.get("timestamp")) or utcnow(),
+        "timestamp": event_time(rec.get("timestamp"), ctx),
         "dataset": DATASET,
         "sensor_id": ctx.sensor_id,
         "host": ctx.host,
@@ -126,6 +181,9 @@ def parse_eve_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
 
     if etype == "alert":
         a = as_dict(rec.get("alert"))
+        base["source"], base["destination"] = _alert_attribution(
+            rec, a, base["source"], base["destination"], labels
+        )
         ids = IdsInfo(
             engine="suricata",
             signature=none_if_empty(a.get("signature")),
@@ -190,6 +248,7 @@ class SuricataEveParser(LineParser):
     def parse(self, line: str) -> list[Event]:
         rec = load_json_object(line)
         if rec is None:
+            self.ctx.stats.unparsed += 1
             return []
         ev = parse_eve_record(rec, self.ctx)
         return [ev] if ev is not None else []

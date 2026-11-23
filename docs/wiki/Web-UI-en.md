@@ -6,15 +6,22 @@ Open the TOKIWA UI at `http://<server>:8788`. The sidebar on the left is divided
 Use the buttons at the top right to switch the **display language (Japanese / English)** and the **light / dark theme**.
 Alerts and incidents update in real time (SSE).
 
+Dates and times always carry a time zone name (for example `11/11/2026, 09:43:09 GMT+9`). The clock button at the top right (showing `JST`, `UTC`, …)
+switches the **display time zone (browser local / UTC)**; the choice is remembered per browser. Hovering over a time also shows
+the ISO 8601 value in UTC (for example `2026-11-11T00:43:09.000Z`). The API, raw (JSON) views, the Gate and logs always use UTC.
+A custom time range on the Events screen is read in the display time zone as well.
+
 ## Roles (permissions)
 
 | Role | What it can do |
 |---|---|
-| `viewer` | View only |
+| `viewer` | View only. Request bodies, query strings, header values, command lines and prompts in events are masked (`[redacted: analyst role required]`). Cannot use the Copilot by default (`copilot.min_role`) |
 | `analyst` | Everything a viewer can do, plus running triage, updating incidents, **approving, rejecting, and reverting response actions**, editing deception assets, and more |
 | `admin` | Everything. Manages users, API tokens, notification channels, and LLM settings |
 
 The user you create first on the setup page is an `admin`. Add users under **Settings → Users**.
+
+A login lasts 12 hours by default (`server.token_ttl_minutes`). **Log out** (top right) ends that user's logins on **every device**. Changing a user's password or role also ends their existing logins, so they sign in again. Admins can sign another user out everywhere with **Revoke sessions** under **Settings → Users** (for example when a login may have been stolen).
 
 ## Monitor
 
@@ -55,11 +62,22 @@ A chat where you can ask questions about TOKIWA's data in natural language (for 
 The tools the Copilot can use are **read-only**; it cannot change settings or execute response actions. If no LLM is configured,
 it gives mock responses.
 
+Because the LLM might follow instructions an attacker planted in telemetry, links in answers are handled as follows:
+
+- Links inside TOKIWA open in the same tab only for known screens (alerts, incidents, sessions, events, …).
+- External links are clickable only for https pages on allowed sites (NVD, MITRE, CISA, JVN, OSV, FIRST), and the real host name is shown next to the label.
+  Anything else is shown as non-clickable text, together with its host name and "link disabled".
+- When a label looks like a URL but differs from the real destination, a "label and destination differ" warning is shown.
+
+The allowed sites are set in `EXTERNAL_LINK_ALLOWLIST` in `frontend/src/components/common/linkPolicy.ts` (requires a rebuild).
+
 ### Incidents
 
 Related alerts grouped by source, session, and entity.
 
 - List: severity, status, **Actor attribution** (AI agent / human / scanner, and so on), AI score
+  (attribution comes from rules and behaviour. Only when the rules cannot attribute is the LLM verdict used, and only to raise it to
+  AI agent / scanner; an LLM verdict of "human" or "benign" does not change it)
 - Detail: attack stage (kill chain: reconnaissance → initial access → …), LLM triage (summary, rationale, recommended response actions),
   the "evidence of AI involvement" cited by the LLM, and related alerts. You can set the assignee and update the status.
 
@@ -68,6 +86,12 @@ The server verifies that the evidence (event IDs) included in the LLM triage ref
 ### Events
 
 Search the raw ingested events. You can filter by type, dataset, source IP, host, time range, and keyword (path / User-Agent).
+
+When a path, User-Agent, header or body contains **invisible characters or characters that reorder the display**
+(the bidirectional control U+202E, the zero-width U+200B, …), each one is shown as `⟨U+202E⟩` in a warning colour and the row or event
+gets a "Contains invisible / bidi control characters" badge (this defeats tricks such as showing `invoice⟨U+202E⟩fdp.exe` as `invoiceexe.pdf`).
+The raw (JSON) view shows them as `\u202E`. Only the display changes; searches and filters use the original string. This applies to the event list,
+event details, alert evidence, session details, and Copilot answers and tool results.
 
 ## Intelligence
 
@@ -85,14 +109,17 @@ against vulnerability information and for prioritizing incidents (whether a KEV 
 ### Rules
 
 - **Detectors**: enable / disable the built-in detectors (web attack signatures, AI behavior, deception, ports, and so on)
-- **Sigma rules**: manage rules in Sigma format (25 bundled + any you add)
+- **Sigma rules**: manage rules in Sigma format (25 bundled + any you add). When one of the 14 bundled web attack rules
+  matches a request on which the built-in web detector of the same kind also fires, the two are merged (one alert, recorded
+  in `details.corroborated_by`); if the detector is enabled but stays silent, the rule's alert is recorded as low. The rule
+  keeps its own severity only while that detector is disabled
 - **LLM proposals**: rules the LLM proposed based on vulnerability information. **They are not enabled automatically**; you review and adopt them
 
 ## Respond
 
 ### Response
 
-A list of response actions proposed by the LLM, rules, and users. Tabs: **Awaiting approval** / **Active** / **History**.
+A list of response actions proposed by the LLM, rules, and users. Tabs: **Awaiting approval** / **Active** / **History** / **Suppressions** (targets marked "do not re-propose" on reject or revert; lift them here).
 Users with `analyst` or higher can approve, reject, and revert. For details, see [Response (approval workflow)](Response-en).
 
 ### Deception

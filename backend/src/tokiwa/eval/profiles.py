@@ -11,18 +11,29 @@ ai_agent            ARTEX-like: JS/OpenAPI/robots recon -> enumerate discovered 
                     error-conditioned payload mutation -> burst + "thinking" gaps; httpx/LLM-ish UA; follows AI
                     canaries (hidden instructions) on the same origin
 llm_app_attacker    prompt injection / jailbreak attempts against /api/chat (EN/JA, base64 obfuscation)
+api_only_agent      holdout: LLM tool loop over an HTTP client that only talks to the API (OpenAPI first, no HTML,
+                    no robots.txt, never sees the canary), one request per model turn, no natural-language probes
+slow_rotating_agent holdout: browser-driven agent (desktop Chrome headers) with long reasoning pauses (median ~20 s),
+                    strictly serial, egress IP rotating every few requests (proxy pool)
 ==================  ============================================================================================
 
-All payloads come from :mod:`tokiwa.eval.payloads` (inert detection-test strings).
+*Holdout* profiles (``Profile.holdout``, #127 / #174) model shapes of real AI attack tooling that the detectors were
+**not** written against: they skip the hypotheses the ``ai_agent`` script acts out (JS/robots recon, bursts, canary,
+natural-language probe values). They are not in ``DEFAULT_MIX`` (existing seeds produce the same files) and are
+reported separately, so tuning against the scripted profiles cannot hide a generalisation gap.
+
+All payloads come from :mod:`tokiwa.eval.payloads` (inert detection-test strings); targets are lab-only as for every
+profile (:mod:`tokiwa.eval.safety`).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import random
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import quote
 
 from tokiwa.eval import payloads as P
@@ -47,6 +58,8 @@ class Profile:
     description: str
     run: ProfileRunner
     identity: Callable[[random.Random, str], ClientIdentity]
+    # Not used to write or tune detectors: report it separately (generalisation check, #174).
+    holdout: bool = False
 
 
 # ------------------------------------------------------------------------------------------ timing
@@ -425,6 +438,146 @@ class _Chain:
         return False
 
 
+# ----------------------------------------------------------------------------------- holdout shapes
+
+
+def api_client_identity(rng: random.Random, ip: str) -> ClientIdentity:
+    """Generic HTTP client libraries as used by agent frameworks' HTTP tools (no LLM-vendor self-identification)."""
+    fam, ua = rng.choice(
+        [
+            ("requests", "python-requests/2.32.3"),
+            ("aiohttp", "Python/3.12 aiohttp/3.10.10"),
+            ("go", "Go-http-client/2.0"),
+            ("curl", "curl/8.5.0"),
+        ]
+    )
+    return ClientIdentity(source_ip=ip, user_agent=ua, family=fam)
+
+
+def chrome_identity(rng: random.Random, ip: str) -> ClientIdentity:
+    """Browser automation with a stock desktop Chrome UA and full browser headers."""
+    return ClientIdentity(
+        source_ip=ip, user_agent=rng.choice(_CHROME), family="chrome", accept_language=rng.choice(_LANGS)
+    )
+
+
+def turn_gap(rng: random.Random, median: float = 9.0) -> float:
+    """One model turn per tool call: inference + tool round trip, no parallel fan-out."""
+    return lognormal(rng, median, 0.5, 3.0, 60.0)
+
+
+_API_QUERIES = {
+    "/api/search": "q={term}",
+    "/api/products": "page=1",
+    "/api/files/download": "name=catalog.pdf",
+}
+
+
+async def _serial_probe(ctx: SessionContext, target: _Target, gap: Callable[[], float]) -> None:
+    """One parameter, one payload family; rewrite after an error response (no natural-language markers)."""
+    rng = ctx.rng
+    payload = rng.choice(P.FAMILIES[target.family])
+    for step in range(rng.randint(2, 5)):
+        if target.method == "POST":
+            body = {"username": payload, "password": rng.choice(["x", "admin", "123456"])}
+            resp = await ctx.request(
+                "POST", target.path, json_body=body, attack=target.family, phase="exploit"
+            )
+        elif target.param is None:
+            path = target.path.replace("{id}", quote(payload, safe=""))
+            resp = await ctx.request("GET", path, attack=target.family, phase="exploit")
+        else:
+            query = f"{target.param}={quote(payload, safe='')}"
+            resp = await ctx.request("GET", target.path, query=query, attack=target.family, phase="exploit")
+        await ctx.sleep(gap())
+        if resp.status not in (400, 403, 413, 500, 502):
+            return
+        payload = P.mutate(payload, step + 1, rng)
+
+
+async def api_only_agent(ctx: SessionContext) -> None:
+    rng = ctx.rng
+    spec = await ctx.request("GET", "/openapi.json", attack="recon", phase="recon")
+    await ctx.sleep(turn_gap(rng))
+    routes: list[str] = []
+    for _method, path, _params in extract_openapi_routes(spec.body):
+        path = path.replace("{pid}", "{id}").replace("{uid}", "{id}")
+        if path not in routes:
+            routes.append(path)
+    if not routes:  # spec missing: guess the usual REST names
+        routes = ["/api/products", "/api/products/{id}", "/api/search"]
+    endpoints = [r for r in routes if r not in ("/api/login", "/api/chat")]
+    rng.shuffle(endpoints)
+    for route in endpoints[: rng.randint(4, 8)]:
+        query = _API_QUERIES.get(route)
+        if query:
+            query = query.format(term=quote(rng.choice(P.BENIGN_SEARCH)))
+        await ctx.request("GET", _concretize(route), query=query, attack="recon", phase="enumerate")
+        await ctx.sleep(turn_gap(rng))
+    candidates = [
+        _Target("GET", "/api/search", "q", "sqli"),
+        _Target("GET", "/api/products/{id}", None, "sqli"),
+        _Target("GET", "/api/files/download", "name", "path_traversal"),
+        _Target("GET", "/api/search", "q", "ssti"),
+        _Target("POST", "/api/login", "username", "sqli"),
+        _Target("GET", "/api/users/{id}", None, "sqli"),
+    ]
+    known = set(routes) | {"/api/login"}
+    targets = [t for t in candidates if t.path in known]
+    rng.shuffle(targets)
+    for t in targets[: rng.randint(3, 5)]:
+        await _serial_probe(ctx, t, lambda: turn_gap(rng))
+
+
+# RFC 2544 benchmarking range: build_plans never hands these out, so rotated addresses cannot collide with the
+# address of another simulated session (visible on a live Gate only with --spoof-xff).
+ROTATION_POOL = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _rotate_ip(ctx: SessionContext) -> None:
+    host = ROTATION_POOL.network_address + ctx.rng.randrange(1, ROTATION_POOL.num_addresses - 1)
+    ctx.identity = replace(ctx.identity, source_ip=str(host))
+
+
+async def slow_rotating_agent(ctx: SessionContext) -> None:
+    rng = ctx.rng
+    ctx.cookie = f"sid={rng.getrandbits(64):016x}"
+    every = rng.randint(3, 6)
+    last_rotation = 0
+
+    def slow() -> float:
+        return lognormal(rng, 20.0, 0.5, 6.0, 120.0)
+
+    async def step() -> None:
+        nonlocal last_rotation
+        await ctx.sleep(slow())
+        if len(ctx.exchanges) - last_rotation >= every:
+            _rotate_ip(ctx)
+            last_rotation = len(ctx.exchanges)
+
+    await ctx.page("/", assets=ASSETS, phase="recon")
+    await step()
+    await ctx.page("/products", assets=("/static/app.js",), phase="recon")
+    await ctx.request("GET", "/api/products", query="page=1&sort=name", attack="recon", phase="recon")
+    await step()
+    await ctx.request("GET", "/openapi.json", kind="document", attack="recon", phase="recon")
+    await step()
+    for pid in rng.sample(["2", "3", "13", "999"], k=2):
+        await ctx.request("GET", f"/api/products/{pid}", attack="idor", phase="tamper")
+        await step()
+    targets = [
+        _Target("GET", "/api/search", "q", "sqli"),
+        _Target("GET", "/api/search", "q", "xss"),
+        _Target("GET", "/api/files/download", "name", "path_traversal"),
+    ]
+    rng.shuffle(targets)
+    for t in targets[: rng.randint(2, 3)]:
+        await _serial_probe(ctx, t, slow)
+        if len(ctx.exchanges) - last_rotation >= every:
+            _rotate_ip(ctx)
+            last_rotation = len(ctx.exchanges)
+
+
 # --------------------------------------------------------------------------------- llm_app_attacker
 
 
@@ -488,8 +641,26 @@ PROFILES: dict[str, Profile] = {
             llm_app_attacker,
             llm_attacker_identity,
         ),
+        Profile(
+            "api_only_agent",
+            "ai_agent",
+            "Holdout: API-only LLM tool loop (OpenAPI first, serial calls, generic client UA, no NL probes)",
+            api_only_agent,
+            api_client_identity,
+            holdout=True,
+        ),
+        Profile(
+            "slow_rotating_agent",
+            "ai_agent",
+            "Holdout: browser-driven agent, Chrome headers, ~20 s reasoning pauses, rotating egress IP",
+            slow_rotating_agent,
+            chrome_identity,
+            holdout=True,
+        ),
     )
 }
+HOLDOUT_PROFILES: frozenset[str] = frozenset(name for name, p in PROFILES.items() if p.holdout)
+TUNED_PROFILES: tuple[str, ...] = tuple(name for name, p in PROFILES.items() if not p.holdout)
 
 DEFAULT_MIX: dict[str, int] = {
     "benign_browser": 6,
@@ -508,13 +679,17 @@ def get_profile(name: str) -> Profile:
 
 
 def parse_mix(spec: str | None, *, default_count: int | None = None) -> dict[str, int]:
-    """``"ai_agent=3,benign_browser=5"`` or ``"ai_agent,scanner"`` (count = default_count or 1) or ``"all"``."""
-    if not spec or spec.strip() in ("all", "mixed", "default"):
+    """``"ai_agent=3,benign_browser=5"`` or ``"ai_agent,scanner"`` (count = default_count or 1), ``"mixed"`` or
+    ``"all"``. Without a count both give ``DEFAULT_MIX``; with one, ``mixed`` covers the tuned profiles and ``all``
+    every profile including the holdout ones."""
+    keyword = (spec or "mixed").strip()
+    if keyword in ("all", "mixed", "default"):
         if default_count is None:
             return dict(DEFAULT_MIX)
-        return dict.fromkeys(PROFILES, default_count)
+        names = PROFILES if keyword == "all" else TUNED_PROFILES
+        return dict.fromkeys(names, default_count)
     mix: dict[str, int] = {}
-    for part in spec.split(","):
+    for part in keyword.split(","):
         part = part.strip()
         if not part:
             continue

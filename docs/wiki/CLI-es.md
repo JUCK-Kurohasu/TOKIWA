@@ -17,6 +17,7 @@ Las opciones actualizadas de cada comando pueden consultarse con `--help`.
 | `tokiwa intel` | Feeds de vulnerabilidades |
 | `tokiwa sim` | Simulador de tráfico para el laboratorio |
 | `tokiwa eval` | Arnés de evaluación |
+| `tokiwa data` | Borrar / exportar los datos de una IP o sesión |
 
 > ⚠️ Ejecute los comandos que acceden directamente a la base de datos (`user`, `token`, `intel`, etc.) con **la misma configuración** que el servidor (el mismo directorio actual
 > o el mismo `TOKIWA_DATABASE__URL`). La ruta por defecto de la base de datos, `./data/tokiwa.db`, es relativa.
@@ -34,6 +35,9 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | No inicia los trabajos periódicos (sincronización de inteligencia, procesamiento de vencimientos, etc.) |
 
 La documentación de la API está en `http://<server>:8788/api/docs` y la comprobación de estado, en `/api/v1/health`.
+La documentación de la API (`/api/docs`, `/api/openapi.json`) es pública sin autenticación, por lo que en producción se
+recomienda desactivarla con `server.expose_docs: false` (variable de entorno `TOKIWA_SERVER__EXPOSE_DOCS=false`). La
+comprobación de estado no requiere autenticación, pero solo devuelve la versión a un usuario con sesión iniciada.
 
 ## tokiwa user create
 
@@ -42,14 +46,55 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 La contraseña se solicita de forma interactiva (dos veces, con la entrada oculta). El rol por defecto es `analyst`.
+Si ya existe un usuario con ese nombre, el comando muestra un error y termina con código 1. La creación queda en el registro de auditoría como `user.create` (actor `cli`).
+También sirve para recuperar el acceso cuando no queda ningún administrador (`--role admin`).
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+Pide una contraseña nueva (dos veces, con la entrada oculta) y la establece. Se cierran todas las sesiones existentes de ese usuario y el registro de auditoría guarda `user.password_reset` (actor `cli`; nunca se registra la contraseña). Úselo si se pierde la contraseña del administrador.
 
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-Los ámbitos por defecto son `ingest` y `gate`. El token (`tkw_...`) se muestra **una sola vez**.
+El ámbito por defecto es **solo** `ingest`. Para un token de Gate indique `--scope ingest --scope gate` explícitamente (el ámbito `gate` puede leer la política de Gate, con rutas señuelo, valores canario y la lista de bloqueo, así que délo solo a los Gate). El token (`tkw_...`) se muestra **una sola vez**.
+`--sensor-id` / `--dataset` (repetibles) vinculan el token a IDs de sensor y datasets ([Conexión de sensores](Sensors-es)).
+`--expires-in-days N` fija una caducidad (por defecto: nunca). Un token caducado recibe 401.
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # lista (nunca muestra secretos; --all incluye revocados)
+tokiwa token revoke <id|name>                              # revocar ahora
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # emite un token nuevo (una sola vez en stdout)
+```
+
+Funcionan en el host del servidor sin iniciar sesión como administrador (contraseña perdida, incidente en curso). Cada
+operación queda en el registro de auditoría con el actor `cli`. `rotate` emite un token nuevo con el mismo nombre, ámbitos
+y vinculación y mantiene válido el anterior durante `--grace-hours` (24 horas por defecto; 0 lo revoca ya). Gate vuelve a
+leer su archivo de token cuando cambia, así que basta con escribir el token nuevo en el archivo, sin reiniciar. Si un nombre
+coincide con varios tokens activos, indique el id.
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # por defecto solo cuenta (dry run)
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+Borra o exporta todo lo guardado sobre una IP de origen, una sesión de actor o un intervalo de tiempo (solicitudes de acceso
+o supresión de interesados, datos de clientes ingeridos por error). Los criterios se combinan con AND. Cobertura: se borran
+las filas de `events`, `actor_sessions` y `deception_trips`; en `alerts` se vacía `details` (la fila se mantiene porque los
+incidentes la referencian); en `llm_calls` solo se vacían el prompt y la respuesta (se conserva el coste). Los registros del
+LLM se comparan con la IP / el ID de sesión respetando límites de palabra (`10.0.0.1` no coincide con `10.0.0.15`). `export`
+escribe JSONL (un `{"table": ..., "row": {...}}` por línea); el archivo de `--out` tiene permisos 600. Ambos quedan en el
+registro de auditoría con el actor `cli`. No cubre resúmenes de incidentes, conversaciones del copiloto ni copias de seguridad.
 
 ## tokiwa gate run
 
@@ -63,7 +108,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | Valor de la configuración | URL de destino del reenvío |
 | `--listen` | `0.0.0.0:8080` | `host:port` de escucha |
 | `--server` | Valor de la configuración | URL del servidor de TOKIWA |
-| `--token` / `--token-file` | — | Token de API (se recomienda la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` o un archivo) |
+| `--token` / `--token-file` | — | Token de API (se recomienda la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` o un archivo; el archivo se relee cuando cambia y tras un 401) |
 | `--sensor-id` | `gate-1` | ID del sensor que se registra en los eventos |
 | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo que se capturan |
 | `--trust-forwarded-for` | off | Toma el valor más a la derecha de `X-Forwarded-For` como origen (solo detrás de un balanceador de carga de confianza) |
@@ -127,9 +172,10 @@ Con `--time-scale` inferior a 1 termina antes, pero cambia el ritmo de las solic
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -138,7 +184,10 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock` (gratis, sin conexión; por defecto) o `live` (el proveedor configurado; **genera costos**) |
 | `--budget-usd` | **Obligatorio** con `--llm live`. Límite de costo de esta ejecución |
 | `--out` | Destino de salida (por defecto `eval/runs/<hora UTC>`) |
-| `--compare` / `--fail-on-regression` | Comparación con la ejecución anterior / código de salida 1 si hay empeoramiento |
+| `--compare` / `--fail-on-regression` | Comparación con la ejecución anterior / código de salida 1 si hay empeoramiento. Si las dos ejecuciones difieren en sus condiciones (sha256 del conjunto de datos, proveedor LLM, detectores activos, número de reglas Sigma cargadas, umbrales, lotes), se consideran "no comparables" y el código de salida es 3 |
+| `--allow-mismatch` | Compara y evalúa el empeoramiento aunque las condiciones difieran (las diferencias se muestran como advertencia) |
 | `--speed` | 0 = lo más rápido posible, 1 = tiempo real, 10 = 10 veces más rápido |
 | `--enable-detector` / `--disable-detector` | Fuerza la activación / desactivación de un detector |
 | `--keep-work` | Conserva la base de datos temporal de la evaluación |
+| `import-artex --since` / `--until` | Importa solo los registros de ARTEX de este intervalo (segundos unix o ISO 8601; UTC si no hay desfase) |
+| `import-artex --split-gap-minutes` | Por host, inicia una nueva sesión (con su propia IP de origen) donde el registro se interrumpe N minutos o más. Por defecto no se divide |

@@ -9,7 +9,7 @@ import { OffsetPager } from "@/components/common/OffsetPager";
 import { QueryView } from "@/components/common/QueryView";
 import { useUrlParams } from "@/components/common/urlState";
 import { Badge, Card, EmptyState, Input } from "@/components/ui";
-import { formatDateTime, pct, timeAgo } from "@/lib/format";
+import { dateTimeTitle, pct, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 
 const LIMIT = 30;
@@ -106,7 +106,7 @@ export function NewsTab({ onOpenVuln }: { onOpenVuln: (id: string) => void }) {
                 <li key={it.id} className="space-y-1.5 px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
                     <Badge>{it.source}</Badge>
-                    <span title={formatDateTime(it.published ?? it.fetched_at)}>
+                    <span title={dateTimeTitle(it.published ?? it.fetched_at)}>
                       {timeAgo(it.published ?? it.fetched_at)}
                     </span>
                     {isSafeHttpUrl(it.url) && <span>{hostOf(it.url)}</span>}

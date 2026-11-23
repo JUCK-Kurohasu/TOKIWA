@@ -15,13 +15,20 @@
 - LLM 设置（**LLM → Settings**（LLM → 设置））：提供商、模型、预算、输出语言、API 密钥等
 - 检测器的启用 / 禁用（**Rules → Detectors**（检测规则 → 检测器））
 
+**在界面中保存的值，对该项优先于环境变量和 YAML**（数据库中的值优先）。重启或恢复数据库后仍然有效。
+启动时，与静态设置不同的 LLM 项的名称会以 WARNING 记录到日志（不记录值）。在 LLM → Settings 的“在此保存的覆盖”中
+可以确认哪些项来自数据库，通过 **重置所有覆盖**（`DELETE /api/v1/llm/config`，仅管理员，记录审计）可以恢复为静态设置。
+如需通过环境变量 / YAML 固定 LLM 设置（例如强制 `TOKIWA_LLM__PROVIDER=mock`，使任何内容都不发送到外部 LLM），请设置
+`TOKIWA_LLM__ALLOW_UI_OVERRIDE=false`（`llm.allow_ui_override`，默认 true）。此时数据库中的覆盖会被忽略，来自界面的更改
+（`PUT /api/v1/llm/config`）返回 409。该设置本身无法在界面中更改。
+
 在 Docker Compose 中，`.env` 会作为环境变量传入容器。在本地直接运行 `tokiwa serve` 时，
 不会自动读取 `.env`。
 
 ### 书写注意事项
 
 - **列表和字典用 JSON 书写**：`TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **不要设置空值**。`TOKIWA_SERVER__SECRET_KEY=` 会被视为“空字符串签名密钥”（与未设置不同）。
+- **不要设置空值**（空字符串的含义因设置项而异）。空的 `TOKIWA_SERVER__SECRET_KEY=` 会被视为未设置，使用 `data_dir/secret.key` 中自动生成的密钥。自行设置时需要至少 32 个字符，过短时服务器无法启动。
 - 建议机密信息（API 密钥、密码）通过环境变量而不是 YAML 传递。
 
 ### YAML 示例
@@ -55,8 +62,17 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | 仅在从其他源提供 UI 时需要 |
 | `server.static_dir` | 无 | 已构建的 UI（`frontend/dist`）。指定后在 `/` 下提供 |
 | `server.data_dir` | `./data` | 数据的保存位置（签名密钥等） |
-| `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥。未设置时生成并保存到 `data_dir/secret.key` |
+| `server.secret_key` | 自动生成 | 登录（JWT）的签名密钥（至少 32 个字符）。未设置或为空时生成并保存到 `data_dir/secret.key`（权限 0600） |
 | `server.token_ttl_minutes` | 720 | 登录的有效时间 |
+| `auth.setup_code_required` | `true` | 初始设置（创建第一个管理员）时要求输入启动日志和 `data_dir/setup-code` 中的一次性设置码 |
+| `server.max_body_bytes` | 1048576（1 MiB） | 请求体上限，超过返回 413。适用于除摄取（ingest）以外的所有 API |
+| `server.security_headers` | `true` | 为所有响应添加 CSP、`X-Frame-Options: DENY`、`nosniff` 和 `Referrer-Policy: no-referrer`。仅当代理自行设置策略或定制的 UI 与 CSP 不兼容时设为 `false` |
+| `server.expose_docs` | `true` | 无需认证即可访问 API 文档（`/api/docs`、`/api/openapi.json`）。生产环境建议设为 `false` |
+| `server.max_ingest_body_bytes` | 33554432（32 MiB） | `/api/v1/ingest/` 的请求体上限。超过的批次返回 413，Gate / 代理会**丢弃**该批次；增大 `batch_size` 时请一并调高 |
+| `auth.login_max_failures` | 5 | 同一用户名 × 来源 IP 的登录失败达到此次数后，暂时拒绝（429）。0 表示禁用 |
+| `auth.login_max_failures_per_ip` | 30 | 单个来源 IP 的失败次数上限（不区分用户名，防密码喷洒）。0 表示禁用 |
+| `auth.login_lockout_minutes` | 15 | 上面两项的统计时间窗（分钟）。旧的失败移出时间窗后解除 |
+| `auth.password_hash_concurrency` | 4 | 同时计算的密码哈希（scrypt）数量 |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | PostgreSQL 为 `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM（`llm.*`）
@@ -69,12 +85,19 @@ deception:
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `disabled_detectors` | `[]` | 要禁用的检测器 ID |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Sigma 规则的存放位置 |
+| `sigma_rule_dirs` | 根据包的位置解析（源码中为 `<仓库>/rules/sigma`，Docker 镜像中为 `/app/rules/sigma`） | Sigma 规则的存放位置。与启动时的工作目录无关。目录不存在时在启动时记录 ERROR 日志。指定相对路径时依次在工作目录、`backend/` 中查找 |
 | `dedup_window_seconds` | 300 | 合并相同告警的时间窗口 |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | 作为提示注入监控对象的 HTTP 路径 |
 | `session_idle_timeout_seconds` | 1800 | 在此时间内没有访问则视为另一个会话 |
 | `ai_agent_threshold` | 0.7 | 判定为 AI 智能体的 AI 评分阈值 |
+| `max_future_skew_seconds` | 120 | 允许传感器时钟超前的秒数。时间戳比这更靠后的事件改用接收时间，并加上标签 `clock_skew` 和标注 `ingest.original_timestamp`（原始时间）；审计日志 `ingest.clock_skew` 每个令牌每 10 分钟最多记录一次。过去的时间戳（延迟或重发的事件）保持不变 |
+| `max_live_sessions` | 4096 | 内存中保留的会话数上限。满了以后先淘汰只有 1 个请求的低分会话，带有 AI 判定、金丝雀或诱饵证据的会话最后淘汰。淘汰过多时输出 WARNING 日志（大量只发 1 个请求的客户端可能重置会话特征）；正常负载下也出现时请调大 |
+| `fp_suppress_hours` | 168 | 将告警标记为“误报”后，在此时间内抑制同一问题（相同规则、匹配内容、路径和来源 IP）的再次出现：再次出现只累加到原告警的计数，不产生新告警、LLM 分诊或通知。出现新的签名或严重级别升高时照常告警。设为 0 则不自动抑制。抑制的列表和解除通过 API `GET/POST /api/v1/alert-suppressions` |
+| `allowlist_max_hours` | 720 | 声明已授权的漏洞扫描或负载测试来源 CIDR 的许可列表（由管理员通过 API 创建，必须指定期限）的最长期限。许可列表内的告警只以 info 记录，不进入分诊、通知、事件或处置建议 |
 | `web.*` | — | Web 类速率检测的阈值（连续错误、登录失败、洪泛等） |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 签名检测的检查上限。超出数量上限的参数、请求头、JSON 值和 multipart 部分不会被丢弃，而是合并在一起检查；超出字符数上限的部分不检查。达到上限时记录在告警的 `details.inspection_truncated` 和标签 `inspection-truncated` 中；如果上限之前的内容像填充（同一字符重复、空的虚拟元素），会产生 `web.inspection_evasion`（low） |
+| `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | 应用自定义的请求头（X-Tenant-Id 等）也作为 SQLi、XSS、路径遍历、命令注入的检查对象。Accept、Sec-*、If-*、追踪类等框架性请求头不检查；在 `extra_framing_headers` 中添加名称（末尾 `*` 表示前缀匹配）可以排除更多。设为 false 恢复以前的行为（只检查 User-Agent、Referer、X-Forwarded-* 等） |
+| `web.max_decode_rounds` | 8 | 对一个值重复进行 URL / HTML / JS 解码的最大次数（应对多重编码；值不再变化时即停止） |
 
 ### 分诊（研判）与关联（`triage.*`）
 
@@ -93,6 +116,7 @@ deception:
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | 自动批准（两项设置都需要） |
+| `auto_approve_cooldown_minutes` | 1440 | 人工拒绝或撤销后，同类型 + 同目标在此时间（分钟）内不会被自动批准（0 表示禁用） |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL 的默认值和上限 |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | 绝不作为处置对象的范围 |
 | `protect_server_addresses` | true | 保护服务器自身的 IP |
@@ -113,13 +137,21 @@ deception:
 | `gate.listen_host` / `gate.listen_port` | `0.0.0.0` / 8080 | 监听 |
 | `gate.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `gate.ingest_token` | 无 | API 令牌（scope: ingest + gate） |
+| `gate.token_file` | 无 | 保存 API 令牌的文件。变化时和收到 401 时重新读取（轮换时无需重启）。可读时优先于 `ingest_token` |
 | `gate.capture_body_bytes` | 4096 | 捕获请求体的前多少字节 |
 | `gate.trust_forwarded_for` | false | 信任 `X-Forwarded-For` |
+| `gate.max_request_headers` | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
+| `gate.forward_client_headers` | `[]` | 默认会移除的 `X-Real-IP`、`Forwarded`、`CF-Connecting-IP`、`X-Original-URL` 等请求头中，要原样转发给上游的那些（仅限前置的可信代理所添加的） |
+| `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）。超出的请求返回 429。0 表示不限制 |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `agent.ingest_token` | 无 | API 令牌（scope: ingest） |
 | `agent.interval_seconds` | 10 | 主机传感器的采集间隔 |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | 要接入的日志 |
 | `agent.verify_tls` | true | 校验服务器的 TLS 证书 |
+| `agent.send_cmdline` | true | 发送进程的命令行（机密在发送前遮盖）。false 时只发送名称、可执行文件和用户 |
+| `agent.max_connections_per_cycle` | 1000 | 每个周期发送的新连接上限（超出部分顺延到下一个周期） |
+| `agent.log_timezone` | 无 | 不带偏移的日志时间的时区（`Asia/Tokyo`・`+09:00`・`UTC`）。未设置时视为 UTC 并警告 |
+| `agent.health_report_seconds` | 300 | 报告无法读取的行／时间的最短间隔（`agent.health` 事件） |
 
 ### 通知（`notify.*`）、Copilot（`copilot.*`）
 
@@ -130,9 +162,16 @@ deception:
 | `notify.public_ui_url` | 无 | 通知中包含的 UI 链接地址 |
 | `notify.language` | `both` | 通知的语言 |
 | `notify.dedup_minutes` | 10 | 抑制相同通知的时间 |
+| `notify.include_summary` | false | 在通知中包含 LLM 写的文字（安全事件摘要、处置理由） |
+| `notify.include_source_ip` | true | 在通知中包含来源 IP 和 IP / CIDR 处置目标（false 时显示 `(hidden)`） |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | 发送目标的限制（SSRF 防护） |
+| `notify.smtp_password_envs` | `[]` | 邮件 `password_env` 可额外使用的环境变量名（默认可用 `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`） |
+| `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | SMTP 发送目标的限制（考虑到内部中继，默认不拒绝私有地址） |
+| `notify.smtp_allow_plaintext_auth` | false | 允许不使用 TLS 的 SMTP 认证 |
 | `copilot.enabled` | true | Copilot（AI 助手） |
 | `copilot.tier` | `deep` | 使用的模型层级 |
 | `copilot.max_tool_iterations` | 8 | 单次提问中使用工具的最大次数 |
+| `copilot.min_role` | `analyst` | 创建会话和发送消息所需的最低角色（`viewer` / `analyst` / `admin`）。一次提问最多调用 8 次 deep 层级，且日预算全局共用，因此默认不允许 viewer |
+| `copilot.messages_per_minute` | 6 | 每个用户每分钟可发送的消息上限（0 表示不限）。超出时返回 429 |
 
 所有配置项都在 `backend/src/tokiwa/config.py` 中。Docker 用的示例请参阅仓库根目录下的 `.env.example`。

@@ -69,7 +69,8 @@ const strings = {
     smtpPass: "パスワード",
     starttls: "STARTTLS を使う",
     passwordEnv: "パスワードの環境変数名（任意）",
-    passwordEnvHint: "指定するとパスワードを DB に保存せず、サーバーの環境変数から読みます（推奨）",
+    passwordEnvHint:
+      "指定するとパスワードを DB に保存せず、サーバーの環境変数から読みます（推奨）。使える名前は TOKIWA_NOTIFY_SMTP_* / TOKIWA_SMTP_PASSWORD* と、サーバー設定 notify.smtp_password_envs に列挙したものだけです。ユーザー名を指定する場合は STARTTLS か SSL が必要です。宛先（ホスト・ポート・ユーザー名）を変えたらパスワードも入力し直してください。",
     from: "送信元アドレス",
     to: "宛先（カンマ区切り）",
     emailErr: "SMTP ホスト・送信元・宛先を入力してください",
@@ -111,7 +112,7 @@ const strings = {
     starttls: "Use STARTTLS",
     passwordEnv: "Password env var (optional)",
     passwordEnvHint:
-      "When set, the password is read from the server environment instead of stored in the DB (recommended)",
+      "When set, the password is read from the server environment instead of stored in the DB (recommended). Only TOKIWA_NOTIFY_SMTP_* / TOKIWA_SMTP_PASSWORD* names and those listed in the server setting notify.smtp_password_envs are accepted. With a username, STARTTLS or SSL is required. Re-enter the password when you change the host, port or username.",
     from: "From address",
     to: "Recipients (comma separated)",
     emailErr: "SMTP host, from and recipients are required",

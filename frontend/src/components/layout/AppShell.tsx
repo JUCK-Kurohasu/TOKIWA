@@ -1,13 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Languages, LogOut, Moon, Sun } from "lucide-react";
+import { Clock, Languages, LogOut, Moon, Sun } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router";
 import { api } from "@/api/client";
 import { BrandMark } from "@/components/common/BrandMark";
-import { useLabel, useLang, useT } from "@/lib/i18n";
+import { useLabel, useLang, useLocal, useT } from "@/lib/i18n";
+import { zoneName } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
 import { appRoutes, SECTION_ORDER } from "@/routes";
 import { authStore, useAuth } from "@/stores/auth";
+import { LlmModeBanner } from "./LlmModeBanner";
 
 function useTheme(): [boolean, () => void] {
   const [dark, setDark] = useState(() => {
@@ -96,6 +98,43 @@ function SystemStatus() {
   );
 }
 
+const tzStrings = {
+  ja: {
+    local: "ローカル",
+    utc: "UTC",
+    title:
+      "表示タイムゾーン: {zone}（クリックで {next} に切り替え）。ツールチップには常に UTC の ISO 時刻を表示します。",
+  },
+  en: {
+    local: "Local",
+    utc: "UTC",
+    title: "Display time zone: {zone} (click to switch to {next}). Tooltips always show the ISO time in UTC.",
+  },
+};
+
+/** Display time zone switch (#165): browser-local <-> UTC, remembered per browser. */
+function TimeZoneToggle() {
+  const { lang, tz, setTz } = useLang();
+  const L = useLocal(tzStrings);
+  const locale = lang === "ja" ? "ja-JP" : "en-US";
+  const name = zoneName(locale, tz);
+  const zone = tz === "utc" ? L.utc : `${L.local} (${name})`;
+  const next = tz === "utc" ? `${L.local} (${zoneName(locale, "local")})` : L.utc;
+  const title = L.title.replace("{zone}", zone).replace("{next}", next);
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-muted hover:bg-surface-2 hover:text-fg"
+      onClick={() => setTz(tz === "utc" ? "local" : "utc")}
+      title={title}
+      aria-label={title}
+    >
+      <Clock className="h-4 w-4" aria-hidden />
+      <span className="font-mono">{name || zone}</span>
+    </button>
+  );
+}
+
 function Topbar() {
   const { user } = useAuth();
   const { lang, setLang } = useLang();
@@ -104,6 +143,7 @@ function Topbar() {
   const navigate = useNavigate();
   return (
     <header className="flex h-14 items-center justify-end gap-2 border-b border-line bg-surface px-4">
+      <TimeZoneToggle />
       <button
         type="button"
         className="rounded-md p-2 text-muted hover:bg-surface-2 hover:text-fg"
@@ -127,8 +167,16 @@ function Topbar() {
         type="button"
         className="rounded-md p-2 text-muted hover:bg-surface-2 hover:text-fg"
         onClick={() => {
-          authStore.logout();
-          navigate("/login");
+          // Server-side logout ends this user's JWTs everywhere (#34). Local state is cleared even if the call
+          // fails (offline, already expired); authStore.logout() itself must not call the API (client.ts calls
+          // it on every 401).
+          void api
+            .post("/auth/logout")
+            .catch(() => undefined)
+            .finally(() => {
+              authStore.logout();
+              navigate("/login");
+            });
         }}
         title={t("common.logout")}
       >
@@ -144,6 +192,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <LlmModeBanner />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>

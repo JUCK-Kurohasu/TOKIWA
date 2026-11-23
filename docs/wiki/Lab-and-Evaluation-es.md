@@ -30,7 +30,7 @@ Es el procedimiento de "3. Montar un minilaboratorio y lanzar ataques" de [Inici
 
 ```bash
 docker compose -f lab/compose.yaml up --build -d            # tokiwa + gate + victim
-# Abra http://localhost:8788 y, la primera vez, cree el administrador
+# Abra http://localhost:8788 y, la primera vez, cree el administrador (código: docker compose -f lab/compose.yaml logs tokiwa)
 
 docker compose -f lab/compose.yaml --profile sim run --rm sim                          # Mezcla por defecto
 SIM_PROFILE=ai_agent docker compose -f lab/compose.yaml --profile sim run --rm sim     # Solo agentes de IA
@@ -43,7 +43,15 @@ docker compose -f lab/compose.yaml down                                         
 Para ejecutarlo con un LLM real, arránquelo añadiendo variables como `TOKIWA_LLM_PROVIDER=auto ANTHROPIC_API_KEY=... TOKIWA_LLM_BUDGET_USD=2`
 (el presupuesto diario por defecto del laboratorio es de $1).
 
-> ⏳ Para `lab/compose.yaml` solo se ha validado la sintaxis; el arranque con `up` aún no está verificado. Si encuentra algún problema, comuníquelo mediante un Issue.
+> ✅ **Verificado (2026-11-10, auditoría L14, en un sandbox; no se registraron las versiones de Docker / Compose)**: con `up -d`,
+> `tokiwa-init` termina correctamente y `tokiwa` / `gate` / `victim` quedan healthy; configuración inicial en la UI; y desde el `sim`
+> de `--profile sim`: alertas → incidente → propuesta de respuesta → aprobación → bloqueo en el Gate (403). El bloqueo tardó unos
+> 4–8 segundos en aplicarse tras la aprobación.
+>
+> ⚠️ En ese entorno, un `up --build` directo falló por el límite de peticiones de Docker Hub (429), un 403 de ghcr.io y un proxy que
+> intercepta TLS. El laboratorio se arrancó tras sustituir las imágenes base mediante argumentos de compilación (`NODE_IMAGE` /
+> `PYTHON_IMAGE` / `UV_IMAGE`) y reetiquetar a mano la imagen base del victim (detalles en "検証状況" de `lab/README.md`).
+> **Sin verificar**: `--profile ingest` y `--profile agent`, y la ejecución con un LLM real.
 
 ## Simulador (`tokiwa sim`)
 
@@ -54,6 +62,10 @@ Para ejecutarlo con un LLM real, arránquelo añadiendo variables como `TOKIWA_L
 | `human_attacker` | Humano | Prueba SQLi / XSS a mano, a ritmo humano |
 | `ai_agent` | Agente de IA | Agente autónomo como ARTEX (descubrimiento de API a partir de JS / OpenAPI, mutación tras errores, ráfagas y esperas de razonamiento, obediencia a canarios) |
 | `llm_app_attacker` | Humano | Inyección de prompts y jailbreak contra `/api/chat` |
+| `api_only_agent` | Agente de IA (reservado) | Un bucle de herramientas de LLM que solo llama a la API (empieza por OpenAPI, nunca toca HTML, robots ni canarios, una petición por turno, UA de cliente HTTP genérico) |
+| `slow_rotating_agent` | Agente de IA (reservado) | Un agente que maneja un navegador (cabeceras completas de Chrome), pausas de razonamiento con una mediana de unos 20 segundos, IP de origen que cambia cada pocas peticiones |
+
+Los **perfiles reservados (holdout)** tienen formas que no se usaron para diseñar ni ajustar los detectores, y no están en la mezcla por defecto. Indíquelos explícitamente (`--profile api_only_agent=2,...`) o inclúyalos con `--profile all --sessions N`. Los resultados de la evaluación los muestran aparte de los perfiles guionizados. La rotación de IP solo es visible para el Gate con `--spoof-xff`.
 
 ```bash
 cd backend
@@ -87,12 +99,22 @@ Los resultados se escriben en `eval/runs/<hora UTC>/` como `metrics.json` y `rep
 
 | Métrica | Significado |
 |---|---|
-| Tasa de detección de sesiones de ataque | Proporción de sesiones de ataque con al menos una alerta |
+| Tasa de detección de sesiones de ataque (medium o superior) | **Métrica principal**. Proporción de sesiones de ataque con al menos una alerta de severidad medium o superior |
+| Tasa de detección de sesiones de ataque (cualquier severidad) | Métrica secundaria. Cuenta una sesión como detectada aunque solo tenga una alerta info / low |
 | Tasa de falsos positivos en sesiones legítimas | Proporción de sesiones legítimas que recibieron alguna alerta |
 | Precisión de las alertas | Proporción de alertas atribuidas solo a sesiones de ataque (también se calcula por detector) |
 | Atribución de IA P / R / F1 / AUC | Exactitud al clasificar las sesiones según si son "un agente de IA" |
 | Tasa de concordancia del LLM | Proporción de evaluaciones del triaje (tipo de actor, malicioso, IA) que coinciden con la referencia |
 | Costo y latencia | Costo del LLM, latencia ingesta → alerta y alerta → triaje |
+
+Cada tasa se informa con su numerador / denominador y un intervalo del 95% (Clopper–Pearson); los valores con menos de 30 ensayos
+se muestran como **valores de referencia** (参考値) en `report.md` (el lab-mini incluido tiene 3 sesiones legítimas y 2 de IA, por lo
+que "0/3 falsos positivos" tiene un intervalo de 0–70.8%). Con `--llm mock`, la "tasa de concordancia del LLM" es la evaluación
+alternativa basada en reglas coincidiendo consigo misma y **no es la calidad del LLM**; el costo se muestra como el real ($0) más una
+estimación aparte (tokens estimados × tabla de precios). `--compare` avisa de que dos ejecuciones "no son comparables" cuando sus
+condiciones difieren (sha256 del dataset, proveedor LLM, detectores activos, número de reglas Sigma cargadas, umbrales), y entonces
+`--fail-on-regression` termina con el código 3 (use `--allow-mismatch` para una comparación intencionada). También se comparan el
+total de alertas y el número por detector.
 
 > El dataset incluido (`eval/datasets/lab-mini.jsonl`) se sintetizó a partir de las mismas hipótesis que los detectores. Considere que las cifras obtenidas con él
 > **serán más altas que en un entorno real**.
@@ -104,23 +126,31 @@ El perfil `ai_agent` del simulador no es más que un modelo hipotético, así qu
 1. Arranque el laboratorio (véase más arriba).
 2. Arranque ARTEX. Por defecto, el proxy de registro de tráfico de ARTEX **usa :8788 y entra en conflicto con TOKIWA**,
    así que configure ARTEX en otro puerto (por ejemplo: `./start.sh -addr :8787 -proxy :18788`).
-3. Limite el objetivo de las tareas de ARTEX **únicamente al Gate del laboratorio (`http://<host del laboratorio>:8080`)**.
-4. Qué observar en TOKIWA durante el ejercicio:
+3. **Antes de crear la tarea**, active en la configuración del sistema de ARTEX el registro de tráfico (clave `traffic_capture`) y el
+   registro del LLM (`llm_record`), y borre los registros anteriores del host objetivo. Ambos registros están desactivados por
+   defecto y, si siguen así, no quedan datos para la evaluación posterior. ARTEX guarda los registros por host, no por tarea
+   (detalles en `docs/purple-team.md` §2).
+4. Limite el objetivo de las tareas de ARTEX **únicamente al Gate del laboratorio (`http://<host del laboratorio>:8080`)**.
+5. Qué observar en TOKIWA durante el ejercicio:
    - **AI sessions** (Sesiones de IA): si las sesiones de ARTEX se clasifican como agente de IA y obtienen una puntuación alta
    - **Alerts** (Alertas): `ai.agent_session`, `ai.adaptive_mutation`, `ai.semantic_recon`, `ai.llm_client_fingerprint`, `deception.trip`, etc.
    - **Incidents** (Incidentes): si **Actor attribution** (Atribución del actor) pasa a ser agente de IA y si las fases del ataque avanzan
    - **Response** (Respuesta): si los bloqueos y demás acciones **se quedan en propuesta** y no se ejecutan hasta que se aprueban
-5. Después, puede convertir los registros de ARTEX en un dataset y volver a evaluarlos tantas veces como quiera.
+6. Después, puede convertir los registros de ARTEX en un dataset y volver a evaluarlos tantas veces como quiera.
 
 ```bash
 cd backend
 uv run tokiwa eval import-artex <directorio donde se extrajo el archivo de tarea de ARTEX> --host <host del laboratorio> \
-  --out ../eval/datasets/artex-<fecha>.jsonl
+  --since <inicio del ejercicio UTC> --until <fin del ejercicio UTC> --split-gap-minutes 30 --out ../eval/datasets/artex-<fecha>.jsonl
 uv run tokiwa sim generate --profile benign_browser=10 --out ../eval/datasets/benign.jsonl
 cat ../eval/datasets/artex-<fecha>.jsonl ../eval/datasets/benign.jsonl > ../eval/datasets/purple-<fecha>.jsonl
 uv run tokiwa eval run --dataset ../eval/datasets/purple-<fecha>.jsonl
 ```
 
 `import-artex` puede leer archivos de tarea (`traffic/traffic.json`), ZIP de evidencias, índices de registros (SQLite) y volcados de la API.
-Tenga en cuenta que los registros de ARTEX tienen una resolución temporal de 1 segundo y no incluyen la IP de origen (se completa con `--source-ip`).
+Las horas de los registros de ARTEX son **horas de finalización de la respuesta con resolución de 1 segundo**, y no incluyen la IP
+de origen (se completa con `--source-ip`). Los intervalos y ráfagas de los eventos importados son aproximados, así que evalúe el ritmo
+de las peticiones con la captura en vivo del Gate durante el ejercicio. El orden de las cabeceras tampoco tiene significado. Puede
+acotar el intervalo con `--since` / `--until` y separar sesiones en los silencios con `--split-gap-minutes`. Si no se importa nada,
+el comando indica si probablemente el registro estaba desactivado, qué hosts había y qué intervalo de tiempo cubren los registros.
 TOKIWA solo lee el formato de registro de ARTEX; no incluye código de ARTEX.

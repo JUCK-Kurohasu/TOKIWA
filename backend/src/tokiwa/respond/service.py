@@ -35,10 +35,14 @@ from tokiwa.audit import record_audit
 from tokiwa.bus import bus
 from tokiwa.config import get_settings
 from tokiwa.db.models.response import ResponseActionRow
+from tokiwa.db.models.response_suppression import ResponseSuppressionRow
 from tokiwa.db.session import session_scope
+from tokiwa.respond import suppress
 from tokiwa.respond.executors import ExecutionRequest, ExecutorError, get_executor
-from tokiwa.respond.policy import auto_approve_allowed
+from tokiwa.respond.policy import auto_approve_allowed, refused_by_settings
+from tokiwa.respond.suppress import ActionSuppressed
 from tokiwa.respond.validate import (
+    NETWORK_ACTIONS,
     ONE_SHOT_ACTIONS,
     ActionValidationError,
     ValidatedAction,
@@ -46,7 +50,8 @@ from tokiwa.respond.validate import (
 )
 from tokiwa.runtime import on_startup
 from tokiwa.schemas.common import Page
-from tokiwa.schemas.response import ActionProposal, ActionStatus, ResponseAction
+from tokiwa.schemas.response import ActionProposal, ActionProposer, ActionStatus, ResponseAction
+from tokiwa.schemas.suppressions import SuppressOptions
 from tokiwa.schemas.triage import ActionType
 from tokiwa.util import new_id, utcnow
 
@@ -54,13 +59,19 @@ log = logging.getLogger(__name__)
 
 POLICY_ACTOR = "policy"
 EXPIRY_ACTOR = "system:expiry"
+SETTINGS_ACTOR = "system:settings"
 OPEN_STATUSES = (ActionStatus.PROPOSED.value, ActionStatus.APPROVED.value, ActionStatus.ACTIVE.value)
 MAX_REASON_CHARS = 8000
+# Audit #130: later proposals for an approved / active action are kept as notes, never merged into its reason.
+MAX_NOTES = 50
+MAX_NOTE_CHARS = 2000
+MAX_AUDIT_REASON_CHARS = 1000
 
 __all__ = [
     "ActionExecutionError",
     "ActionNotFound",
     "ActionStateError",
+    "ActionSuppressed",
     "ActionValidationError",
     "approve_action",
     "create_proposal",
@@ -70,6 +81,7 @@ __all__ = [
     "propose_action",
     "reject_action",
     "revert_action",
+    "revoke_disallowed_actions",
 ]
 
 
@@ -112,13 +124,43 @@ def _append_reason(existing: str, new: str) -> str:
     return combined[:MAX_REASON_CHARS]
 
 
+def _add_note(
+    row: ResponseActionRow, *, reason: str, proposer: str, who: str, v: ValidatedAction, now: datetime
+) -> bool:
+    """Record a later proposal on an approved / active row without touching what was approved (audit #130).
+
+    Bounded (every alert from an attacker merges here): identical reasons are skipped, at most ``MAX_NOTES``
+    (newest kept), each reason capped at ``MAX_NOTE_CHARS``. Returns True when a note was added.
+    """
+    notes = list(row.notes or [])
+    text = reason[:MAX_NOTE_CHARS]
+    if text and (text == row.reason or any(n.get("reason") == text for n in notes)):
+        return False
+    notes.append(
+        {
+            "at": now.isoformat(),
+            "proposed_by": proposer,
+            "by": who[:64],
+            "reason": text,
+            "incident_id": v.incident_id,
+            "alert_id": v.alert_id,
+        }
+    )
+    row.notes = notes[-MAX_NOTES:]
+    return True
+
+
 # ---------------------------------------------------------------- propose
 
 
 async def propose_action(proposal: ActionProposal) -> ResponseAction | None:
-    """Create (or merge into) a proposal. Returns None when validation rejects it."""
+    """Create (or merge into) a proposal. Returns None when validation rejects it or a human suppressed it."""
     try:
         return await create_proposal(proposal)
+    except ActionSuppressed as exc:
+        log.info("response proposal suppressed (%s %r): %s", proposal.action_type, proposal.target, exc)
+        await suppress.note_dropped(exc, actor=proposal.proposed_by.value)
+        return None
     except ActionValidationError as exc:
         log.info("response proposal rejected (%s %r): %s", proposal.action_type, proposal.target, exc)
         await record_audit(
@@ -131,7 +173,11 @@ async def propose_action(proposal: ActionProposal) -> ResponseAction | None:
 
 
 async def create_proposal(proposal: ActionProposal, *, actor: str | None = None) -> ResponseAction:
-    """Validate and store a proposal. Raises :class:`ActionValidationError` (used by the API for 422)."""
+    """Validate and store a proposal. Raises :class:`ActionValidationError` (used by the API for 422).
+
+    A matching suppression (audit #63) drops automated proposals (:class:`ActionSuppressed`, handled by
+    :func:`propose_action`) and forbids auto-approval for everything else.
+    """
     settings = get_settings().response
     v = validate_action(
         proposal.action_type,
@@ -146,6 +192,13 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
     reason = _clean_reason(proposal.reason)
     now = utcnow()
     async with _propose_lock(), session_scope() as session:
+        # Same transaction as the dedup below, so a concurrent reject / revert is seen by both or neither.
+        hold = await suppress.find_suppression(session, v.action_type.value, v.target, now)
+        if hold is not None and suppress.drops(hold, proposal.proposed_by):
+            raise ActionSuppressed(hold.id, v.action_type.value, v.target)  # rolled back; audited by caller
+        if hold is not None:
+            hold.hits = (hold.hits or 0) + 1
+            hold.last_hit_at = now
         existing = (
             await session.execute(
                 select(ResponseActionRow)
@@ -159,15 +212,22 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
             )
         ).scalar_one_or_none()
         if existing is not None:
-            existing.reason = _append_reason(existing.reason, reason)
-            existing.incident_id = existing.incident_id or v.incident_id
-            existing.alert_id = existing.alert_id or v.alert_id
+            noted = False
+            if existing.status == ActionStatus.PROPOSED.value:
+                existing.reason = _append_reason(existing.reason, reason)
+                existing.incident_id = existing.incident_id or v.incident_id
+                existing.alert_id = existing.alert_id or v.alert_id
+            else:
+                # Approved / active: what the approver saw stays as it was (audit #130).
+                noted = _add_note(
+                    existing, reason=reason, proposer=proposal.proposed_by.value, who=who, v=v, now=now
+                )
             existing.updated_at = now
             await record_audit(
                 who,
                 "response.propose_duplicate",
                 target=existing.id,
-                details={"action_type": v.action_type.value, "target": v.target},
+                details={"action_type": v.action_type.value, "target": v.target, "noted": noted},
                 session=session,
             )
             merged = _schema(existing)
@@ -182,12 +242,16 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
                 params=dict(v.params),
                 reason=reason,
                 proposed_by=proposal.proposed_by.value,
+                # The person behind an API proposal (rule / llm / policy have none). Audit #130.
+                proposed_by_user=actor[:64]
+                if actor and proposal.proposed_by is ActionProposer.USER
+                else None,
                 incident_id=v.incident_id,
                 alert_id=v.alert_id,
                 status=ActionStatus.PROPOSED.value,
                 reversible=v.reversible,
                 ttl_minutes=v.ttl_minutes,
-                result={"validation_notes": list(v.notes)} if v.notes else {},
+                result=_initial_result(v.notes, hold),
             )
             session.add(row)
             await record_audit(
@@ -209,10 +273,100 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
         await bus.publish("action.updated", merged)
         return merged
     await bus.publish("action.proposed", created)
-    if auto_approve_allowed(v.action_type, settings):
+    if auto_approve_allowed(v.action_type, settings) and hold is None:
+        weak = await _weak_deception_basis(v.alert_id, v.incident_id)
+        if weak:
+            # Audit #133: a passive / browser-induced canary trip can be caused by a third party (an <img> on
+            # their page makes any visitor's browser "trip" the decoy). Rule triage no longer proposes blocks from
+            # such trips, but an LLM verdict still might — so policy never auto-approves on that evidence alone.
+            await record_audit(
+                POLICY_ACTOR,
+                "response.auto_approve_withheld",
+                target=created.id,
+                details={"reason": "weak_deception_evidence", "alerts": weak},
+            )
+            return created
         log.info("auto-approving %s %s by policy", v.action_type.value, v.target)
         return await approve_action(created.id, actor=POLICY_ACTOR)
+    if hold is not None and auto_approve_allowed(v.action_type, settings):
+        await record_audit(
+            POLICY_ACTOR,
+            "response.auto_approve_suppressed",
+            target=created.id,
+            details={"suppression_id": hold.id, "mode": hold.mode},
+        )
     return created
+
+
+_WEAK_DECEPTION_PROVENANCE = frozenset({"passive", "induced"})
+
+
+async def _weak_deception_basis(alert_id: str | None, incident_id: str | None) -> list[str]:
+    """Alert ids, if the proposal rests *only* on evidence a third party can trigger (else ``[]``).
+
+    The evidence is the proposal's alert, or every alert of its incident. An alert is "weak" when it is a
+    ``deception.*`` trip graded passive / induced, or when **every** one of its evidence events looks
+    browser-induced (cross-site / sub-resource / foreign Referer, :func:`tokiwa.deception.provenance.induced_by`):
+    an ``<img src="https://victim-site/.env">`` on a third-party page also raises ``web.sensitive_file_probe``
+    for the visitor. Any other alert means the action is not founded on such evidence alone.
+
+    This only withholds *auto*-approval. A client can send ``Sec-Fetch-Site: cross-site`` itself, so it must never
+    lower severity or drop the proposal - a human still decides.
+    """
+    from tokiwa.db.models.detection import AlertRow
+    from tokiwa.db.models.telemetry import EventRow
+    from tokiwa.deception.provenance import induced_by
+    from tokiwa.schemas.events import Event
+
+    if alert_id is None and incident_id is None:
+        return []
+    async with session_scope() as session:
+        stmt = select(AlertRow.id, AlertRow.detector, AlertRow.details, AlertRow.evidence_event_ids)
+        stmt = (
+            stmt.where(AlertRow.id == alert_id)
+            if alert_id
+            else stmt.where(AlertRow.incident_id == incident_id)
+        )
+        rows = (await session.execute(stmt.limit(500))).all()
+        if not rows:
+            return []
+        pending: dict[str, list[str]] = {}
+        for aid, detector, details, evidence in rows:
+            provenance = (details or {}).get("provenance")
+            if str(detector).startswith("deception.") and provenance in _WEAK_DECEPTION_PROVENANCE:
+                continue
+            ids = [str(i) for i in (evidence or [])][:200]
+            if not ids:
+                return []
+            pending[aid] = ids
+        if pending:
+            wanted = {i for ids in pending.values() for i in ids}
+            found = (
+                await session.execute(select(EventRow.id, EventRow.data).where(EventRow.id.in_(wanted)))
+            ).all()
+            induced: set[str] = set()
+            for eid, data in found:
+                try:
+                    if induced_by(Event.model_validate(data)):
+                        induced.add(eid)
+                except Exception:  # a malformed stored event is not evidence of anything
+                    log.debug("could not re-read event %s for provenance", eid, exc_info=True)
+            for ids in pending.values():
+                if not all(i in induced for i in ids):
+                    return []
+    return [r[0] for r in rows]
+
+
+def _initial_result(notes: tuple[str, ...], hold: ResponseSuppressionRow | None) -> dict[str, Any]:
+    result: dict[str, Any] = {"validation_notes": list(notes)} if notes else {}
+    if hold is not None:
+        # Shown in the UI: why this proposal waits for a human although auto-approve may be on.
+        result["suppression"] = {
+            "id": hold.id,
+            "mode": hold.mode,
+            "expires_at": hold.expires_at.isoformat() if hold.expires_at else None,
+        }
+    return result
 
 
 # ---------------------------------------------------------------- approve / execute
@@ -238,9 +392,31 @@ async def approve_action(action_id: str, *, actor: str) -> ResponseAction:
             if row is None:
                 raise ActionNotFound(action_id)
             raise ActionStateError(f"action is {row.status}; only proposed actions can be approved")
-        await record_audit(actor, "response.approve", target=action_id, session=session)
         row = await session.get(ResponseActionRow, action_id, populate_existing=True)
         assert row is not None
+        # Audit #130: freeze what was approved (later proposals become notes, but keep a copy regardless).
+        snapshot = {
+            "action_type": row.action_type,
+            "target": row.target,
+            "params": dict(row.params or {}),
+            "ttl_minutes": row.ttl_minutes,
+            "reason": row.reason,
+            "incident_id": row.incident_id,
+            "alert_id": row.alert_id,
+            "proposed_by": row.proposed_by,
+            "proposed_by_user": row.proposed_by_user,
+            "approved_by": actor[:64],
+            "approved_at": now.isoformat(),
+            "self_approval": bool(row.proposed_by_user) and row.proposed_by_user == actor[:64],
+        }
+        row.result = {**(row.result or {}), "approval_snapshot": snapshot}
+        await record_audit(
+            actor,
+            "response.approve",
+            target=action_id,
+            details={**snapshot, "reason": (row.reason or "")[:MAX_AUDIT_REASON_CHARS]},
+            session=session,
+        )
         approved = _schema(row)
     await bus.publish("action.updated", approved)
     return await _execute(action_id)
@@ -355,7 +531,11 @@ async def _execute(action_id: str) -> ResponseAction:
 # ---------------------------------------------------------------- reject / revert / expire
 
 
-async def reject_action(action_id: str, *, actor: str, reason: str | None = None) -> ResponseAction:
+async def reject_action(
+    action_id: str, *, actor: str, reason: str | None = None, suppress_options: SuppressOptions | None = None
+) -> ResponseAction:
+    """Reject a proposal. Always records a suppression (audit #63): ``suppress`` when requested, otherwise
+    the ``manual_only`` cooldown, so the same proposal cannot come straight back auto-approved."""
     now = utcnow()
     async with session_scope() as session:
         res = await session.execute(
@@ -377,6 +557,18 @@ async def reject_action(action_id: str, *, actor: str, reason: str | None = None
         await record_audit(
             actor, "response.reject", target=action_id, details={"reason": reason or ""}, session=session
         )
+        held = await suppress.record_decision(
+            session,
+            row,
+            actor=actor,
+            decision="reject",
+            options=suppress_options,
+            reason=reason,
+            now=now,
+            settings=get_settings().response,
+        )
+        if held is not None:
+            row.result = {**result, "suppression_id": held.id}
         rejected = _schema(row)
     await bus.publish("action.updated", rejected)
     return rejected
@@ -393,8 +585,14 @@ async def _set_result(action_id: str, **values: Any) -> ResponseAction:
         return _schema(row)
 
 
-async def revert_action(action_id: str, *, actor: str) -> ResponseAction:
-    """Undo an active action. Status flips to ``reverted`` first, so the Gate stops enforcing immediately."""
+async def revert_action(
+    action_id: str, *, actor: str, reason: str | None = None, suppress_options: SuppressOptions | None = None
+) -> ResponseAction:
+    """Undo an active action. Status flips to ``reverted`` first, so the Gate stops enforcing immediately.
+
+    Records a suppression like :func:`reject_action`. It is kept even if the executor's revert fails (the
+    action is then ``active`` again): it only stops re-proposals, it never enforces anything.
+    """
     now = utcnow()
     async with session_scope() as session:
         row = await session.get(ResponseActionRow, action_id)
@@ -410,9 +608,28 @@ async def revert_action(action_id: str, *, actor: str) -> ResponseAction:
         )
         if res.rowcount != 1:  # type: ignore[attr-defined]
             raise ActionStateError(f"action is {row.status}; only active actions can be reverted")
-        await record_audit(actor, "response.revert", target=action_id, session=session)
+        await record_audit(
+            actor, "response.revert", target=action_id, details={"reason": reason or ""}, session=session
+        )
         row = await session.get(ResponseActionRow, action_id, populate_existing=True)
         assert row is not None
+        held = await suppress.record_decision(
+            session,
+            row,
+            actor=actor,
+            decision="revert",
+            options=suppress_options,
+            reason=reason,
+            now=now,
+            settings=get_settings().response,
+        )
+        extra: dict[str, Any] = {}
+        if reason:
+            extra["revert_reason"] = reason.strip()[:2000]
+        if held is not None:
+            extra["suppression_id"] = held.id
+        if extra:
+            row.result = {**(row.result or {}), **extra}
         req = _request(_Snapshot.of(row))
     try:
         outcome = await get_executor(req.action_type).revert(req)
@@ -485,6 +702,67 @@ async def expire_due_actions(now: datetime | None = None) -> int:
         expired += 1
         await bus.publish("action.updated", final)
     return expired
+
+
+async def revoke_disallowed_actions(now: datetime | None = None) -> int:
+    """Revert active network actions that the *current* settings refuse (audit #64).
+
+    E.g. a CIDR added to ``response.protected_cidrs`` after the block was approved: ``build_gate_policy`` already
+    stops serving such rows; this records the transition (``reverted``, audit ``response.auto_revert`` by
+    ``system:settings``, ``result.auto_reverted``) and runs the executor's revert, which matters for
+    ``nftables_block`` (the element lives in the kernel set). Run by the expiry job and at startup.
+    """
+    now = now or utcnow()
+    settings = get_settings().response
+    async with session_scope() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(ResponseActionRow).where(
+                        ResponseActionRow.status == ActionStatus.ACTIVE.value,
+                        ResponseActionRow.action_type.in_([t.value for t in NETWORK_ACTIONS]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        refused = [(row.id, error) for row, error in refused_by_settings(rows, settings)[1]]
+    revoked = 0
+    for action_id, error in refused:
+        async with session_scope() as session:
+            res = await session.execute(
+                update(ResponseActionRow)
+                .where(
+                    ResponseActionRow.id == action_id, ResponseActionRow.status == ActionStatus.ACTIVE.value
+                )
+                .values(status=ActionStatus.REVERTED.value, reverted_at=now, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            if res.rowcount != 1:  # type: ignore[attr-defined]
+                continue  # reverted / expired concurrently
+            await record_audit(
+                SETTINGS_ACTOR,
+                "response.auto_revert",
+                target=action_id,
+                details={"error": error},
+                session=session,
+            )
+            row = await session.get(ResponseActionRow, action_id, populate_existing=True)
+            assert row is not None
+            row.result = {**(row.result or {}), "auto_reverted": {"reason": error, "at": now.isoformat()}}
+            req = _request(_Snapshot.of(row))
+        log.warning("reverted active action %s: refused by current settings (%s)", action_id, error)
+        try:
+            outcome = await get_executor(req.action_type).revert(req)
+            final = await _set_result(action_id, revert=outcome)
+        except Exception as exc:
+            message = str(exc) if isinstance(exc, ExecutorError) else type(exc).__name__
+            log.warning("revert of action %s (refused by settings) failed: %s", action_id, message)
+            final = await _set_result(action_id, revert_error=message)
+        revoked += 1
+        await bus.publish("action.updated", final)
+    return revoked
 
 
 # ---------------------------------------------------------------- queries
@@ -567,3 +845,12 @@ async def _fail_interrupted_actions() -> None:
             )
     if rows:
         log.warning("marked %d interrupted response actions as failed", len(rows))
+
+
+@on_startup
+async def _revoke_on_startup() -> None:
+    """Safety settings usually change with a restart: apply them to active actions right away (audit #64)."""
+    try:
+        await revoke_disallowed_actions()
+    except Exception:
+        log.exception("could not re-check active actions against the current settings")

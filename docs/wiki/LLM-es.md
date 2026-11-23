@@ -36,8 +36,22 @@ También puede introducirse en **LLM → Settings** (LLM → Configuración) de 
 **se guarda en texto plano en la base de datos**. Tenga cuidado con el manejo de las copias de seguridad de la base de datos y, si es posible, use una variable de entorno.
 La clave no se escribe en los logs, en el log de auditoría ni en las entradas al LLM.
 
+**Límites al cambiar la URL del endpoint (`llm.anthropic_base_url` / `llm.openai_base_url`) desde la UI o la API**: se requiere
+`https://`; `http://` solo se permite para `localhost` / `127.0.0.1` / `::1`. Se rechazan las direcciones link-local
+(`169.254.0.0/16`, `fe80::/10`) y los endpoints de metadatos de la nube (`169.254.169.254`, `metadata.google.internal`, …,
+incluidas las formas decimales y hexadecimales). **La clave de API queda vinculada al endpoint para el que se introdujo**: al
+cambiar la URL en la UI, la clave guardada deja de ser válida y no se envía ninguna clave (ni siquiera la de la variable de entorno)
+hasta que introduzca la clave para el nuevo endpoint. Puede introducir la URL y la clave en el mismo guardado. Para usar HTTP sin
+cifrar con un host distinto de localhost (p. ej. `http://ollama:11434/v1`), configúrelo con una variable de entorno o en
+`tokiwa.yaml` (la configuración estática no tiene estas restricciones).
+
 Una vez configurada, puede comprobarse con **LLM → Settings → Connection test** (Prueba de conexión) (realiza una llamada estructurada mínima por nivel, fast y deep, que cuenta para el presupuesto y queda auditada).
 Si el **Provider** (Proveedor) del resultado es `mock`, no se llamó a ninguna API real (puede que el proveedor siga en `mock`). «Current status» (Estado actual) muestra el proveedor realmente en uso además del configurado.
+
+Mientras el proveedor realmente en uso sea `mock` (incluido el respaldo de `auto` cuando no hay clave de API) o el proveedor no esté disponible,
+en la parte superior de todas las pantallas se muestra siempre la franja **«No LLM is in use»** (no se usa ningún LLM). Los resultados de triaje devueltos por el mock
+muestran **mock (no LLM used)** (mock, sin LLM) en lugar del nombre del modelo y el nivel en el panel «LLM triage» de alertas / incidentes y en el registro **Calls** (llamadas) de LLM.
+Las propuestas de respuesta creadas a partir de un veredicto del mock se etiquetan como **Rule** (regla) en lugar de **LLM** (las propuestas anteriores a este cambio conservan su etiqueta).
 
 ## Modelos y niveles (tiers)
 
@@ -70,7 +84,14 @@ Solo se envían al LLM las alertas de severidad `triage.min_severity_for_llm` (m
 - En **LLM → Usage** (LLM → Uso) se pueden consultar los costos y el número de llamadas por día y por finalidad. El **Dashboard** (Panel) también muestra el costo del día.
 - El costo real depende en gran medida del volumen de tráfico, de la distribución de severidades de las alertas y de la configuración de modelos. Se recomienda **empezar con un presupuesto pequeño,
   medir el consumo real en la pantalla de uso** y ajustar después (todavía no se ha evaluado el costo con un LLM real).
-- La tabla de precios unitarios usada para calcular los costos puede sobrescribirse con `llm.pricing`.
+- La tabla de precios unitarios usada para calcular los costos puede sobrescribirse o ampliarse con `llm.pricing` (USD por
+  1 M de tokens, p. ej. `{"my-model": {"input": 3, "output": 15}}`). Los ID de instantáneas con fecha (`claude-opus-5-5-20261001`,
+  `claude-opus-4-5@20251101`) y los ID al estilo Bedrock (`us.anthropic.…-v1:0`) se calculan con el precio del modelo base.
+- **Un modelo que no está en la tabla de precios no es gratuito**. Para que el presupuesto siempre se aplique, se estima con el
+  precio más alto de la tabla y se cuenta como «llamadas a modelos que no están en la tabla de precios» en **LLM → Uso**
+  (la página de configuración también avisa). Para un **LLM local gratuito** (Ollama, etc. mediante `openai_compat`), regístrelo
+  con precio 0 en `llm.pricing` (p. ej. `{"llama3.1:8b": {"input": 0, "output": 0}}`) o establezca `llm.daily_budget_usd: 0`
+  (sin presupuesto). De lo contrario, el costo estimado alcanza el presupuesto diario y TOKIWA pasa a decisiones basadas en reglas.
 
 ## Diseño orientado a la seguridad
 

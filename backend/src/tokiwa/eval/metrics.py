@@ -16,6 +16,24 @@ Definitions (requirements §7 評価指標):
 * LLM agreement — over triaged alerts/incidents: actor type, malicious verdict, AI verdict vs ground truth;
 * cost — tokens and USD from ``llm_calls`` per alert / per triaged alert; latency — batch processing time
   (ingest -> alert) and alert -> triage.
+
+Every rate also appears in ``intervals`` with its numerator, denominator and a 95 % Clopper–Pearson interval
+(:mod:`tokiwa.eval.stats`); ``reference_only`` marks n < 30 (#175). The primary detection metric is the medium+
+attack-session rate (any-severity is secondary: an info/low alert is not what an analyst acts on).
+``by_generator`` splits sessions by where they came from (#174): ``scripted`` = simulator profiles that act out the
+detection hypotheses (detectors were written and tuned against them), ``holdout`` = simulator profiles kept out of
+tuning (``Profile.holdout``), ``artex`` = imported ARTEX recordings, ``other`` = anything else. Read the holdout /
+artex rows as the generalisation estimate; the scripted rows mostly show the detectors recognise their own script.
+``ai_attribution.per_profile`` gives the AI-flag rate per profile.
+``alerts.attributed_by_ip_fallback`` counts alerts tied to sessions only through ``source_ip``: that works because
+the simulator gives every session its own address, and would not hold behind NAT / CDNs / rotating IPs.
+
+``--llm mock`` measures nothing about an LLM (#176): the mock provider answers triage with the rule-based fallback
+(``ai_agent_likelihood`` copies the alert's ``ai_score``), so the "LLM agreement" numbers are the rules agreeing with
+themselves, every triage tier is the same rules (``by_tier`` reads ``rules(mock)``; the tier the pipeline asked
+for stays in ``by_tier_requested``), the gateway books $0 and token counts are estimates (chars/4 in, 200 out).
+For mock runs ``cost.estimated_cost_usd`` prices those estimated tokens with the configured price table — an order
+of magnitude for "what would these calls cost live", not a measurement.
 """
 
 from __future__ import annotations
@@ -27,8 +45,19 @@ from typing import Any
 
 from tokiwa.eval.dataset import SessionTruth, Truth
 from tokiwa.eval.harness import RunResults
+from tokiwa.eval.profiles import HOLDOUT_PROFILES, PROFILES
+from tokiwa.eval.stats import rate_summary
+from tokiwa.llm.base import LLMUsage
+from tokiwa.llm.pricing import estimate_cost
 
 _SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+MOCK_TIER = "rules(mock)"
+MOCK_LLM_CAVEAT = (
+    "provider=mock: triage results are the rule-based fallback (ai_agent_likelihood copies the alert ai_score); "
+    "LLM agreement is rule self-agreement, not LLM quality; prompt-injection robustness, refusals, real cost and "
+    "latency are not measured"
+)
 
 
 def ratio(num: float, den: float) -> float | None:
@@ -78,6 +107,7 @@ class _Attribution:
         self.by_ip = truth.sessions_by_ip()
         self.alert_sessions: dict[str, set[str]] = {}
         self.session_alerts: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.ip_fallback: set[str] = set()  # alert ids attributed only through source_ip
         for a in res.alerts:
             names = self._sessions_for_alert(a)
             self.alert_sessions[a["id"]] = names
@@ -98,6 +128,8 @@ class _Attribution:
                 names.add(st.session)
         if not names and alert.get("source_ip"):
             names = {st.session for st in self.by_ip.get(alert["source_ip"], [])}
+            if names:
+                self.ip_fallback.add(alert["id"])
         return names
 
     def sessions_for_ips(self, ips: Iterable[str]) -> set[str]:
@@ -115,14 +147,20 @@ class _Attribution:
 
 def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[str, Any]]:
     per_profile: dict[str, dict[str, Any]] = {}
-    attack_total = attack_hit = benign_total = benign_hit = benign_hit_med = 0
+    attack_total = attack_hit = attack_hit_med = benign_total = benign_hit = benign_hit_med = 0
     for st in truth.sessions.values():
         alerts = att.session_alerts.get(st.session, [])
         hit = bool(alerts)
         hit_med = any(_SEV_RANK.get(str(a.get("severity")), 0) >= 2 for a in alerts)
         row = per_profile.setdefault(
             st.profile,
-            {"actor": st.actor, "sessions": 0, "detected": 0, "detected_medium_plus": 0, "alerts": 0},
+            {
+                "actor": st.actor,
+                "sessions": 0,
+                "detected": 0,
+                "detected_medium_plus": 0,
+                "alerts": 0,
+            },
         )
         row["sessions"] += 1
         row["detected"] += int(hit)
@@ -131,12 +169,14 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         if st.is_attack:
             attack_total += 1
             attack_hit += int(hit)
+            attack_hit_med += int(hit_med)
         else:
             benign_total += 1
             benign_hit += int(hit)
             benign_hit_med += int(hit_med)
     for row in per_profile.values():
         row["detection_rate"] = ratio(row["detected"], row["sessions"])
+        row["detection_rate_medium_plus"] = ratio(row["detected_medium_plus"], row["sessions"])
     evidence: set[str] = set()
     for a in att.res.alerts:
         evidence.update(a.get("evidence_event_ids") or [])
@@ -144,18 +184,25 @@ def _detection(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], dict[st
         eid for eid, lb in truth.by_event.items() if lb["actor"] != "benign" and lb["attack"] != "none"
     ]
     benign_events = [eid for eid, lb in truth.by_event.items() if lb["actor"] == "benign"]
+    attack_cited = sum(1 for e in attack_events if e in evidence)
+    benign_cited = sum(1 for e in benign_events if e in evidence)
     detection = {
         "attack_sessions": attack_total,
         "attack_sessions_detected": attack_hit,
         "attack_session_rate": ratio(attack_hit, attack_total),
+        "attack_sessions_detected_medium_plus": attack_hit_med,
+        "attack_session_rate_medium_plus": ratio(attack_hit_med, attack_total),
         "benign_sessions": benign_total,
         "benign_sessions_alerted": benign_hit,
         "benign_session_fpr": ratio(benign_hit, benign_total),
+        "benign_sessions_alerted_medium_plus": benign_hit_med,
         "benign_session_fpr_medium_plus": ratio(benign_hit_med, benign_total),
         "attack_events": len(attack_events),
-        "event_recall": ratio(sum(1 for e in attack_events if e in evidence), len(attack_events)),
+        "attack_events_cited": attack_cited,
+        "event_recall": ratio(attack_cited, len(attack_events)),
         "benign_events": len(benign_events),
-        "event_fpr": ratio(sum(1 for e in benign_events if e in evidence), len(benign_events)),
+        "benign_events_cited": benign_cited,
+        "event_fpr": ratio(benign_cited, len(benign_events)),
     }
     return detection, dict(sorted(per_profile.items()))
 
@@ -176,11 +223,13 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
                 "tp": 0,
                 "fp": 0,
                 "unattributed": 0,
+                "ip_fallback": 0,
                 "actors": Counter(),
             },
         )
         row["alerts"] += 1
         row["hits"] += int(a.get("count") or 1)
+        row["ip_fallback"] += int(a["id"] in att.ip_fallback)
         if not names:
             unattributed += 1
             row["unattributed"] += 1
@@ -199,14 +248,17 @@ def _alerts(truth: Truth, att: _Attribution) -> tuple[dict[str, Any], list[dict[
         rules.append(row)
     by_sev = Counter(str(a.get("severity")) for a in att.res.alerts)
     by_cat = Counter(str(a.get("category")) for a in att.res.alerts)
+    by_det = Counter(str(a.get("detector") or a.get("rule_id")) for a in att.res.alerts)
     summary = {
         "total": len(att.res.alerts),
         "true_positive": tp,
         "false_positive": fp,
         "unattributed": unattributed,
+        "attributed_by_ip_fallback": len(att.ip_fallback),
         "precision": ratio(tp, tp + fp),
         "by_severity": dict(sorted(by_sev.items())),
         "by_category": dict(sorted(by_cat.items())),
+        "by_detector": dict(sorted(by_det.items())),
         "incidents": len(att.res.incidents),
     }
     return summary, rules
@@ -264,16 +316,73 @@ def _ai_attribution(truth: Truth, att: _Attribution, threshold: float) -> dict[s
             {
                 "session": st.session,
                 "actor": st.actor,
+                "profile": st.profile,
                 "predicted_ai": predicted,
                 **{k: sc[k] for k in scores},
             }
         )
     out = binary_scores(tp, fp, fn, tn)
+    out["fpr"] = ratio(fp, fp + tn)
     out["threshold"] = threshold
     out["auc"] = roc_auc(scores["combined"]["pos"], scores["combined"]["neg"])
+    out["auc_positives"] = len(scores["combined"]["pos"])
+    out["auc_negatives"] = len(scores["combined"]["neg"])
     out["auc_by_source"] = {k: roc_auc(v["pos"], v["neg"]) for k, v in scores.items() if k != "combined"}
     out["confusion"] = {actor: dict(sorted(c.items())) for actor, c in sorted(confusion.items())}
+    per_profile: dict[str, dict[str, Any]] = {}
+    for row in per_session:
+        pp = per_profile.setdefault(
+            row["profile"], {"actor": row["actor"], "sessions": 0, "predicted_ai": 0, "holdout": False}
+        )
+        pp["sessions"] += 1
+        pp["predicted_ai"] += int(row["predicted_ai"])
+        pp["holdout"] = generator_of(row["profile"]) != "scripted"
+    for pp in per_profile.values():
+        pp["predicted_ai_rate"] = ratio(pp["predicted_ai"], pp["sessions"])
+    out["per_profile"] = dict(sorted(per_profile.items()))
     out["sessions"] = per_session
+    return out
+
+
+def generator_of(profile: str) -> str:
+    """Which generator produced a labelled session (see module docstring)."""
+    if profile in HOLDOUT_PROFILES:
+        return "holdout"
+    if profile == "artex":
+        return "artex"
+    if profile in PROFILES:
+        return "scripted"
+    return "other"
+
+
+def _by_generator(truth: Truth, att: _Attribution, ai: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    counts: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in ai["sessions"]:
+        st = truth.sessions[row["session"]]
+        c = counts[generator_of(st.profile)]
+        c["sessions"] += 1
+        if st.is_attack:
+            alerts = att.session_alerts.get(st.session, [])
+            c["attack_sessions"] += 1
+            c["attack_detected_medium_plus"] += int(
+                any(_SEV_RANK.get(str(a.get("severity")), 0) >= 2 for a in alerts)
+            )
+        if st.is_ai:
+            c["ai_sessions"] += 1
+            c["ai_flagged"] += int(row["predicted_ai"])
+        else:
+            c["non_ai_sessions"] += 1
+            c["non_ai_flagged_ai"] += int(row["predicted_ai"])
+    out: dict[str, dict[str, Any]] = {}
+    for gen, c in sorted(counts.items()):
+        out[gen] = {
+            **{k: c[k] for k in ("sessions", "attack_sessions", "ai_sessions", "non_ai_sessions")},
+            "attack_detection_medium_plus": rate_summary(
+                c["attack_detected_medium_plus"], c["attack_sessions"]
+            ),
+            "ai_recall": rate_summary(c["ai_flagged"], c["ai_sessions"]),
+            "ai_fpr": rate_summary(c["non_ai_flagged_ai"], c["non_ai_sessions"]),
+        }
     return out
 
 
@@ -299,13 +408,21 @@ def _llm(truth: Truth, att: _Attribution, threshold: float) -> dict[str, Any]:
         malicious = result.get("actor_type") != "benign" and float(result.get("confidence") or 0.0) >= 0.5
         verdict_ok += int(malicious == (actor != "benign"))
         ai_ok += int((float(result.get("ai_agent_likelihood") or 0.0) >= threshold) == (actor == "ai_agent"))
+    mock = att.res.llm_provider == "mock"
     return {
+        "provider": att.res.llm_provider,
+        "measures_llm": not mock,
+        "caveat": MOCK_LLM_CAVEAT if mock else None,
         "triaged": triaged,
         "judged_against_truth": judged,
-        "by_tier": dict(sorted(by_tier.items())),
+        "by_tier": {MOCK_TIER: triaged} if mock and triaged else dict(sorted(by_tier.items())),
+        "by_tier_requested": dict(sorted(by_tier.items())),
         "actor_agreement": ratio(actor_ok, judged),
         "verdict_agreement": ratio(verdict_ok, judged),
         "ai_agreement": ratio(ai_ok, judged),
+        "actor_agreed": actor_ok,
+        "verdict_agreed": verdict_ok,
+        "ai_agreed": ai_ok,
     }
 
 
@@ -315,8 +432,30 @@ def _cost(res: RunResults, triaged: int) -> dict[str, Any]:
     tin = sum(int(c.get("input_tokens") or 0) for c in calls)
     tout = sum(int(c.get("output_tokens") or 0) for c in calls)
     n_alerts = len(res.alerts)
+    estimated: float | None = None
+    by_model_est: dict[str, float] = {}
+    if res.llm_provider == "mock":
+        for c in calls:
+            model = str(c.get("model") or "")
+            usage = LLMUsage(
+                input_tokens=int(c.get("input_tokens") or 0),
+                output_tokens=int(c.get("output_tokens") or 0),
+                cache_read_tokens=int(c.get("cache_read_tokens") or 0),
+                cache_write_tokens=int(c.get("cache_write_tokens") or 0),
+            )
+            by_model_est[model] = by_model_est.get(model, 0.0) + estimate_cost(model, usage, res.llm_pricing)
+        estimated = round(sum(by_model_est.values()), 6)
     return {
         "provider": res.llm_provider,
+        "estimated_cost_usd": estimated,
+        "estimated_cost_by_model_usd": {k: round(v, 6) for k, v in sorted(by_model_est.items())} or None,
+        "estimated_cost_basis": (
+            "mock token estimates (input chars/4, output fixed 200) x price table (tokiwa.llm.pricing + "
+            "llm.pricing overrides) for the model each call would have used; verify the prices before relying on it"
+            if estimated is not None
+            else None
+        ),
+        "by_model": dict(sorted(Counter(str(c.get("model")) for c in calls).items())),
         "llm_calls": len(calls),
         "by_status": dict(sorted(Counter(str(c.get("status")) for c in calls).items())),
         "by_purpose": dict(sorted(Counter(str(c.get("purpose")) for c in calls).items())),
@@ -350,25 +489,76 @@ def _latency(res: RunResults) -> dict[str, Any]:
     }
 
 
+def _intervals(
+    det: dict[str, Any],
+    per_profile: dict[str, dict[str, Any]],
+    alerts: dict[str, Any],
+    ai: dict[str, Any],
+    llm: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Numerator / denominator / 95 % interval for every rate, keyed by its metric path."""
+    out: dict[str, dict[str, Any]] = {
+        "detection.attack_session_rate_medium_plus": rate_summary(
+            det["attack_sessions_detected_medium_plus"], det["attack_sessions"]
+        ),
+        "detection.attack_session_rate": rate_summary(
+            det["attack_sessions_detected"], det["attack_sessions"]
+        ),
+        "detection.benign_session_fpr_medium_plus": rate_summary(
+            det["benign_sessions_alerted_medium_plus"], det["benign_sessions"]
+        ),
+        "detection.benign_session_fpr": rate_summary(det["benign_sessions_alerted"], det["benign_sessions"]),
+        # events are clustered by session: the binomial interval is too narrow for these two
+        "detection.event_recall": {
+            **rate_summary(det["attack_events_cited"], det["attack_events"]),
+            "clustered": True,
+        },
+        "detection.event_fpr": {
+            **rate_summary(det["benign_events_cited"], det["benign_events"]),
+            "clustered": True,
+        },
+        "alerts.precision": rate_summary(
+            alerts["true_positive"], alerts["true_positive"] + alerts["false_positive"]
+        ),
+        "ai_attribution.precision": rate_summary(ai["tp"], ai["tp"] + ai["fp"]),
+        "ai_attribution.recall": rate_summary(ai["tp"], ai["tp"] + ai["fn"]),
+        "ai_attribution.fpr": rate_summary(ai["fp"], ai["fp"] + ai["tn"]),
+        "llm.actor_agreement": rate_summary(llm["actor_agreed"], llm["judged_against_truth"]),
+        "llm.verdict_agreement": rate_summary(llm["verdict_agreed"], llm["judged_against_truth"]),
+        "llm.ai_agreement": rate_summary(llm["ai_agreed"], llm["judged_against_truth"]),
+    }
+    for name, row in per_profile.items():
+        out[f"per_profile.{name}.detection_rate_medium_plus"] = rate_summary(
+            row["detected_medium_plus"], row["sessions"]
+        )
+        out[f"per_profile.{name}.detection_rate"] = rate_summary(row["detected"], row["sessions"])
+    return out
+
+
 def compute_metrics(truth: Truth, res: RunResults, *, ai_threshold: float | None = None) -> dict[str, Any]:
     threshold = res.ai_agent_threshold if ai_threshold is None else ai_threshold
     att = _Attribution(truth, res)
     detection, per_profile = _detection(truth, att)
     alerts, per_rule = _alerts(truth, att)
     llm = _llm(truth, att, threshold)
+    ai = _ai_attribution(truth, att, threshold)
     return {
         "detection": detection,
         "per_profile": per_profile,
         "alerts": alerts,
         "per_detector": per_rule,
-        "ai_attribution": _ai_attribution(truth, att, threshold),
+        "ai_attribution": ai,
         "llm": llm,
+        "intervals": _intervals(detection, per_profile, alerts, ai, llm),
+        "by_generator": _by_generator(truth, att, ai),
         "cost": _cost(res, llm["triaged"]),
         "latency": _latency(res),
         "pipeline": {
             "detectors_registered": res.detectors_registered,
             "detectors_enabled": res.detectors_enabled,
             "enrichers": res.enrichers,
+            "sigma_rules_loaded": res.sigma_rules_loaded,
+            "sigma_rule_dirs_missing": res.sigma_rule_dirs_missing,
             "actor_sessions": len(res.sessions),
             "events_stored": len(res.events),
             "notes": res.notes,

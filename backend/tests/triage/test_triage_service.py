@@ -23,7 +23,7 @@ from tokiwa.schemas.common import Severity
 from tokiwa.schemas.response import ActionProposal
 from tokiwa.schemas.triage import TriageRecord, TriageResult
 from tokiwa.triage.fallback import mock_triage_responder, parse_untrusted_blocks
-from tokiwa.triage.prompts import RETRY_NOTE
+from tokiwa.triage.prompts import RETRY_NOTE, TRIAGE_ALERT
 from tokiwa.triage.service import (
     get_triage_service,
     incident_signature,
@@ -112,7 +112,7 @@ async def test_fast_tier_verdict(mock_llm: MockProvider, add_alert, add_events, 
     status, rec = await _stored(a.id)
     assert status == "triaged"
     assert rec.tier == "fast" and rec.model == FAST and not rec.escalated
-    assert rec.prompt_version == "triage.alert@1" and rec.llm_call_id
+    assert rec.prompt_version == TRIAGE_ALERT.ref and rec.llm_call_id
     assert set(rec.result.evidence_ids) <= set(a.evidence_event_ids)
 
 
@@ -272,8 +272,21 @@ async def test_provider_exception_falls_back(
 # ------------------------------------------------------------------ response proposals
 
 
+class _LiveProvider(MockProvider):
+    """A scripted provider that reports a real provider name (proposals are then LLM proposals)."""
+
+    name: ClassVar[str] = "anthropic"
+
+
+@pytest.fixture
+def live_llm(settings: Settings) -> MockProvider:
+    provider = _LiveProvider()
+    gw.set_gateway(gw.LLMGateway(provider=provider, settings=settings))
+    return provider
+
+
 async def test_only_evidenced_targets_are_proposed(
-    mock_llm: MockProvider, monkeypatch, add_alert, add_events, make_http_event
+    live_llm: MockProvider, monkeypatch, add_alert, add_events, make_http_event
 ) -> None:
     proposals: list[ActionProposal] = []
 
@@ -288,7 +301,7 @@ async def test_only_evidenced_targets_are_proposed(
         {"action_type": "rate_limit", "target": "203.0.113.0/24", "reason": "cidr widening"},
         {"action_type": "webhook", "target": "http://169.254.169.254/", "reason": "ssrf"},
     ]  # (schema caps the list at 5; "IP not in evidence" is covered in test_triage_evidence)
-    mock_llm._local["TriageResult"] = lambda s, u: _verdict(
+    live_llm._local["TriageResult"] = lambda s, u: _verdict(
         evidence_ids=_shown_ids(u), recommended_actions=actions
     ).model_dump(mode="json")
     a = await _seeded_alert(add_alert, add_events, make_http_event)
@@ -297,6 +310,29 @@ async def test_only_evidenced_targets_are_proposed(
     p = proposals[0]
     assert (p.action_type, p.target, p.ttl_minutes) == ("block_ip", "203.0.113.10", 30)
     assert p.proposed_by == "llm" and p.alert_id == a.id
+    _, record = await _stored(a.id)
+    assert record.provider == "anthropic" and record.tier != "rules"
+
+
+async def test_mock_provider_proposals_are_rule_proposals(
+    mock_llm: MockProvider, monkeypatch, add_alert, add_events, make_http_event
+) -> None:
+    """#151: the mock answers with the rule verdict; it must not be presented as an LLM proposal."""
+    proposals: list[ActionProposal] = []
+
+    async def fake_propose(p: ActionProposal) -> None:
+        proposals.append(p)
+
+    monkeypatch.setattr(respond_service, "propose_action", fake_propose)
+    actions = [{"action_type": "block_ip", "target": "203.0.113.10", "reason": "attacker"}]
+    mock_llm._local["TriageResult"] = lambda s, u: _verdict(
+        evidence_ids=_shown_ids(u), recommended_actions=actions
+    ).model_dump(mode="json")
+    a = await _seeded_alert(add_alert, add_events, make_http_event)
+    await get_triage_service().triage_alert(a.id)
+    assert [(p.action_type, p.proposed_by) for p in proposals] == [("block_ip", "rule")]
+    _, record = await _stored(a.id)
+    assert record.provider == "mock"
 
 
 async def test_rule_proposals_marked_rule(

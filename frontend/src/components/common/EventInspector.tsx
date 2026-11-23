@@ -9,14 +9,17 @@ import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { Endpoint, TkEvent } from "@/api/types";
 import { JsonView, Mono } from "@/components/common";
+import { Time } from "@/components/common/Time";
 import { Badge, Table, Tabs, TBody, TD, TH, THead, TR } from "@/components/ui";
 import { useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { DataState } from "./DataState";
 import { HttpStatusBadge } from "./HttpStatusBadge";
+import { escapeInvisible } from "./invisible";
 import { formatBytes, formatMs } from "./numfmt";
+import { InvisibleCharsBadge, SafeText } from "./SafeText";
 import { CopyButton } from "./SecretReveal";
 import { SideDrawer } from "./SideDrawer";
 
@@ -143,8 +146,9 @@ function Section({
 function renderValue(v: unknown): ReactNode {
   if (v == null || v === "") return <span className="text-muted">-</span>;
   if (typeof v === "boolean") return v ? "true" : "false";
-  if (typeof v === "number" || typeof v === "string") return <span className="font-mono">{String(v)}</span>;
-  return <span className="font-mono">{JSON.stringify(v)}</span>;
+  if (typeof v === "number") return <span className="font-mono">{String(v)}</span>;
+  if (typeof v === "string") return <SafeText text={v} className="font-mono" />;
+  return <SafeText text={JSON.stringify(v)} className="font-mono" />;
 }
 
 /** Generic key/value grid for small nested objects (ids, deception, llm_app, network, process). */
@@ -205,18 +209,21 @@ function HttpView({ event }: { event: TkEvent }) {
       </div>
       <Section title={L.request}>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg p-3 font-mono text-xs leading-relaxed">
-          <span className="font-semibold text-accent">{h.method ?? "?"}</span> {target}{" "}
+          <span className="font-semibold text-accent">{h.method ?? "?"}</span> <SafeText text={target} />{" "}
           <span className="text-muted">{version}</span>
           {"\n"}
           {!hasHostHeader && h.host && (
             <>
-              <span className="text-muted">host:</span> {h.host}
+              <span className="text-muted">host:</span> <SafeText text={h.host} />
               {"\n"}
             </>
           )}
           {order.map((k) => (
             <span key={k}>
-              <span className="text-muted">{k}:</span> {headers[k]}
+              <span className="text-muted">
+                <SafeText text={k} />:
+              </span>{" "}
+              <SafeText text={headers[k]} />
               {"\n"}
             </span>
           ))}
@@ -238,7 +245,7 @@ function HttpView({ event }: { event: TkEvent }) {
       >
         {body ? (
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md border border-line bg-bg p-3 font-mono text-xs leading-relaxed">
-            {prettyBody(body, h.content_type)}
+            <SafeText text={prettyBody(body, h.content_type)} multiline />
           </pre>
         ) : (
           <div className="text-xs text-muted">{L.noBody}</div>
@@ -305,7 +312,9 @@ function Overview({ event }: { event: TkEvent }) {
     <div className="space-y-5">
       {event.message && (
         <Section title={L.message}>
-          <p className="whitespace-pre-wrap break-words text-xs">{event.message}</p>
+          <p className="whitespace-pre-wrap break-words text-xs">
+            <SafeText text={event.message} multiline />
+          </p>
         </Section>
       )}
       <dl className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -346,7 +355,9 @@ function Overview({ event }: { event: TkEvent }) {
         <KV label={L.asset}>
           <Mono>{event.asset_id ?? "-"}</Mono>
         </KV>
-        <KV label={L.ingested}>{formatDateTime(event.ingested_at)}</KV>
+        <KV label={L.ingested}>
+          <Time iso={event.ingested_at} />
+        </KV>
       </dl>
       {(event.tags?.length ?? 0) > 0 && (
         <Section title={L.tags}>
@@ -368,12 +379,14 @@ function Overview({ event }: { event: TkEvent }) {
         <Section title={L.request}>
           <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
             <span className="font-semibold">{event.http.method}</span>
-            <span className="break-all">{event.http.path}</span>
+            <SafeText text={event.http.path} className="break-all" />
             <HttpStatusBadge status={event.http.status} />
             <span className="text-muted">{formatMs(event.http.duration_ms)}</span>
           </div>
           {event.http.user_agent && (
-            <div className="break-all text-xs text-muted">{event.http.user_agent}</div>
+            <div className="break-all text-xs text-muted">
+              <SafeText text={event.http.user_agent} />
+            </div>
           )}
         </Section>
       )}
@@ -410,8 +423,11 @@ export function EventInspector({ event }: { event: TkEvent }) {
           <KindBadge kind={event.kind} />
           <Mono className="text-muted">{event.dataset}</Mono>
           <span className="text-muted">·</span>
-          <span title={event.timestamp}>{formatDateTime(event.timestamp)}</span>
+          <span title={event.timestamp}>
+            <Time iso={event.timestamp} />
+          </span>
           <span className="text-muted">({timeAgo(event.timestamp)})</span>
+          <InvisibleCharsBadge value={event} />
         </div>
         <div className="flex items-center gap-2">
           <Mono className="min-w-0 truncate text-muted">{event.id}</Mono>
@@ -452,7 +468,13 @@ export function EventDrawer({
     <SideDrawer
       open={!!eventId}
       onClose={onClose}
-      title={ev?.http ? `${ev.http.method ?? ""} ${ev.http.path ?? ""}` : (ev?.message ?? L.title)}
+      title={
+        ev?.http
+          ? escapeInvisible(`${ev.http.method ?? ""} ${ev.http.path ?? ""}`)
+          : ev?.message
+            ? escapeInvisible(ev.message)
+            : L.title
+      }
       subtitle={ev ? endpointText(ev.source) : undefined}
       actions={
         ev?.session_id ? (

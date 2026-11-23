@@ -17,6 +17,7 @@
 | `tokiwa intel` | 漏洞情报源 |
 | `tokiwa sim` | 实验环境用流量模拟器 |
 | `tokiwa eval` | 评估框架 |
+| `tokiwa data` | 删除 / 导出指定 IP 或会话的数据 |
 
 > ⚠️ 直接访问数据库的命令（`user`、`token`、`intel` 等）必须在与服务器 **相同的设置**（相同的当前目录，
 > 或相同的 `TOKIWA_DATABASE__URL`）下执行。默认数据库路径 `./data/tokiwa.db` 是相对路径。
@@ -34,6 +35,8 @@ tokiwa serve [--host HOST] [--port 8788] [--reload] [--no-jobs]
 | `--no-jobs` | 不启动定时作业（情报同步、过期处理等） |
 
 API 文档位于 `http://<server>:8788/api/docs`，健康检查为 `/api/v1/health`。
+API 文档（`/api/docs`、`/api/openapi.json`）无需认证即可访问，生产环境建议通过 `server.expose_docs: false`
+（环境变量 `TOKIWA_SERVER__EXPOSE_DOCS=false`）将其关闭。健康检查无需认证，但只有已登录时才返回版本号。
 
 ## tokiwa user create
 
@@ -42,14 +45,51 @@ tokiwa user create <username> [--role admin|analyst|viewer]
 ```
 
 会以交互方式询问密码（隐藏输入，需输入 2 次）。角色默认为 `analyst`。
+如果已存在同名用户，会显示错误信息并退出（退出码 1）。创建操作会以 `user.create`（操作者 `cli`）记录在审计日志中。
+也可用于一个管理员都没有时的恢复（`--role admin`）。
+
+## tokiwa user reset-password
+
+```bash
+tokiwa user reset-password <username>
+```
+
+以交互方式询问新密码（隐藏输入，需输入 2 次）并进行设置。该用户已有的登录全部失效，审计日志中会记录 `user.password_reset`（操作者 `cli`，不记录密码）。忘记管理员密码时使用。
 
 ## tokiwa token create
 
 ```bash
-tokiwa token create <name> [--scope ingest] [--scope gate]
+tokiwa token create <name> [--scope ingest] [--scope gate] [--sensor-id ID ...] [--dataset PATTERN ...]
 ```
 
-默认作用域为 `ingest` 和 `gate`。令牌（`tkw_...`）**仅显示一次**。
+默认作用域 **仅为** `ingest`。Gate 用的令牌需显式指定 `--scope ingest --scope gate`（`gate` 作用域可以读取包含诱饵路径、金丝雀值和封禁列表的 Gate 策略，只应授予 Gate）。令牌（`tkw_...`）**仅显示一次**。
+`--sensor-id` / `--dataset`（可重复）把令牌绑定到传感器 ID 和 dataset（[接入传感器](Sensors-zh)）。
+`--expires-in-days N` 可设置有效期（默认永不过期）。过期的令牌返回 401。
+
+## tokiwa token list / revoke / rotate
+
+```bash
+tokiwa token list [--all]                                  # 列表（不显示密钥；--all 包含已吊销）
+tokiwa token revoke <id|name>                              # 立即吊销
+tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 签发新令牌（只在标准输出显示一次）
+```
+
+无需管理员登录（忘记密码、事件处理中）也可以在服务器主机上停用令牌。每次操作都以 actor `cli` 记入审计日志。
+`rotate` 签发名称、作用域和绑定都相同的新令牌，并让旧令牌在 `--grace-hours`（默认 24 小时，0 表示立即吊销）内继续有效。
+Gate 会在令牌文件变化时自动重新读取，因此把新令牌写入文件即可无需重启完成切换。名称对应多个有效令牌时请指定 id。
+
+## tokiwa data purge / export
+
+```bash
+tokiwa data purge  [--ip IP] [--session ID] [--before 2026-11-01] [--yes]   # 默认只显示数量（dry run）
+tokiwa data export [--ip IP] [--session ID] [--before ...] [--out subject.jsonl]
+```
+
+按来源 IP、行为者会话或时间范围，批量删除或导出已保存的数据（个人的查阅 / 删除请求、误导入的客户数据等）。条件以 AND 组合。
+范围：`events`、`actor_sessions`、`deception_trips` 删除行；`alerts` 清空 `details`（为保留与安全事件的关联，行本身保留）；
+`llm_calls` 只清空提示词和响应正文（费用记录保留）。LLM 记录按带词边界的 IP / 会话 ID 匹配（`10.0.0.1` 不会匹配 `10.0.0.15`）。
+`export` 输出 JSONL（每行一条 `{"table": ..., "row": {...}}`），`--out` 文件权限为 600。两者都会以 actor `cli` 记入审计日志。
+安全事件摘要、Copilot 会话和备份不在范围内。
 
 ## tokiwa gate run
 
@@ -63,7 +103,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--upstream` | 配置值 | 转发目标的 URL |
 | `--listen` | `0.0.0.0:8080` | 监听 `host:port` |
 | `--server` | 配置值 | TOKIWA 服务器的 URL |
-| `--token` / `--token-file` | — | API 令牌（推荐使用环境变量 `TOKIWA_GATE__INGEST_TOKEN` 或文件） |
+| `--token` / `--token-file` | — | API 令牌（推荐使用环境变量 `TOKIWA_GATE__INGEST_TOKEN` 或文件；文件在变化时和收到 401 时重新读取） |
 | `--sensor-id` | `gate-1` | 记录到事件中的传感器 ID |
 | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节 |
 | `--trust-forwarded-for` | off | 将 `X-Forwarded-For` 的最右端作为来源（仅限可信的 LB 之后） |
@@ -127,9 +167,10 @@ tokiwa sim ingest   [--server http://localhost:8788] [--token-file PATH] [--prof
 
 ```bash
 tokiwa eval run --dataset FILE.jsonl [--llm mock|live] [--budget-usd N] [--out DIR] \
-                [--compare PREV] [--fail-on-regression] [--speed 0] [--json]
-tokiwa eval compare <current> <previous> [--fail-on-regression]
-tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP]
+                [--compare PREV] [--fail-on-regression] [--allow-mismatch] [--speed 0] [--json]
+tokiwa eval compare <current> <previous> [--fail-on-regression] [--allow-mismatch]
+tokiwa eval import-artex <source> --out FILE.jsonl [--host HOST] [--session LABEL] [--source-ip IP] \
+                         [--since T] [--until T] [--split-gap-minutes N]
 tokiwa eval info FILE.jsonl
 ```
 
@@ -138,7 +179,10 @@ tokiwa eval info FILE.jsonl
 | `--llm` | `mock`（免费、离线，默认）或 `live`（使用已配置的提供商。**会产生费用**） |
 | `--budget-usd` | 使用 `--llm live` 时 **必填**。本次运行的费用上限 |
 | `--out` | 输出位置（默认 `eval/runs/<UTC 时间>`） |
-| `--compare` / `--fail-on-regression` | 与上次结果比较 / 若指标变差则以退出码 1 结束 |
+| `--compare` / `--fail-on-regression` | 与上次结果比较 / 若指标变差则以退出码 1 结束。两次运行的条件（数据集 sha256、LLM 提供商、启用的检测器、已加载的 Sigma 规则数、阈值、批处理设置）不同时视为“不可比较”，退出码为 3 |
+| `--allow-mismatch` | 即使条件不同也进行比较并判定是否变差（差异以警告显示） |
 | `--speed` | 0 = 最快，1 = 实时，10 = 10 倍速 |
 | `--enable-detector` / `--disable-detector` | 强制启用 / 禁用检测器 |
 | `--keep-work` | 保留评估用的临时数据库 |
+| `import-artex --since` / `--until` | 只导入该时间段内的 ARTEX 记录（unix 秒或 ISO 8601；无时区偏移时视为 UTC） |
+| `import-artex --split-gap-minutes` | 按主机，在记录中断 N 分钟以上处拆分为新的会话（使用不同的源 IP）。默认不拆分 |

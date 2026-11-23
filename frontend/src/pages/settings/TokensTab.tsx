@@ -17,6 +17,7 @@ import { Mono } from "@/components/common";
 import { ConfirmButton } from "@/components/common/ConfirmButton";
 import { DataState } from "@/components/common/DataState";
 import { SecretReveal } from "@/components/common/SecretReveal";
+import { Time } from "@/components/common/Time";
 import {
   Badge,
   Button,
@@ -33,7 +34,7 @@ import {
   TR,
 } from "@/components/ui";
 import { errorMessage, useApiQuery } from "@/hooks/useApi";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { type Flash, MutationError } from "./shared";
@@ -52,6 +53,7 @@ const strings = {
     status: "状態",
     active: "有効",
     revoked: "失効",
+    expired: "期限切れ",
     revoke: "失効させる",
     revokedMsg: "トークンを失効させました",
     empty: "トークンはまだありません",
@@ -84,6 +86,7 @@ const strings = {
     status: "Status",
     active: "active",
     revoked: "revoked",
+    expired: "expired",
     revoke: "Revoke",
     revokedMsg: "Token revoked",
     empty: "No tokens yet",
@@ -109,7 +112,8 @@ function CreateTokenDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const L = useLocal(strings);
   const qc = useQueryClient();
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<ApiTokenScope[]>(["ingest", "gate"]);
+  // ingest only by default: the gate scope reads decoys / canaries / block list (Gate tokens only).
+  const [scopes, setScopes] = useState<ApiTokenScope[]>(["ingest"]);
   const [touched, setTouched] = useState(false);
   const [created, setCreated] = useState<ApiTokenCreated | null>(null);
   const nameOk = name.trim().length >= 1 && name.trim().length <= 64;
@@ -300,12 +304,20 @@ export function TokensTab({ flash }: { flash: Flash }) {
                   </span>
                 </TD>
                 <TD className="hidden whitespace-nowrap text-xs text-muted md:table-cell">
-                  {formatDateTime(t.created_at)}
+                  <Time iso={t.created_at} />
                 </TD>
-                <TD className="whitespace-nowrap text-xs text-muted" title={formatDateTime(t.last_used)}>
+                <TD className="whitespace-nowrap text-xs text-muted" title={dateTimeTitle(t.last_used)}>
                   {t.last_used ? timeAgo(t.last_used) : L.never}
                 </TD>
-                <TD>{t.revoked ? <Badge>{L.revoked}</Badge> : <Badge tone="accent">{L.active}</Badge>}</TD>
+                <TD title={dateTimeTitle(t.expires_at)}>
+                  {t.revoked ? (
+                    <Badge>{L.revoked}</Badge>
+                  ) : t.expires_at && Date.parse(t.expires_at) <= Date.now() ? (
+                    <Badge>{L.expired}</Badge>
+                  ) : (
+                    <Badge tone="accent">{L.active}</Badge>
+                  )}
+                </TD>
                 <TD className="text-right">
                   {!t.revoked && (
                     <ConfirmButton

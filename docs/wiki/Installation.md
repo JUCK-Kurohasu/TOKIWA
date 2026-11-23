@@ -19,14 +19,15 @@ cp .env.example .env     # 必要な行だけコメントを外す
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. <http://localhost:8788/setup> で最初の管理者を作成します（CLI の場合:
+1. <http://localhost:8788/setup> で最初の管理者を作成します。画面で求められる **セットアップコード** は、起動ログ（`docker compose -f deploy/compose.yaml logs tokiwa`。コード入りの URL が出ます）か
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` で確認します（1 回限り。CLI の場合:
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`。パスワードは対話入力）。
 2. LLM を使う場合は `.env` に `ANTHROPIC_API_KEY=...` を書きます（未設定ならモック LLM で動作）。
 3. 既定では `127.0.0.1:8788` にだけ公開されます。LAN に出す場合は `.env` の `TOKIWA_BIND=0.0.0.0` ですが、
    **TLS なしで公開せず**、後述のリバースプロキシを前に置いてください。
 
-> ⚠️ **空の値で有効化しないでください**。たとえば `TOKIWA_SERVER__SECRET_KEY=`（空）は「空文字の署名鍵」として
-> 使われてしまいます。使わない項目はコメントアウトのままにします。未設定なら署名鍵は初回起動時に自動生成されます。
+> ⚠️ **空の値で有効化しないでください**（空文字の意味は項目によって違います）。使わない項目はコメントアウトのままにします。
+> 署名鍵 `TOKIWA_SERVER__SECRET_KEY` は未設定（または空）なら初回起動時に自動生成され、設定する場合は 32 文字以上が必要です。
 
 ### docker 単体で動かす
 
@@ -46,16 +47,20 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 ```bash
 # センサー用 API トークン（一度だけ表示）
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate（compose の gate プロファイル。.env に TOKIWA_GATE__INGEST_TOKEN と TOKIWA_GATE__UPSTREAM を設定）
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # ホストセンサー（ホストのポート・プロセスを見るため host の PID / ネットワーク名前空間を使う）
+# トークンは権限 600 の env ファイル /etc/tokiwa/agent.env（中身は TOKIWA_AGENT__INGEST_TOKEN=tkw_... の 1 行）で渡す
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **API トークンを `--token tkw_...` のようにコマンドライン引数で渡さないでください。** 引数は同じホストのほかのユーザーにも `ps` で、
+  Docker の管理者には `docker inspect` で見えます。Gate は `--token-file`（変更時に読み直します）、Agent は環境変数
+  `TOKIWA_AGENT__INGEST_TOKEN`（`--env-file` や compose の `.env`）を使います。手順は `docs/deploy.md` §4 にあります。
 - HTTP を持たないロール（agent / sim）は `TOKIWA_HEALTHCHECK_URL=none` を付けます。Gate のヘルスチェックは
   `http://127.0.0.1:8080/__tokiwa/health` です。
 - Agent は他ユーザーのプロセス情報を読むのに root 相当の権限が要る場合があります（イメージは非 root）。
@@ -127,6 +132,7 @@ API トークンで認証されるので、これらのパスは除外するか�
 
 保存すべきものは **DB** と **署名鍵 `secret.key`** の 2 つです（どちらも `/data`）。`secret.key` を失うと
 ログイン中のセッションが無効になります（API トークンは DB 内のハッシュなので影響しません）。
+デセプションの鍵リング `deception.key`（同じく `/data`）も一緒に保存してください。失うとデコイ内の偽の認証情報・カナリアの値が変わり、既に攻撃者の手に渡った値が検知されなくなります（[デセプション](Deception)）。
 
 SQLite は WAL モードなので、稼働中にファイルを直接コピーせず、オンラインバックアップ API を使います。
 
@@ -136,6 +142,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -145,11 +152,12 @@ $C exec -T tokiwa rm /data/backup.db
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-PostgreSQL の場合は `pg_dump -Fc` / `pg_restore` を使い、`secret.key` は別途保存します。
+PostgreSQL の場合は `pg_dump -Fc` / `pg_restore` を使い、`secret.key` と `deception.key` は別途保存します。
 
 ## アップグレード
 

@@ -30,6 +30,10 @@ class ResponseActionRow(IdMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
     reverted_at: Mapped[datetime | None] = mapped_column(default=None)
     result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Audit #130 (nullable: added to existing databases by schema_sync). Username behind an API proposal.
+    proposed_by_user: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    # Later proposals for this (type, target) once it was approved: [{at, proposed_by, by, reason, ...}].
+    notes: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True, default=None)
 
 
 class DeceptionAssetRow(IdMixin, Base):

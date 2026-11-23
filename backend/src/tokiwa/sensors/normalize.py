@@ -8,19 +8,26 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
-from datetime import UTC, datetime
+import re
+from dataclasses import dataclass, field, fields
+from datetime import UTC, datetime, tzinfo
 from typing import Any
 from urllib.parse import urlsplit
 
 from tokiwa.llm.redact import redact_headers, redact_obj, redact_text
 from tokiwa.schemas.events import HostInfo
-from tokiwa.util import ensure_utc
+from tokiwa.util import ensure_utc, utcnow
 
 RAW_LIMIT_BYTES = 4096
 _EMPTY = {"", "-", "(empty)"}
 # Keys whose values must never leave the host, whatever they contain (Zeek http.log has ``password``).
+# Account names from HTTP authentication are personal data and not needed for detection (data handling, #169):
+# Zeek http.log ``username`` (Basic auth user, base/protocols/http/main.zeek), nginx ``$remote_user``,
+# Caddy access log ``user_id`` (modules/caddyhttp/server.go).
 _SENSITIVE_KEYS = {
+    "username",
+    "remote_user",
+    "user_id",
     "password",
     "passwd",
     "pass",
@@ -43,12 +50,44 @@ _SENSITIVE_KEYS = {
 }
 
 
+@dataclass
+class ParseStats:
+    """What a log source could not read faithfully (audit #131: format mistakes must not be silent).
+
+    ``unparsed``: lines that are not a record of the expected format (invalid JSON, Zeek TSV without header);
+    ``bad_time``: records whose timestamp could not be interpreted (the event got the collection time);
+    ``naive_time``: timestamps without a UTC offset read as UTC because ``agent.log_timezone`` is unset;
+    ``recovered``: nginx ``escape=default`` lines (``\\xHH``) decoded instead of dropped.
+    Records that are skipped on purpose (Suricata ``stats``, non-access JSON, Zeek header lines) are not counted.
+    """
+
+    unparsed: int = 0
+    bad_time: int = 0
+    naive_time: int = 0
+    recovered: int = 0
+
+    def snapshot(self) -> ParseStats:
+        return ParseStats(**{f.name: getattr(self, f.name) for f in fields(self)})
+
+    def minus(self, other: ParseStats) -> ParseStats:
+        return ParseStats(**{f.name: getattr(self, f.name) - getattr(other, f.name) for f in fields(self)})
+
+    def any(self) -> bool:
+        return any(getattr(self, f.name) for f in fields(self))
+
+
 @dataclass(frozen=True)
 class ParseContext:
-    """Who/where a log line was read: stamped on every event the adapters produce."""
+    """Who/where a log line was read: stamped on every event the adapters produce.
+
+    ``tz`` reads offset-less timestamps (``agent.log_timezone``; None = UTC, counted in ``stats.naive_time``).
+    ``stats`` is per log source (the agent gives each source its own context).
+    """
 
     sensor_id: str | None = None
     host: HostInfo | None = None
+    tz: tzinfo | None = None
+    stats: ParseStats = field(default_factory=ParseStats)
 
 
 def none_if_empty(value: Any) -> str | None:
@@ -107,31 +146,74 @@ def to_bool(value: Any) -> bool | None:
     return None
 
 
-def parse_ts(value: Any) -> datetime | None:
-    """Epoch seconds (number or numeric string), ISO 8601 (incl. ``+0000``) or nginx ``$time_local``."""
+_WALL_FRACTION = re.compile(r"^(.*\.\d{6})\d+$")  # %f takes at most 6 digits (Caddy ``wall_nano``)
+_TIME_FORMATS = (
+    "%d/%b/%Y:%H:%M:%S %z",  # nginx $time_local, Caddy common_log
+    "%Y-%m-%dT%H:%M:%S.%f%z",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S.%f",  # Caddy wall_milli / wall_nano (local wall clock, no offset)
+    "%Y/%m/%d %H:%M:%S",  # Caddy wall
+)
+
+
+def _parse_time(value: Any) -> tuple[datetime | None, bool]:
+    """(datetime as parsed, had no UTC offset). Epoch numbers are UTC by definition."""
     if value is None or isinstance(value, bool):
-        return None
+        return None, False
     f = to_float(value) if isinstance(value, int | float) or _numeric(value) else None
     if f is not None:
-        if f > 1e11:  # milliseconds
-            f /= 1000.0
+        # seconds / milliseconds / microseconds / nanoseconds since the epoch (any date before year 5138)
+        for limit, div in ((1e17, 1e9), (1e14, 1e6), (1e11, 1e3)):
+            if abs(f) > limit:
+                f /= div
+                break
         try:
-            return datetime.fromtimestamp(f, tz=UTC)
+            return datetime.fromtimestamp(f, tz=UTC), False
         except (OverflowError, OSError, ValueError):
-            return None
+            return None, False
     s = str(value).strip()
     if not s or s in _EMPTY:
-        return None
+        return None, False
     try:
-        return ensure_utc(datetime.fromisoformat(s.replace("Z", "+00:00")))
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt, dt.tzinfo is None
     except ValueError:
         pass
-    for fmt in ("%d/%b/%Y:%H:%M:%S %z", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%d %H:%M:%S"):
+    s = _WALL_FRACTION.sub(r"\1", s)
+    for fmt in _TIME_FORMATS:
         try:
-            return ensure_utc(datetime.strptime(s, fmt))
+            dt = datetime.strptime(s, fmt)
         except ValueError:
             continue
-    return None
+        return dt, dt.tzinfo is None
+    return None, False
+
+
+def parse_ts(value: Any, *, tz: tzinfo | None = None) -> datetime | None:
+    """Epoch (s/ms/us/ns, number or numeric string), ISO 8601 (incl. ``+0000``), nginx ``$time_local`` or Caddy
+    wall clock -> aware UTC datetime. Offset-less values are read in ``tz`` (default UTC)."""
+    dt, naive = _parse_time(value)
+    if dt is None:
+        return None
+    if naive and tz is not None:
+        dt = dt.replace(tzinfo=tz)
+    return ensure_utc(dt)
+
+
+def event_time(value: Any, ctx: ParseContext) -> datetime:
+    """Timestamp of a log record, counting what had to be guessed (audit #131). Missing -> collection time."""
+    if value is None or (isinstance(value, str) and value.strip() in _EMPTY):
+        return utcnow()
+    dt, naive = _parse_time(value)
+    if dt is None:
+        ctx.stats.bad_time += 1
+        return utcnow()
+    if naive:
+        if ctx.tz is None:
+            ctx.stats.naive_time += 1
+        else:
+            dt = dt.replace(tzinfo=ctx.tz)
+    return ensure_utc(dt)
 
 
 def _numeric(value: Any) -> bool:

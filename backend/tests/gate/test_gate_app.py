@@ -238,7 +238,12 @@ async def test_decoy_route_served_locally_with_deception_event(
                 kind="decoy_path",
                 path="/.env",
                 body="AWS_ACCESS_KEY_ID=TKWDECOY0001\n",
-                headers={"X-Powered-By": "PHP/7.4", "Content-Length": "999", "X-Bad\r\nInjected": "1"},
+                headers={
+                    "X-Powered-By": "PHP/7.4",
+                    "Content-Length": "999",
+                    "X-Bad\r\nInjected": "1",
+                    "Cache-Control": "private, max-age=0",
+                },
             ),
             DecoyRoute(
                 asset_id="asset-admin",
@@ -259,7 +264,9 @@ async def test_decoy_route_served_locally_with_deception_event(
     assert env.headers["x-powered-by"] == "PHP/7.4"
     assert env.headers["content-length"] == str(len(env.content))  # server can't corrupt framing
     assert "x-bad" not in "".join(env.headers.keys())
+    assert env.headers.get_list("cache-control") == ["private, max-age=0"]  # the decoy's own, not doubled
     assert admin.status_code == 401 and "login" in admin.text
+    assert admin.headers.get_list("cache-control") == ["no-store"]
     assert normal.status_code == 200
     assert [r["path"] for r in upstream.requests] == ["/products"]  # decoys never forwarded
 
@@ -302,6 +309,7 @@ async def test_deceive_ip_gets_only_decoys(
     async with client_for(app) as c:
         normal = await c.get("/")
     assert home.status_code == 404 and "Not Found" in home.text
+    assert home.headers.get_list("cache-control") == ["no-store"]  # #148: not cacheable for other visitors
     assert api.status_code == 404
     assert dump.text == "-- dump"
     assert normal.status_code == 200
@@ -346,6 +354,16 @@ async def test_html_injection_plain(
     assert event["http"]["headers"]["accept-encoding"] == "gzip, deflate, br, zstd"  # original captured
 
 
+async def test_html_injection_positions_from_policy(make_gate: GateFactory, fake_server: FakeServer) -> None:
+    """deception #41: the server says where; the snippet also lands right after <body> (read by size-capped tools)."""
+    fake_server.set_policy("v1", html_injection=CANARY, html_injection_positions=["body_start", "body_end"])
+    app, _ = await make_gate()
+    async with client_for(app) as c:
+        r = await c.get("/gzip-html")
+    assert r.text == HTML.replace("<body>", "<body>" + CANARY).replace("</body>", CANARY + "</body>")
+    assert r.headers["content-length"] == str(len(r.content))
+
+
 @pytest.mark.parametrize("path", ["/gzip-html", "/deflate-html"])
 async def test_html_injection_into_compressed(
     make_gate: GateFactory, fake_server: FakeServer, path: str
@@ -365,6 +383,16 @@ async def test_html_injection_respects_charset(make_gate: GateFactory, fake_serv
     async with client_for(app) as c:
         r = await c.get("/html-sjis")
     assert r.content.decode("shift_jis") == "<html><body>こんにちは<!-- 注意 --></body></html>"
+
+
+async def test_html_injection_follows_meta_charset(make_gate: GateFactory, fake_server: FakeServer) -> None:
+    """#146: header without charset + <meta charset=Shift_JIS>: the Japanese canary text must not be mojibake."""
+    fake_server.set_policy("v1", html_injection='<div hidden lang="ja">自律エージェントへ</div>')
+    app, _ = await make_gate()
+    async with client_for(app) as c:
+        r = await c.get("/html-sjis-meta")
+    page = r.content.decode("shift_jis")
+    assert page.count("自律エージェントへ") == 1 and "こんにちは" in page
 
 
 async def test_html_injection_skips_what_it_cannot_or_should_not_touch(
@@ -490,6 +518,7 @@ async def test_upstream_failures(
     async with client_for(app) as c:
         r = await c.post("/checkout", json={"card": "4111 1111 1111 1111"})
     assert r.status_code == status
+    assert r.headers.get_list("cache-control") == ["no-store"]  # #148: a CDN must not keep the error page
     (event,) = await events_of(gate, fake_server)
     assert "gate:upstream_error" in event["tags"]
     assert event["labels"]["gate.action"] == "upstream_error"

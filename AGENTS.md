@@ -16,7 +16,7 @@ uv run pytest                             # テスト（全部 1 分以内を維
 uv run ruff check src tests && uv run ruff format --check src tests
 uv run mypy src                           # 型（警告は徐々に潰す。新規コードは通すこと）
 uv run tokiwa serve --reload              # http://localhost:8788  （API docs: /api/docs）
-uv run tokiwa token create gate-1         # センサー/ゲート用 API トークン
+uv run tokiwa token create agent-1       # センサー用 API トークン（既定 scope ingest。Gate 用は --scope ingest --scope gate）
 
 # frontend（Node 22 / npm）
 cd frontend

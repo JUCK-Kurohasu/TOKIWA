@@ -14,9 +14,10 @@ import { ConfirmDialog } from "@/components/common/DangerConfirm";
 import { AiGeneratedBadge } from "@/components/common/IntelBadges";
 import { ApiErrorState, QueryView } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
+import { Time } from "@/components/common/Time";
 import { useUrlParams } from "@/components/common/urlState";
 import { Button, Card, EmptyState, Spinner } from "@/components/ui";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { useLocal } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { RuleSourceBadge } from "./labels";
@@ -208,7 +209,7 @@ export function ProposalsTab() {
                   <RuleSourceBadge source={current.source} />
                   {current.source === "llm" && <AiGeneratedBadge />}
                   <span className="text-xs text-muted">
-                    {L.created}: {formatDateTime(current.created_at)}
+                    {L.created}: <Time iso={current.created_at} />
                   </span>
                 </div>
                 <h3 className="text-base font-semibold">{current.title}</h3>

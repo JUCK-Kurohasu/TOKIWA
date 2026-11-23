@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from tokiwa.schemas.common import ORMModel
 
@@ -32,8 +32,9 @@ class UserCreate(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    # Bounded so an anonymous request cannot make the server hash megabytes (accounts allow <= 64 / 256 chars).
+    username: str = Field(max_length=128)
+    password: str = Field(max_length=1024)
 
 
 class TokenResponse(BaseModel):
@@ -46,6 +47,8 @@ class TokenResponse(BaseModel):
 class AuthStatus(BaseModel):
     setup_required: bool
     version: str
+    # True while setup is pending and POST /auth/setup needs the one-time code from the server log.
+    setup_code_required: bool = False
 
 
 class ApiTokenScope(StrEnum):
@@ -62,11 +65,35 @@ class ApiToken(ORMModel):
     created_at: datetime
     last_used: datetime | None = None
     revoked: bool = False
+    # Ingest binding (None = unrestricted). See db.models.core.ApiTokenRow.
+    allowed_sensor_ids: list[str] | None = None
+    allowed_datasets: list[str] | None = None
+    expires_at: datetime | None = None  # None = never expires
+    created_by: str | None = None
+    rotated_from: str | None = None
+
+
+# sensor ids are host names / "gate-1" style ids; dataset patterns are "<family>.<stream>" with fnmatch "*".
+SensorIdItem = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.:@/-]{1,128}$")]
+DatasetPatternItem = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.*-]{1,64}$")]
 
 
 class ApiTokenCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    scopes: list[ApiTokenScope] = Field(default_factory=lambda: [ApiTokenScope.INGEST, ApiTokenScope.GATE])
+    # Default ingest only (audit #33): the gate scope reads the whole deception layout, so it is opt-in.
+    scopes: list[ApiTokenScope] = Field(default_factory=lambda: [ApiTokenScope.INGEST])
+    # Optional ingest binding. Omitted / null = unrestricted. An empty list is rejected (it would mean "deny all").
+    allowed_sensor_ids: list[SensorIdItem] | None = Field(default=None, min_length=1, max_length=64)
+    allowed_datasets: list[DatasetPatternItem] | None = Field(default=None, min_length=1, max_length=64)
+    # None = never expires (backwards compatible default). TODO(decide): default to 90 days? (NOTES #163)
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class ApiTokenRotate(BaseModel):
+    """Issue a replacement with the same name / scopes / binding; the old token stays valid for ``grace_hours``."""
+
+    grace_hours: int = Field(default=24, ge=0, le=24 * 30)  # 0 = revoke the old token immediately
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)  # for the new token (None = never)
 
 
 class ApiTokenCreated(ApiToken):
@@ -99,6 +126,8 @@ class LLMCall(ORMModel):
     latency_ms: float
     related: dict[str, str]
     error: str | None = None
+    # "table" | "snapshot" | "unpriced" (estimated at the highest known rates, #35) | None (nothing billed / old row)
+    cost_basis: str | None = None
 
 
 class LLMCallDetail(LLMCall):

@@ -19,14 +19,15 @@ cp .env.example .env     # 只取消注释需要的行
 make up                  # = docker compose -f deploy/compose.yaml --env-file .env up -d --build --wait
 ```
 
-1. 在 <http://localhost:8788/setup> 创建第一个管理员（使用 CLI 时：
+1. 在 <http://localhost:8788/setup> 创建第一个管理员。页面要求输入的 **Setup code**（设置码）可在启动日志（`docker compose -f deploy/compose.yaml logs tokiwa`，会输出包含设置码的 URL）中找到，或通过
+   `docker compose -f deploy/compose.yaml exec tokiwa cat /data/setup-code` 查看（仅可使用一次。使用 CLI 时：
    `docker compose -f deploy/compose.yaml exec tokiwa tokiwa user create admin --role admin`。密码以交互方式输入）。
 2. 如需使用 LLM，在 `.env` 中写入 `ANTHROPIC_API_KEY=...`（未设置时以模拟 LLM 运行）。
 3. 默认只在 `127.0.0.1:8788` 上公开。若要对局域网公开，可在 `.env` 中设置 `TOKIWA_BIND=0.0.0.0`，但
    **不要在没有 TLS 的情况下公开**，请在前面放置后文所述的反向代理。
 
-> ⚠️ **不要用空值启用设置**。例如 `TOKIWA_SERVER__SECRET_KEY=`（空）会被当作“空字符串签名密钥”使用。
-> 不使用的项目请保持注释状态。未设置时，签名密钥会在首次启动时自动生成。
+> ⚠️ **不要用空值启用设置**（空字符串的含义因设置项而异）。不使用的项目请保持注释状态。
+> 签名密钥 `TOKIWA_SERVER__SECRET_KEY` 未设置（或为空）时会在首次启动时自动生成；自行设置时需要至少 32 个字符。
 
 ### 单独用 docker 运行
 
@@ -46,16 +47,20 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 ```bash
 # 传感器用 API 令牌（仅显示一次）
-docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --scope ingest --scope gate
 
 # Gate（compose 的 gate profile。在 .env 中设置 TOKIWA_GATE__INGEST_TOKEN 和 TOKIWA_GATE__UPSTREAM）
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # 主机传感器（为了查看主机的端口和进程，使用 host 的 PID / 网络命名空间）
+# 令牌通过权限为 600 的 env 文件 /etc/tokiwa/agent.env 传入（内容为一行 TOKIWA_AGENT__INGEST_TOKEN=tkw_...）
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **不要像 `--token tkw_...` 这样通过命令行参数传递 API 令牌。** 同一主机上的其他用户可以通过 `ps` 看到参数，
+  Docker 管理员也可以通过 `docker inspect` 看到。Gate 请使用 `--token-file`（文件变化时会重新读取），Agent 请使用环境变量
+  `TOKIWA_AGENT__INGEST_TOKEN`（`--env-file` 或 compose 的 `.env`）。具体步骤见 `docs/deploy.md` §4。
 - 没有 HTTP 的角色（agent / sim）需要加上 `TOKIWA_HEALTHCHECK_URL=none`。Gate 的健康检查地址是
   `http://127.0.0.1:8080/__tokiwa/health`。
 - Agent 读取其他用户的进程信息时，可能需要相当于 root 的权限（镜像以非 root 运行）。
@@ -127,6 +132,7 @@ tokiwa.example.internal {
 
 需要保存的是 **数据库** 和 **签名密钥 `secret.key`** 这两样（都位于 `/data`）。丢失 `secret.key` 会导致
 已登录的会话失效（API 令牌是数据库中的哈希值，因此不受影响）。
+请同时保存欺骗功能的密钥环 `deception.key`（同样位于 `/data`）。丢失后，诱饵中的伪造凭据和金丝雀的值会改变，攻击者已经拿到的值将不再被检测到（[欺骗（Mirage）](Deception-zh)）。
 
 SQLite 使用 WAL 模式，因此不要在运行中直接复制文件，而应使用在线备份 API。
 
@@ -136,6 +142,7 @@ $C exec -T tokiwa python -c "import sqlite3; s=sqlite3.connect('/data/tokiwa.db'
 mkdir -p backups
 $C cp tokiwa:/data/backup.db  "backups/tokiwa-$(date +%F).db"
 $C cp tokiwa:/data/secret.key "backups/secret-$(date +%F).key"
+$C cp tokiwa:/data/deception.key "backups/deception-$(date +%F).key"
 $C exec -T tokiwa rm /data/backup.db
 ```
 
@@ -145,11 +152,12 @@ $C exec -T tokiwa rm /data/backup.db
 $C stop tokiwa
 $C cp backups/tokiwa-YYYY-MM-DD.db  tokiwa:/data/tokiwa.db
 $C cp backups/secret-YYYY-MM-DD.key tokiwa:/data/secret.key
+$C cp backups/deception-YYYY-MM-DD.key tokiwa:/data/deception.key
 $C run --rm --entrypoint sh tokiwa -c 'rm -f /data/tokiwa.db-wal /data/tokiwa.db-shm'
 $C start tokiwa
 ```
 
-使用 PostgreSQL 时，请使用 `pg_dump -Fc` / `pg_restore`，并另行保存 `secret.key`。
+使用 PostgreSQL 时，请使用 `pg_dump -Fc` / `pg_restore`，并另行保存 `secret.key` 和 `deception.key`。
 
 ## 升级
 

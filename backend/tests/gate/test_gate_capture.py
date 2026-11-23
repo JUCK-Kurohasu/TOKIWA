@@ -70,12 +70,13 @@ def test_body_capture_binary_and_empty() -> None:
 
 
 def test_capture_headers_keeps_order_and_duplicates() -> None:
-    headers, order = capture_headers(
+    cap = capture_headers(
         [(b"Host", b"x"), (b"accept", b"*/*"), (b"cookie", b"a=1"), (b"Cookie", b"b=2"), (b"x-a", b"1")]
     )
-    assert order == ["host", "accept", "cookie", "cookie", "x-a"]
-    assert headers["cookie"] == "a=1; b=2"
-    assert headers["host"] == "x"
+    assert cap.order == ["host", "accept", "cookie", "cookie", "x-a"]
+    assert cap.headers["cookie"] == "a=1; b=2"
+    assert cap.headers["host"] == "x"
+    assert cap.total == 5 and not cap.truncated and cap.duplicated == []
 
 
 def _exchange(**kw: object) -> Exchange:

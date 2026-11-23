@@ -18,13 +18,17 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tokiwa.auth.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token
+from tokiwa.auth.api_tokens import is_expired
+from tokiwa.auth.security import API_TOKEN_PREFIX, decode_access_token, hash_api_token, token_version_matches
 from tokiwa.db.models.core import ApiTokenRow, UserRow
 from tokiwa.db.session import get_session
 from tokiwa.schemas.system import ApiToken, Role, User
 from tokiwa.util import utcnow
 
-DbSession = Annotated[AsyncSession, Depends(get_session)]
+# scope="function": the session is committed (or rolled back) when the route returns, *before* the response is
+# sent -- see tokiwa.db.session.get_session. Keep it: the default "request" scope commits after the client already
+# has its 2xx (audit #91).
+DbSession = Annotated[AsyncSession, Depends(get_session, scope="function")]
 
 
 def _bearer(authorization: str | None) -> str | None:
@@ -51,6 +55,11 @@ async def user_from_token(session: AsyncSession, token: str | None) -> User:
     row = await session.get(UserRow, claims.get("sub"))
     if row is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
+    if not token_version_matches(claims, row.token_version):
+        # Password/role changed, logged out or sessions revoked since this JWT was issued (#34).
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "token revoked", headers={"WWW-Authenticate": "Bearer"}
+        )
     return User.model_validate(row)
 
 
@@ -96,6 +105,8 @@ def require_token_scope(scope: str) -> Callable[..., Coroutine[Any, Any, ApiToke
         ).scalar_one_or_none()
         if row is None or row.revoked:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid API token")
+        if is_expired(row):  # audit #163: expires_at NULL = never
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API token expired")
         if scope not in row.scopes:
             raise HTTPException(status.HTTP_403_FORBIDDEN, f"token lacks scope {scope!r}")
         row.last_used = utcnow()

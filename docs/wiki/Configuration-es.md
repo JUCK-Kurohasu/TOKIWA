@@ -15,13 +15,22 @@ Además, los dos elementos siguientes pueden **sobrescribirse en tiempo de ejecu
 - Configuración del LLM (**LLM → Settings** (LLM → Configuración)): proveedor, modelos, presupuesto, idioma de salida, clave de API, etc.
 - Activación / desactivación de detectores (**Rules → Detectors** (Reglas de detección → Detectores))
 
+**Un valor guardado en la interfaz tiene prioridad sobre las variables de entorno y el YAML para ese campo** (gana el valor de la
+base de datos). Se mantiene tras reinicios y restauraciones de la base de datos. Al arrancar, los nombres de los campos del LLM que
+difieren de la configuración estática se registran como WARNING (sin los valores). En LLM → Settings, «Sobrescrituras guardadas aquí»
+muestra qué campos vienen de la base de datos, y **Restablecer todas las sobrescrituras** (`DELETE /api/v1/llm/config`, solo
+administradores, queda en la auditoría) vuelve a la configuración estática. Para fijar la configuración del LLM desde el entorno / YAML
+(p. ej. forzar `TOKIWA_LLM__PROVIDER=mock` para que nunca se envíe nada a un LLM externo), establezca
+`TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (`llm.allow_ui_override`, por defecto true). Las sobrescrituras de la base de datos se ignoran y
+los cambios desde la interfaz (`PUT /api/v1/llm/config`) devuelven 409. Este ajuste no puede cambiarse desde la interfaz.
+
 Con Docker Compose, `.env` se pasa al contenedor como variables de entorno. Si ejecuta `tokiwa serve` directamente en local,
 `.env` no se carga automáticamente.
 
 ### Precauciones de escritura
 
 - **Las listas y los diccionarios se escriben en JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
-- **No defina valores vacíos**. `TOKIWA_SERVER__SECRET_KEY=` se trata como "clave de firma de cadena vacía" (no es lo mismo que no definirla).
+- **No defina valores vacíos** (lo que significa una cadena vacía depende del ajuste). Un `TOKIWA_SERVER__SECRET_KEY=` vacío se trata como no definido y se usa la clave generada en `data_dir/secret.key`. Una clave definida debe tener al menos 32 caracteres; si es más corta, el servidor no arranca.
 - Se recomienda pasar los secretos (claves de API, contraseñas) mediante variables de entorno y no en el YAML.
 
 ### Ejemplo de YAML
@@ -55,8 +64,17 @@ deception:
 | `server.cors_origins` | `["http://localhost:5173"]` | Solo si la interfaz se sirve desde otro origen |
 | `server.static_dir` | Ninguno | Interfaz compilada (`frontend/dist`). Si se indica, se sirve en `/` |
 | `server.data_dir` | `./data` | Ubicación de los datos (clave de firma, etc.) |
-| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT). Si no se define, se genera y se guarda en `data_dir/secret.key` |
+| `server.secret_key` | Generada automáticamente | Clave de firma del inicio de sesión (JWT), de al menos 32 caracteres. Si no se define o está vacía, se genera y se guarda en `data_dir/secret.key` (permisos 0600) |
 | `server.token_ttl_minutes` | 720 | Tiempo de validez de la sesión iniciada |
+| `auth.setup_code_required` | `true` | La configuración inicial (crear el primer administrador) exige el código de un solo uso que aparece en el log de arranque y en `data_dir/setup-code` |
+| `server.max_body_bytes` | 1048576 (1 MiB) | Límite del cuerpo de la petición; si se supera, 413. Se aplica a toda la API salvo la ingesta (ingest) |
+| `server.security_headers` | `true` | Añade CSP, `X-Frame-Options: DENY`, `nosniff` y `Referrer-Policy: no-referrer` a todas las respuestas. Use `false` solo si un proxy aplica su propia política o una UI personalizada no encaja con la CSP |
+| `server.expose_docs` | `true` | Publica la documentación de la API (`/api/docs`, `/api/openapi.json`) sin autenticación. En producción se recomienda `false` |
+| `server.max_ingest_body_bytes` | 33554432 (32 MiB) | Límite del cuerpo para `/api/v1/ingest/`. Un lote mayor recibe 413 y el Gate / agente **descarta** ese lote; súbalo junto con un `batch_size` mayor |
+| `auth.login_max_failures` | 5 | Tras este número de fallos de inicio de sesión para el mismo usuario + IP de origen, se rechazan los intentos durante un tiempo (429). 0 lo desactiva |
+| `auth.login_max_failures_per_ip` | 30 | Límite de fallos desde una IP de origen con cualquier usuario (password spraying). 0 lo desactiva |
+| `auth.login_lockout_minutes` | 15 | Ventana (minutos) de ambos límites; el bloqueo se levanta cuando los fallos antiguos salen de la ventana |
+| `auth.password_hash_concurrency` | 4 | Hashes de contraseña (scrypt) calculados a la vez |
 | `database.url` | `sqlite+aiosqlite:///./data/tokiwa.db` | Para PostgreSQL, `postgresql+asyncpg://user:pass@host/db` |
 
 ### LLM (`llm.*`)
@@ -69,12 +87,19 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | Clave | Por defecto | Descripción |
 |---|---|---|
 | `disabled_detectors` | `[]` | ID de los detectores que se desactivan |
-| `sigma_rule_dirs` | `["../rules/sigma"]` | Ubicación de las reglas Sigma |
+| `sigma_rule_dirs` | se resuelve a partir de la ubicación del paquete (`<repositorio>/rules/sigma` en el código fuente, `/app/rules/sigma` en la imagen Docker) | Ubicación de las reglas Sigma. No depende del directorio de trabajo. Si un directorio no existe se registra un ERROR al arrancar. Las rutas relativas se buscan en el directorio de trabajo y después en `backend/` |
 | `dedup_window_seconds` | 300 | Ventana de tiempo para agrupar alertas idénticas |
 | `llm_app_paths` | `/api/chat`, `/v1/chat/completions`, `/chat` | Rutas HTTP supervisadas para detectar inyección de prompts |
 | `session_idle_timeout_seconds` | 1800 | Si no hay accesos durante este tiempo, se considera una sesión distinta |
 | `ai_agent_threshold` | 0.7 | Umbral de puntuación de IA para clasificar como agente de IA |
+| `max_future_skew_seconds` | 120 | Cuánto puede adelantarse el reloj de un sensor. Los eventos con una fecha más futura reciben la hora de recepción, la etiqueta `clock_skew` y la etiqueta `ingest.original_timestamp` (la hora original); la entrada de auditoría `ingest.clock_skew` se escribe como máximo una vez por token cada 10 minutos. Las horas pasadas (eventos retrasados o reenviados) se conservan |
+| `max_live_sessions` | 4096 | Número máximo de sesiones en memoria. Cuando se llena, se expulsan primero las sesiones de una sola petición con puntuación baja y al final las que tienen evidencia de IA, canario o señuelo. Muchas expulsiones generan un WARNING en el log (una avalancha de clientes de una sola petición puede reiniciar las características de una sesión); súbalo si aparece con la carga normal |
+| `fp_suppress_hours` | 168 | Al marcar una alerta como falso positivo, las repeticiones del mismo hallazgo (misma regla, contenido coincidente, ruta e IP de origen) se suprimen durante este tiempo: se suman al contador de la alerta original, sin alerta nueva, triaje con LLM ni notificación. Una firma nueva o una severidad mayor alertan como siempre. 0 desactiva la supresión automática. Las supresiones se listan y levantan con la API `GET/POST /api/v1/alert-suppressions` |
+| `allowlist_max_hours` | 720 | Duración máxima de una lista de permitidos que declara el CIDR de origen de un análisis de vulnerabilidades o una prueba de carga autorizados (la crea un administrador por API; la duración es obligatoria). Las alertas bajo una lista de permitidos solo se registran con severidad info y no pasan a triaje, notificación, incidentes ni propuestas de respuesta |
 | `web.*` | — | Umbrales de las detecciones por tasa en tráfico web (ráfagas de errores, fallos de inicio de sesión, inundaciones, etc.) |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Límites de inspección de las detecciones web por firmas. Los parámetros, cabeceras, valores JSON y partes multipart que superan un límite de cantidad no se descartan: se inspeccionan juntos; el texto que supera el límite de caracteres no se inspecciona. Alcanzar un límite queda registrado en `details.inspection_truncated` de la alerta y en la etiqueta `inspection-truncated`; si lo que precede al límite parece relleno (un mismo carácter repetido, elementos vacíos de relleno), se genera `web.inspection_evasion` (low) |
+| `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | Las cabeceras propias de la aplicación (X-Tenant-Id y similares) también se revisan en busca de SQLi, XSS, recorrido de rutas e inyección de comandos. Las cabeceras de protocolo (Accept, Sec-*, If-*, contexto de trazas, etc.) se omiten; añada nombres a `extra_framing_headers` (un `*` final coincide con un prefijo) para omitir más. false recupera el comportamiento anterior (solo User-Agent, Referer, X-Forwarded-* y similares) |
+| `web.max_decode_rounds` | 8 | Número máximo de pasadas de decodificación URL / HTML / JS por valor (contra codificaciones anidadas; se detiene en cuanto el valor deja de cambiar) |
 
 ### Triaje y correlación (`triage.*`)
 
@@ -93,6 +118,7 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | Clave | Por defecto | Descripción |
 |---|---|---|
 | `auto_approve_enabled` / `auto_approve_actions` | false / `[]` | Aprobación automática (requiere ambos ajustes) |
+| `auto_approve_cooldown_minutes` | 1440 | Tras rechazar o revertir una persona una acción, el mismo tipo + objetivo no se aprueba automáticamente durante estos minutos (0 lo desactiva) |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL por defecto y máximo |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | Rangos que nunca serán objetivo |
 | `protect_server_addresses` | true | Protege las IP del propio servidor |
@@ -113,13 +139,21 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `gate.listen_host` / `gate.listen_port` | `0.0.0.0` / 8080 | Dirección y puerto de escucha |
 | `gate.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `gate.ingest_token` | Ninguno | Token de API (ámbito: ingest + gate) |
+| `gate.token_file` | Ninguno | Archivo con el token de API. Se relee cuando cambia y tras un 401 (sin reiniciar al rotar). Tiene prioridad sobre `ingest_token` si se puede leer |
 | `gate.capture_body_bytes` | 4096 | Número de bytes iniciales del cuerpo que se capturan |
 | `gate.trust_forwarded_for` | false | Confiar en `X-Forwarded-For` |
+| `gate.max_request_headers` | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
+| `gate.forward_client_headers` | `[]` | Encabezados que normalmente se eliminan (`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `X-Original-URL`, ...) y que se pasan sin cambios al upstream (solo los que añade un proxy de confianza situado delante) |
+| `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP). Las que excedan reciben 429. 0 = sin límite |
 | `agent.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `agent.ingest_token` | Ninguno | Token de API (ámbito: ingest) |
 | `agent.interval_seconds` | 10 | Intervalo de recopilación del sensor de host |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | Logs que se ingieren |
 | `agent.verify_tls` | true | Verificar el certificado TLS del servidor |
+| `agent.send_cmdline` | true | Enviar la línea de comandos de los procesos (secretos enmascarados antes del envío). false: solo nombre, ejecutable y usuario |
+| `agent.max_connections_per_cycle` | 1000 | Conexiones nuevas enviadas por ciclo (el exceso pasa al ciclo siguiente) |
+| `agent.log_timezone` | ninguno | Zona horaria de las horas de log sin desplazamiento (`Asia/Tokyo`, `+09:00`, `UTC`). Sin configurar: UTC con aviso |
+| `agent.health_report_seconds` | 300 | Intervalo mínimo para informar de líneas / horas ilegibles (evento `agent.health`) |
 
 ### Notificaciones (`notify.*`) y copiloto (`copilot.*`)
 
@@ -130,9 +164,16 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `notify.public_ui_url` | Ninguno | Destino de los enlaces a la interfaz incluidos en las notificaciones |
 | `notify.language` | `both` | Idioma de las notificaciones |
 | `notify.dedup_minutes` | 10 | Tiempo durante el que se suprimen las notificaciones idénticas |
+| `notify.include_summary` | false | Incluir en las notificaciones el texto escrito por el LLM (resúmenes de incidentes, motivos de las acciones) |
+| `notify.include_source_ip` | true | Incluir en las notificaciones las IP de origen y los objetivos IP / CIDR de las acciones (false muestra `(hidden)`) |
 | `notify.allowed_hosts` / `notify.block_private_destinations` | `[]` / true | Restricción de destinos (protección contra SSRF) |
+| `notify.smtp_password_envs` | `[]` | Nombres de variables de entorno adicionales permitidos como `password_env` del correo (por defecto se permiten `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*`) |
+| `notify.smtp_allowed_hosts` / `notify.smtp_block_private` | `[]` / false | Restricción de destinos SMTP (rechazar direcciones privadas está desactivado por defecto porque los relés internos son habituales) |
+| `notify.smtp_allow_plaintext_auth` | false | Permitir la autenticación SMTP sin TLS |
 | `copilot.enabled` | true | Copiloto |
 | `copilot.tier` | `deep` | Nivel (tier) del modelo que se usa |
 | `copilot.max_tool_iterations` | 8 | Número máximo de usos de herramientas por pregunta |
+| `copilot.min_role` | `analyst` | Rol mínimo para crear conversaciones y enviar mensajes (`viewer` / `analyst` / `admin`). Una pregunta puede hacer hasta 8 llamadas de nivel deep contra el presupuesto diario común, así que por defecto se excluye a viewer |
+| `copilot.messages_per_minute` | 6 | Límite de mensajes por minuto y usuario (0 = sin límite). Al superarlo, la API responde 429 |
 
 Todas las opciones están en `backend/src/tokiwa/config.py`. Para un ejemplo para Docker, consulte `.env.example` en la raíz del repositorio.

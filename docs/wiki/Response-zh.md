@@ -15,7 +15,7 @@ proposed（提议）──批准──▶ approved ──执行成功──▶ a
 
 | 操作 | 执行者 | 备注 |
 |---|---|---|
-| 提议 | LLM（分诊）/ 规则 / 用户 | 如果已存在相同类型、相同对象的提议，则不新建，而是追加理由 |
+| 提议 | LLM（分诊）/ 规则 / 用户 | 如果已存在相同类型、相同对象的提议，则不新建。待批准时追加理由；批准后不再修改理由，而是作为“批准后收到的提议”另行记录 |
 | 批准、拒绝 | `analyst` 及以上 | 批准后立即执行 |
 | 撤销 | `analyst` 及以上 | 仅限处于 `active` 且可撤销的处置 |
 | 到期失效 | 自动（每 30 秒检查一次） | 超过 TTL 后解除 |
@@ -36,6 +36,21 @@ proposed（提议）──批准──▶ approved ──执行成功──▶ a
 | `webhook` | — | 向已配置的 Webhook 发送固定格式的 JSON |
 
 与 Gate 相关的处置，会在 Gate 下一次拉取策略时（默认 5 秒以内）生效。
+**即使批准后显示为“Active”（执行中），在 Gate 拉取策略之前也不会被强制执行。** 而且只对经过 Gate 的请求有效，
+不经过 Gate 的路径（只做日志摄取的部署、绕过 Gate 的直接访问）不会被阻断。
+
+Response（处置）页面的每张卡片都会显示该处置在 Gate 上的生效情况。
+
+| 显示 | 含义 |
+|---|---|
+| No Gate to apply it（无可生效的 Gate） | 没有任何 Gate 拉取过策略。该处置未被强制执行 |
+| Approved (not applied yet)（已批准，未生效） | 有 Gate，但批准后尚未拉取策略 |
+| Applied by n Gate(s) (hh:mm)（已在 n 台 Gate 生效） | 批准后拉取了策略的 Gate 数量和最近一次拉取时间 |
+| … none has polled for over N min（超过 N 分钟未拉取） | 已生效，但这些 Gate 已有一段时间未拉取策略（可能已停止） |
+
+“Active” 标签页还会显示 Gate 的整体状况（正在拉取的台数、已停止拉取的 Gate）。超过
+`max(120 秒, gate.policy_refresh_seconds × 12)` 未拉取即视为停止。同样的信息也可以通过 `GET /api/v1/gate/status` 获取。
+Gate 按“令牌 + 来源地址”区分，因此位于同一反向代理之后的多台 Gate 会被算作 1 台。
 
 ## 安全机制
 
@@ -49,6 +64,7 @@ proposed（提议）──批准──▶ approved ──执行成功──▶ a
    - 与 **受保护对象**（`response.protected_cidrs`。默认 `127.0.0.0/8`、`::1/128`）重叠的对象
    - 服务器自身的 IP 地址（`response.protect_server_addresses`，默认 ON）
 4. 在执行之前，会按当前设置 **再次校验**（例如在提议之后新增了受保护对象时，状态会变为 `failed`）。
+5. **生效中的处置也会按当前设置重新校验**。落在之后新增到 `response.protected_cidrs` 等范围内的处置，会在 Gate 下次获取策略时从下发内容中移除，并在 30 秒内（或重启时）变为 `reverted`（审计日志记录 `response.auto_revert`）。
 
 > 💡 强烈建议事先将管理终端、监控系统、上游负载均衡器的 IP 添加到 `response.protected_cidrs` 中。
 
@@ -69,7 +85,23 @@ response:
 
 自动批准的处置，其批准者会记录为 `policy`。由于误报的影响很大，是否对封禁（`block_ip`）启用自动批准，请慎重判断。
 
-> 要求提议者与批准者为不同人员的“双人批准”，在 v0.1 中尚未强制执行（计划在下一个开发阶段作为设置项添加）。
+如果依据只有第三方能让浏览器触发的内容，即使启用了自动批准，处置也会保持待批准状态（审计日志 `response.auto_approve_withheld`）。这包括“诱发”（如第三方页面上的 `<img>`）或“被动”（只有可经由链接到达的值）的欺骗触发，以及证据请求全部看起来由浏览器诱发的告警（例如 `<img src="…/.env">` 引发的敏感文件探测）。
+
+> 要求提议者与批准者为不同人员的“双人批准”，在 v0.1 中尚未强制执行（计划在下一个开发阶段作为设置项添加）。由在界面上提议的同一用户批准的处置会显示“自我批准”，批准时的内容（理由、对象、TTL 等）会保留在审计日志和处置记录中。
+
+## 拒绝、撤销与抑制（阻止再次提议）
+
+在拒绝、撤销的对话框中可以选择“对同一目标的再次提议”如何处理。
+
+| 选项 | 来自规则 / LLM 的同类型、同目标提议 | 自动批准 |
+|---|---|---|
+| 不抑制（默认） | 仍会提议 | **24 小时内不自动批准**（`response.auto_approve_cooldown_minutes`，0 表示禁用） |
+| 指定小时数 / 永久不再提议 | **不创建**（审计日志记录 `response.propose_suppressed`，也不发送批准请求通知） | 不批准 |
+
+- 目标为 IP / CIDR 时按重叠判断（被抑制的 /24 内的 IP、包含被抑制 IP 的更大 CIDR 也算命中）。处置类型不同则分别处理。
+- 人工手动提议时，即使处于抑制中也会创建提议（但不会自动批准）。
+- 可在处置页面的 **抑制** 标签页查看和解除（API：`GET /api/v1/response/suppressions`，解除用 `POST /api/v1/response/suppressions/{id}/lift`）。
+- 若要预先抑制共享 NAT 或监控服务的 IP，请使用 `POST /api/v1/response/suppressions`。
 
 ## 使用 nftables 封禁（可选）
 
@@ -101,7 +133,9 @@ nft add rule inet tokiwa input ip6 saddr @blocklist6 drop
 
 - 相同内容每 10 分钟最多发送 1 次（`notify.dedup_minutes`）。但严重级别上升时仍会发送。
 - 通知的语言由 `notify.language`（`ja` / `en` / `both`）决定。链接使用 `notify.public_ui_url`。
+- 默认情况下，处置的审批请求只包含类型、目标、TTL、提议者和指向界面的链接。LLM 写的理由和安全事件摘要可能被攻击者诱导、也可能含有个人信息，因此仅在 `notify.include_summary=true` 时包含。若不想包含来源 IP，请设置 `notify.include_source_ip=false`。在 Slack、Discord 和邮件中，正文里的 URL 会改为不可点击的形式（`hxxps://`），并禁用 Discord 的格式。
 - **SSRF 防护**：发送目标仅限 http / https，且不跟随重定向。默认情况下，如果域名解析的结果是私有
   地址（回环地址、内网、云元数据等），则拒绝发送。也可以通过
   `notify.allowed_hosts` 限定允许的主机。
-- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。
+- 建议不要将邮件密码保存在数据库中，而是通过 `password_env`（环境变量名）传入。可用的环境变量名仅限 `TOKIWA_NOTIFY_SMTP_*` / `TOKIWA_SMTP_PASSWORD*` 以及在设置 `notify.smtp_password_envs` 中列出的名称（TOKIWA 自身的设置 `TOKIWA_*__*` 和 `ANTHROPIC_*` 等 API 密钥即使列出也不能使用）。如果之前使用了其他名称，请重命名该变量或将其加入 `notify.smtp_password_envs`（否则发送会失败并给出原因）。
+- 指定了用户名（SMTP 认证）的渠道必须使用 STARTTLS 或 SSL。更改主机、端口或用户名时请重新输入密码（更改 Webhook 的 URL 时也请重新输入头部值）。

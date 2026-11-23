@@ -1,0 +1,241 @@
+> 🌐 [日本語](Data-Handling) · **English** · [中文](Data-Handling-zh) · [Español](Data-Handling-es)
+
+# Data handling
+
+This page summarizes **what TOKIWA receives, what it stores, what it sends outside, how long it keeps it, and who can see it**.
+It is based on the v0.1.0 code and default settings. Anything that could not be confirmed from the code is marked "unverified".
+
+> ⚠️ **Key points (with the default settings)**
+> - The Gate stores up to the first 4,096 bytes of request bodies. Secrets, email addresses and card numbers are redacted, but
+>   **names, phone numbers, addresses, dates of birth, login IDs and the like are not**.
+> - Once an LLM API key is configured, alerts and incidents of `medium` or higher are **sent automatically to the external LLM
+>   provider**, together with excerpts of their evidence events.
+> - **Automatic deletion is not implemented**. Stored data remains until someone deletes it by hand.
+> - Every role, including `viewer`, can read raw events, request bodies included.
+>
+> Legal decisions about handling personal data are up to the organization that deploys TOKIWA. This page collects the facts to inform those decisions.
+
+## Collection and storage
+
+### Redaction happens on the sensor side
+
+- The Gate and the Agent redact events **in their own process, before** sending them to the server. They use the
+  `llm.redaction.*` settings passed to that process (see [LLM setup & cost](LLM-en) for the keys).
+- The server **stores received events as they are** (it does not redact again at ingest). Changing `llm.redaction.*` on the
+  server does not change what is stored from the Gate / Agent.
+- Events you send yourself to the ingest API (`POST /api/v1/ingest/events`) are also stored without redaction. Redact them on the sending side.
+- Each field is cut at `llm.redaction.max_field_chars` (default 2,048 characters); Gate bodies are cut at `gate.capture_body_bytes`.
+
+### What each sensor collects
+
+| Sensor (dataset) | Stored | Redacted | Not stored |
+|---|---|---|---|
+| **Gate** (`gate.http`) | Source / destination IP and port, method, Host, path, query, request headers (up to 64 names; those used for detection are kept wherever they appear) and their order, User-Agent, Referer, Content-Type, **the first `gate.capture_body_bytes` (default 4,096) bytes of text bodies**, body size, status, response size and Content-Type, duration | Values of the headers in `llm.redaction.sensitive_headers` (`Authorization`, `Cookie`, ...) and the "Redacted" items below | Response bodies, response headers (other than Content-Type), binary bodies (only the size is recorded), headers beyond 64 names (only the tag `gate:headers_truncated` and the header count remain) |
+| **Gate decoy serving** (`gate.deception`) | One more record with the same HTTP content as above (including values typed into a decoy login form) | Same as above | Same as above (these requests are not forwarded to the protected app) |
+| **nginx / Caddy** (`nginx.access` / `caddy.access`) | Source IP and port, method, Host, path, query, headers present in the log, status, size, duration, the original log line (`raw`, after redaction, up to 4 KB) | Header values (as above), values of keys such as `password`, `token`, `cookie`, authenticated user names (nginx `remote_user`, Caddy `user_id`), and the "Redacted" items below | Request bodies (access logs do not contain them) |
+| **Zeek** (`zeek.conn` / `zeek.http` / `zeek.notice`) | Connections (IP, port, bytes, state), HTTP (path, query, UA, Referer, status), notices, the original line (`raw`, up to 4 KB) | Values of keys such as `password` and `username`, and the "Redacted" items below | Logs other than these three |
+| **Suricata** (`suricata.eve`) | `alert` / `http` / `flow` / `dns` records (IP and port, HTTP path, query and headers, DNS query names and answers), the original EVE record (`raw`, up to 4 KB) | Header values, redaction by key name, and the "Redacted" items below | Other types such as `tls`, `fileinfo`, `stats`. If EVE is configured to output payloads, they can end up in `raw` within the 4 KB limit |
+| **Host sensor** (`host.ports` / `host.connections`) | Host name, host IPs (up to 32), OS, listening sockets, new TCP connections (IPs and ports of both ends), and for their processes: name, executable, command line (up to 512 characters), OS user name | Secrets in command lines (`password=...`, arguments named like a secret such as `--password X` / `--api-key X`, options of common tools such as `mysql -pX`, `redis-cli -a X`, `curl -u user:X`, environment assignments such as `*_KEY=X`) | With `agent.send_cmdline=false` the command line is not sent at all (default: sent after masking; passwords passed as positional arguments and the like may not be redacted) |
+| **Ingest API** (direct) | Everything in the events you send | **Nothing** (the server does not redact) | — |
+| **Deception trip records** | The asset that was touched, source IP, event ID, path, method, UA, the trap value (a fake value generated by TOKIWA) and the names of the fields it appeared in | — | — (trip records remain even after the asset is deleted) |
+
+### What is and is not redacted
+
+Redacted values are replaced with `[REDACTED:<type>]`.
+
+| Redacted | Not redacted (examples) |
+|---|---|
+| Private keys, JWTs, API key / token formats of major services (Anthropic, OpenAI, AWS, GitHub, Slack, Google), `Bearer` / `Basic` credentials | Names, phone numbers, addresses, dates of birth |
+| Values of 3 or more characters following `password=`, `token=`, `secret=`, `api_key=`, `auth=`, `session=` and similar | Login IDs (values of `username=` and similar), passwords of 2 characters or fewer |
+| Credentials embedded in URLs (`https://user:pass@...`) | URL-encoded email addresses (containing `%40`) |
+| Card numbers that pass the Luhn check | IPv6 addresses (`mask_ips` only covers IPv4) |
+| Email addresses (`mask_emails`, default ON) | The source / destination IP fields of events (not covered even with `mask_ips` ON) |
+| IPv4 addresses inside strings (`mask_ips`, default OFF) | |
+
+### Where data is copied inside the server
+
+The same personal data is copied into several tables during detection and triage. When handling a deletion or disclosure request, you need to check all of the following.
+
+| Table | Items that can contain personal data |
+|---|---|
+| `events` | The whole event (the content in the table above, including `raw`) |
+| `alerts` | Source IP, title, `entities` (path, Host, parameter name), the matched fragment in `details` (up to 200 characters for web detections), triage result |
+| `incidents` | List of source IPs, the summary written by the LLM (up to 4,000 characters), triage result |
+| `actor_sessions` | Source IP, User-Agent, behavioral features |
+| `llm_calls` | The input passed to the LLM (redacted, up to 100,000 characters) and the response. Recorded even when the provider is `mock` |
+| `copilot_messages` | Copilot conversations and tool results (including the first 300 characters of event bodies, etc.) |
+| `deception_trips` | The trip records described above |
+| `response_actions` | Target IP of response actions and the reason (including text written by the LLM) |
+| `audit_log` | User name of the operator, target, details |
+| `users` | TOKIWA user names, password hashes, last login time |
+| `notification_channels` | Recipient email addresses, SMTP user name, webhook URLs |
+| `settings_kv` | The LLM API key entered in the UI (plain text) |
+
+### Collecting less
+
+```bash
+# Pass to the Gate process
+export TOKIWA_GATE__CAPTURE_BODY_BYTES=0   # do not store bodies (only the size is recorded); same as --capture-body-bytes 0
+# Add headers whose values are masked entirely (list the 7 defaults again as well)
+export TOKIWA_LLM__REDACTION__SENSITIVE_HEADERS='["authorization","cookie","set-cookie","proxy-authorization","x-api-key","x-auth-token","x-csrf-token","x-forwarded-user"]'
+
+# Pass to the Agent process
+export TOKIWA_AGENT__CONNECTIONS=false     # do not send new TCP connections
+export TOKIWA_AGENT__HOST_SENSOR=false     # do not send listening ports and process information
+```
+
+- If you add `deception.canary_header` (default `X-Debug-Auth`) to `sensitive_headers`, AI canaries can no longer be detected.
+- Do not put Cookie, Authorization or request bodies into the nginx `log_format` (see the note in `lab/nginx/tokiwa-json.conf`).
+- Turning `mask_ips` ON can affect detection and response proposals, so try it in a test environment first (the extent of the impact is unverified).
+- With the Gate's `--access-log` (default OFF), uvicorn's standard access log (client address and request line) is written to standard output. This log does not go through TOKIWA's redaction.
+
+## Sending data outside
+
+### Destinations
+
+| Destination | When | What is sent | How to stop it |
+|---|---|---|---|
+| LLM provider: automatic triage | When an alert at or above `triage.min_severity_for_llm` (default `medium`) is created; when an incident is created, and when its severity, attack stage, etc. change | Alert / incident content (title, description, source IPs, entities), excerpts of up to `triage.max_evidence_events` (default 25) evidence events, AI session features, related vulnerabilities | `triage.auto_triage=false`, or do not use an external provider (see below) |
+| LLM: manual triage | When an `analyst` or above runs it from the UI or the API (it runs regardless of `auto_triage` and the minimum severity) | Same as above | Do not use an external provider |
+| LLM: Copilot | When a user asks a question | The question, conversation history, results of the read-only tools (event path, query, UA, first 300 characters of the body, alerts, incidents, assets, etc.) | `copilot.enabled=false` |
+| LLM: vulnerability advisories | When a vulnerability matching an asset is found, and on a schedule | Vulnerability information; name, kind, criticality and software of the matched assets | `intel.enabled=false` |
+| LLM: web research | Every `intel.research_interval_hours` (default 12) hours, only when the provider is not `mock` | Research topics, the asset software list (vendor, product, version). The search runs on the provider side | `intel.research_enabled=false` |
+| Notification channels (Webhook / Slack / Discord / email) | Alert and incident creation, incident severity increases, response proposals | See "What notifications contain" below | Disable or delete the channel, unset `notify.default_webhook_url`, `notify.notify_action_proposals=false` |
+| `webhook` / `notify` response actions | Only when that action is approved | Action ID, type, target IP, TTL, incident / alert IDs | Do not approve them; do not configure `response.webhook_urls` |
+| Vulnerability feeds | Every `intel.sync_interval_minutes` (default 360) minutes | **Queries only**: a time window (NVD, JVN, GHSA), CVE IDs (EPSS), ecosystem, package name and version of asset software (OSV). No telemetry is sent | `intel.enabled=false`, or `intel.sources.<name>=false` |
+
+### What evidence is sent to the LLM
+
+For triage, only the following items are extracted from each evidence event. The original log line (`raw`) is not sent.
+
+- ID, time, kind, source / destination IP and port, host name, session ID, tags
+- HTTP: method, Host, path, query, status, sizes, Content-Type, some headers (13 kinds, such as User-Agent, Referer, Origin,
+  the Accept family and `X-Forwarded-For`) and the header order, **the first 512 characters of the body**
+- Non-HTTP: the event content except `raw`, labels, etc. (including host sensor command lines)
+
+Right before sending, the server redacts again with its own `llm.redaction.*` and wraps the data in an "untrusted data" envelope.
+How long the provider keeps the data and under what terms it may use it depend on each provider's terms (TOKIWA cannot control this; the details are unverified).
+
+### Not sending to an external LLM
+
+```bash
+# Pass to the server
+export TOKIWA_LLM__PROVIDER=mock               # send nothing outside (LLM verdicts come from the mock and the rules)
+export TOKIWA_TRIAGE__AUTO_TRIAGE=false        # do not triage automatically at all (also fewer llm_calls records)
+export TOKIWA_COPILOT__ENABLED=false           # turn off the Copilot
+```
+
+- **By default the UI setting takes precedence over environment variables**. If a provider has been saved under **LLM → Settings**,
+  it is used even if you set `mock` in an environment variable. To pin "do not send outside", also pass
+  `TOKIWA_LLM__ALLOW_UI_OVERRIDE=false` (it can only be set by environment variable or config file): saving from the UI is refused
+  and overrides already in the DB are ignored (their names are logged as a warning at startup). "Current status" in
+  **LLM → Settings** shows the provider actually in use and any overridden items. Redaction (`llm.redaction.*`) cannot be changed from the UI.
+- With `mock`, triage still runs and its input is stored in `llm_calls` (nothing is sent outside). The input of calls that were not
+  sent because the budget was exceeded is also recorded.
+- With an OpenAI-compatible server run inside your organization (`llm.provider=openai_compat`), you can keep the destination inside your organization ([LLM setup & cost](LLM-en)).
+- With `mask_ips=true` on the server, the LLM is expected to be unable to name a target IP, so no blocking or similar proposals would be
+  created from the LLM (an inference from the code; the behavior is unverified).
+
+### What notifications contain
+
+| Notification | Content |
+|---|---|
+| Alert | Title (up to 200 characters), description (up to 600 characters), source IP, category, rule ID, AI score |
+| Incident | Title, source IPs (5 in the text, up to 20 in the webhook `data`), actor type, AI score, number of alerts, attack stage, **summary (up to 600 characters; only with `notify.include_summary=true`)** |
+| Approval request for a response action | Action type, target IP, TTL, proposer, **reason (up to 500 characters; only with `notify.include_summary=true`)** |
+
+- Event bodies, queries and headers are not included. However, alert titles and descriptions can contain fragments of attacker-controlled strings, such as paths and parameter names.
+- Incident summaries and action reasons can be text written by the LLM during triage. Because the LLM may write personal items from the evidence, they are not included by default (`notify.include_summary=true` includes them; how often this happens with a real LLM is unverified).
+- With `notify.include_source_ip=false`, source IPs and IP / CIDR action targets are shown as `(hidden)` (and removed from the webhook `data`).
+- In Slack, Discord and email, URLs in the text are made non-clickable (`hxxps://`) and Discord formatting (links, emphasis) is disabled.
+
+## Retention
+
+- **Automatic deletion (a retention period or scheduled purge) is not implemented.** Events, alerts, incidents, LLM call
+  records and the like stay until someone deletes them ([#80](https://github.com/JUCK-Kurohasu/TOKIWA/issues/80),
+  [#171](https://github.com/JUCK-Kurohasu/TOKIWA/issues/171)).
+- Data for a given IP address, AI session or everything before a given time can be deleted with the CLI `tokiwa data purge` (see "Handling requests from data subjects" below).
+- The UI and API can delete only users, API tokens, rules, assets, deception assets, copilot conversations, port
+  baselines and notification channels.
+- Deleting a copilot conversation leaves the LLM call records (`llm_calls`) made in it. Deleting a deception asset leaves its trip records.
+- While they cannot reach the server, the Gate and Agent queue events **in memory** (Gate up to 10,000 by default, Agent up to 50,000; nothing is written to disk).
+- Data lives in the DB at `database.url` (default `./data/tokiwa.db`). New SQLite files and data directories that TOKIWA creates are
+  owner-only (0600 / 0700), as is the login signing key `secret.key`; existing files and directories are left as they are. DB backups contain the same data.
+
+## Who can see it
+
+### By role (API permissions)
+
+The role table in the [Web UI guide](Web-UI-en) describes which operations each role can perform. Which data each role can read is
+decided by the API permissions below (items the UI does not show can still be fetched through the API).
+
+| Data | `viewer` | `analyst` | `admin` |
+|---|:-:|:-:|:-:|
+| Raw events (body, query, header values, `raw`, host process command lines) | masked¹ | ✅ | ✅ |
+| Event source, destination, method, host, path, status, User-Agent | ✅ | ✅ | ✅ |
+| AI sessions (source IP, User-Agent; events inside follow the first row) | ✅ | ✅ | ✅ |
+| Alerts (including the matched text in `details`; evidence events follow the first row), incidents (summary, triage result) | ✅ | ✅ | ✅ |
+| Deception trip records (token value masked for viewers), response actions (target IP, reason) | ✅ | ✅ | ✅ |
+| LLM call list (purpose, cost, status; no prompt or response text²) | ✅ | ✅ | ✅ |
+| Using the copilot (its tools can search events and more) | —³ | ✅ | ✅ |
+| LLM call prompt and response text | — | — | ✅ |
+| Other users' copilot conversations, read access log (`GET /api/v1/audit/access`) | — | — | ✅ |
+| Audit log, user list, notification channel settings | — | — | ✅ |
+
+- ¹ For `viewer`, the query, body, header values (other than User-Agent, Host, Content-Type, Accept, Content-Length), the query part of
+  the Referrer, `raw`, log lines from sensors other than the Gate, command lines and LLM-app prompts are replaced with
+  `[redacted: analyst role required]`. Paths stay visible (take care if your application puts personal data in paths).
+- ² For a refused chat, the list's `error` field holds the first 500 characters of the model output.
+- ³ The default is `copilot.min_role: analyst`; set it to `viewer` to let viewers use it. Each user can send up to `copilot.messages_per_minute` messages per minute (default 6).
+- The live stream (`GET /api/v1/stream`) sends every signed-in user the content of alerts (including `details`), incidents and response actions,
+  and deception trips (source IP). Events are sent only as counts; LLM prompts and responses are not sent.
+- **Read access log**: event and AI-session lists and details, LLM call details and copilot tool runs are recorded in `access_log`
+  (who, which view, which filter, how many rows; repeated reads by the same user with the same filter are folded into one row per 5 minutes).
+  Login success and failure, logout and first-run setup go to the audit log. Viewing alerts and incidents is not recorded.
+
+### Who can see it outside TOKIWA
+
+- Anyone who can read the DB file and its backups (OS users, backup administrators)
+- The LLM provider (for what was sent)
+- Notification destinations (Slack, Discord, mail servers, webhook receivers) and the members of those channels
+- Administrators of the hosts running the Gate / Agent (while events are in memory before being sent)
+
+## Handling requests from data subjects
+
+Data for a given IP address, AI session or time range can be exported and deleted with the CLI on the server host (there is no UI or API for it).
+
+- **Find**: events can be filtered by source IP (`GET /api/v1/events?source_ip=...`) or by a substring of the path or User-Agent (`q=`).
+  No API searches inside bodies or queries.
+- **Export**: `tokiwa data export --ip 203.0.113.7 --out subject.jsonl` (`--session` / `--before` also narrow it; the output file is 0600).
+- **Delete**: `tokiwa data purge --ip 203.0.113.7` only shows how many rows would go (dry run). Add `--yes` to delete.
+  - Events, AI sessions and deception trip records are deleted row by row.
+  - Alerts keep their row; only `details` is cleared.
+  - `llm_calls` keep the cost record; only the prompt and response text are cleared (rows whose text contains the IP as a word, and rows of related alerts).
+  - Export and purge (including dry runs) are written to the audit log as `data.export` / `data.purge`.
+- **What this does not remove**: there is no search or deletion by identifiers other than IP (such as login IDs). Incident summaries,
+  notification history, DB backups and anything users saved elsewhere are out of scope. Check the DB directly if needed (see "Where data is
+  copied inside the server" above), and stop the server and take a backup before editing the DB by hand.
+- **What was sent outside**: content sent to the LLM provider or notification destinations cannot be recalled from TOKIWA.
+
+## Points for operators to check
+
+Which laws and rules apply, and what they require, must be determined by the organization that deploys TOKIWA, with experts where needed.
+The following is a list of general points and is not exhaustive.
+
+- **Purpose of use**: Do you need to specify, notify or publish that data about users of the protected app (form input, IP addresses, etc.) is used for security monitoring?
+- **Minimal collection**: Is storing bodies (`gate.capture_body_bytes`) necessary? Are there unnecessary items in log formats or headers?
+- **Providing data to others**: Does sending to the LLM provider or notification services count as outsourcing, provision to a third party, or a transfer abroad? What are the recipients' retention periods and conditions for secondary use?
+- **Retention period**: How many days to keep data. Since there is no automatic deletion, decide the deletion procedure and who is responsible.
+- **Access rights**: Who gets `viewer` or higher. Manage access on the assumption that reads are not recorded.
+- **Security measures**: Permissions and encryption of the DB file and its backups. API keys entered in the UI are stored in the DB in plain text.
+- **Requests from data subjects**: Procedures and deadlines for requests for disclosure, correction, deletion, suspension of use, etc.
+- **In case of a leak**: Know, based on this page, which tables and which external destinations hold data.
+- **Employee monitoring**: Internal rules and notice when the host sensor or the Gate records employees' communications or activity.
+- **Deception**: The wording and placement of decoys and AI canaries ([Deception (Mirage)](Deception-en)).
+
+## Related pages
+
+- [LLM setup & cost](LLM-en): provider and redaction settings
+- [Connecting sensors](Sensors-en): Gate and Agent settings
+- [Configuration reference](Configuration-en)
+- [Web UI guide](Web-UI-en): roles and screens

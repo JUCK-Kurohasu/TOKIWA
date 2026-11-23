@@ -28,6 +28,13 @@
   - 偵察スキル `skills/api-recon` は静的 JS バンドルを並列取得（ThreadPoolExecutor, max_workers=20〜24）してから
     API ルートを抽出し、その後ランタイム（Puppeteer/ブラウザ）で列挙する手順。UA は
     `Mozilla/5.0 (spa-api-recon)` のような **Mozilla 接頭辞だが実ブラウザのエンジントークンを持たない** 文字列。
+  - 資産の自動補完エンジンは標的 URL に `User-Agent: artex-enrich/1.0` で GET を送る（監査 L01-08 / #85 の読解）。
+    `artex-enrich/…` は `artex-enrich`、`spa-api-recon` は `artex-api-recon` として AI_AGENT に分類する（自己申告で
+    偽装・改名が容易なので AI 信号の強さは 0.6 に抑え、主に帰属＝`client_tool` と `ai.llm_client_fingerprint` のため）。
+- MCP 参照実装の fetch サーバーは、モデル起点の取得で `ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)`、
+  ユーザーが URL を指定した取得で `(User-Specified; …)` を送る（監査 L02-05 / #115 が `mcp_server_fetch/server.py` で確認した文字列。
+  ここでは再確認していない）。それぞれ `mcp-fetch-autonomous`（強さ 1.0）/ `mcp-fetch-user-specified`（0.6）、その他の
+  `ModelContextProtocol/` は `mcp-fetch`（0.8）。`--user-agent` で変えられるので、来ないことは何の証拠にもならない。
   - ワーカーのプロンプトは「最初に阻まれても（フィルタ/404/無反応）探り尽くしたことにはならない。回避手段を試し尽くせ」
     と指示している → エラー後の変種試行が設計上起こる。
   - LLM 呼び出しは推論（thinking / effort）付きモデルに対応しており、ツール呼び出しの間に推論待ちが入る。
@@ -36,6 +43,12 @@
   でしか送られない（このため HTTP では欠落を異常扱いしない）。
 - MCP Streamable HTTP は `Mcp-Session-Id` / `MCP-Protocol-Version` ヘッダを使う。OpenAI / Anthropic の公式 SDK
   （Stainless 生成）は `X-Stainless-*` ヘッダを送る。
+  - **ただしこれらは「LLM アプリ → LLM プロバイダ」「MCP クライアント → MCP サーバー」の区間のヘッダ**で、攻撃ツールが
+    標的に送る通信には通常載らない（HexStrike / PentAGI / Strix などは nmap・ffuf・curl 等のツール自身が標的へ通信する構成。
+    監査 L02-07 / #125。実トラフィックでは未観測の推測を含む）。したがって特徴量 `llm_sdk_headers`（+1.0）が意味を持つのは
+    **TOKIWA が LLM アプリの API（OpenAI 互換エンドポイント等）や MCP エンドポイントそのものを守っているとき**だけ。
+    通常の Web アプリ・API の保護では「`x-stainless-*` が来ない ＝ AI ではない」とは言えない（この特徴が 0 なのが普通）。
+    重みは根拠が無いため変えていない。評価では UA・ヘッダ依存を外したアブレーションで寄与を確かめること。
 
 ### 2.2 仮説（評価で検証が必要）
 | ID | 仮説 | 対応する特徴量 |
@@ -118,7 +131,7 @@ overlap 係数を混ぜるのは、`laptop'` → `laptop' OR '1'='1' --` のよ�
 | `spec_discovery` = spec/2 | +0.6 | H3 |
 | `ai_ecosystem_probe` | +1.2 | H3 |
 | `natural_language_payload` = nl_attack/2 | +1.6 | H4 |
-| `ai_declared_client`（AI エージェント UA=1, AI クローラ=0.5） | +1.4 | H5（詐称容易なので弱め） |
+| `ai_declared_client`（AI エージェント UA=1、ツール別の例外は `DECLARED_CLIENT_STRENGTH`: MCP fetch User-Specified・ARTEX 自己申告=0.6、MCP fetch 不明モード=0.8。AI クローラ=0.5） | +1.4 | H5（詐称容易なので弱め） |
 | `llm_sdk_headers` | +1.0 | H5 |
 | `automation_client`（ライブラリ/CLI/ヘッドレス/非標準 Mozilla/空 UA） | +0.7 | H5 |
 | `browser_claim_mismatch` | +0.8 | H5 |
@@ -192,17 +205,25 @@ TODO(verify): システムプロンプト抽出・データ漏えいの ATLAS ID
     重大度を系統数・強度で段階化し、最終判断は LLM トリアージと人間に委ねる。
 11. **重みは手設定**: 合成データで分離できることのみ確認（6 プロファイル × 5〜8 シードで 100%、AI スコアは AI 系 ≥0.98、
     他は < 0.03）。合成データは仮説どおりに作っているため **過大評価** である。
+12. **LLM SDK / MCP ヘッダは守る対象を選ぶ**（#125）: `x-stainless-*` / `mcp-session-id` / `anthropic-version` などは LLM アプリ →
+    プロバイダ、MCP クライアント → サーバーの区間に付くもので、攻撃ツールが標的に送る通信には通常載らない。
+    `llm_sdk_headers` は **LLM アプリの API や MCP エンドポイントを保護しているときだけ有効** な特徴で、それ以外では 0 が普通
+    （§2.1）。重みは根拠が無いので変えていない。
+13. **時刻とメモリの上限**: センサーの時刻が `detection.max_future_skew_seconds`（既定 120 秒）より未来なら受信時刻に置き換える
+    （タグ `clock_skew`）。時計が進んだセンサーではタイミング特徴（H1）が効かなくなる。ライブのセッション数は
+    `detection.max_live_sessions`（既定 4096）で、溢れると 1 リクエスト・低スコアのセッションから追い出す（#19 / #88）。
 
 ## 8. 調整ポイント（どこを触るか）
 
 | 何を | どこで |
 |---|---|
 | 重み・バイアス・分類閾値 | `aidetect/scoring.py`（`AI_WEIGHTS`, `SCANNER_WEIGHTS`, `HOSTILE_WEIGHTS`, `*_BIAS`, `SCANNER_THRESHOLD`, `HOSTILE_THRESHOLD`, `BENIGN_MAX_HOSTILE`, `MIN_REQUESTS_FOR_VERDICT`） |
-| シグナルの正規化（何件で満額か） | `aidetect/scoring.py` `signals()` |
+| シグナルの正規化（何件で満額か） | `aidetect/scoring.py` `signals()`（自己申告 UA のツール別の強さは `DECLARED_CLIENT_STRENGTH`） |
+| 時計ずれの許容・ライブセッション数 | `detection.max_future_skew_seconds`、`detection.max_live_sessions`（追い出しの走査幅は `aidetect/sessions.py` `EVICT_SCAN`） |
 | 時間帯の境界・変異/探索の窓 | `aidetect/features.py`（`BURST_GAP_S`, `THINK_MIN_S`, `THINK_MAX_S`, `MUTATION_*`, `ADAPTIVE_MIN_GAP_S`, `DISCOVERY_WINDOW_S`） |
 | AI 判定の閾値・アイドル | `config.py` `detection.ai_agent_threshold`, `detection.session_idle_timeout_seconds`（env `TOKIWA_DETECTION__...`） |
 | メモリ・永続化頻度 | `enrich/sessionizer.py` `Sessionizer.max_sessions / max_obs / flush_interval_seconds / flush_max_dirty` |
-| UA / SDK ヘッダ / 探索パスの一覧 | `aidetect/fingerprints.py` `_UA_RULES`、`aidetect/recon.py` `_PATH_RULES` |
+| UA / SDK ヘッダ / 探索パスの一覧 | UA は `aidetect/ua_catalog.py` `UA_RULES`（`web.scanner_ua` と共通の唯一の表。スキャナ系は `alert` に重大度を書くと Web 検知器も鳴る。`tests/aidetect/test_ua_catalog.py` に見本 UA の追加が必要）、SDK ヘッダは `aidetect/fingerprints.py`、探索パスは `aidetect/recon.py` `_PATH_RULES` |
 | 検知器のしきい値 | 各 `detect/detectors/ai_*.py` 冒頭の定数（`MIN_CHAIN`, `MIN_ENUM_STRONG`, `NL_THRESHOLD` …） |
 | LLM アプリの保護パス | `config.py` `detection.llm_app_paths` |
 

@@ -75,6 +75,16 @@ export interface LLMConfig {
   openai_api_key_set?: boolean;
   openai_base_url?: string | null;
   anthropic_base_url?: string | null;
+  /** Fields currently set from the UI (stored in the database), overriding env / YAML. */
+  overridden?: string[];
+  /** False when llm.allow_ui_override=false: settings are pinned by env / YAML and PUT /llm/config returns 409. */
+  ui_override_allowed?: boolean;
+  /** Fields stored from the UI but ignored because UI overrides are disabled. */
+  ignored_overrides?: string[];
+  /** Configured models without a price: their calls are charged at the highest known rates (fail-closed). */
+  unpriced_models?: string[];
+  /** Providers whose endpoint was changed from the UI without a key entered for it: the key must be entered again. */
+  api_key_rebind_required?: string[];
 }
 
 /**
@@ -109,11 +119,15 @@ export interface LLMUsageDay {
   input_tokens: number;
   output_tokens: number;
   by_purpose: Record<string, PurposeUsage>;
+  /** Billed calls whose model was not in the pricing table (cost estimated at the highest known rates). */
+  unpriced_calls?: number;
 }
 
 /** GET /llm/usage?days=N */
 export interface LLMUsageResponse {
   days: LLMUsageDay[];
+  /** Models behind unpriced_calls in the period. */
+  unpriced_models?: string[];
 }
 
 /** GET /llm/models: Anthropic models for the settings dropdown ("api" = live from the API, "builtin" = fallback list). */

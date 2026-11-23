@@ -3,11 +3,84 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-11-11（実運用・対 AI 攻撃ツール監査を実施し、指摘を Issue 化。コードは変更していない。第 2 波は未着手のまま）
+最終更新: 2026-11-23（監査の系統 G / I / K と、A・B・C・D・E・F・H の工数 S を修正。ブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#179（ドラフト、未マージ））
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
+
+## 監査修正 第 3 弾（2026-11-22〜23）— 系統 A Gate / B Web 検知 / H センサー・インテル（工数 S）
+
+- **何をしたか**: 「検知の入力を攻撃者が消せる」テーマの中核（#140 ヘッダ 64 個で UA 等が消える、#141 圧縮ボディが未展開）を含む 21 件を 3 レーン
+  （gate-capture / web-detect / sensors）で修正。同じ PR（JUCK-Kurohasu/TOKIWA#179）。詳細は `docs/handoff/2026-11-22-audit-<レーン>.md`。
+- **完全（8）**: #138 #149 #146 #99（A）、#52 #53 #76（B）、#131（H）。
+- **部分（13）**: #148（deceive 応答の `Vary` / `CDN-Cache-Control`）、#51（`max_inspect_chars`（8192 文字）以降は依然未検査）、#89（セミコロン無しの実体参照は理由付きで未対応 — #30 と同様に要判断）、#140（異常なヘッダ数の検知シグナル）、#141（展開不能の検知シグナル・運用文書）、#147（X-Original-URL の検知ルール）、#54（overlong UTF-8・上流別の正規化）、
+  #143（redact の `tkw_` 形式・TOKIWA 自身の cmdline）、#166 / #173（**UI 未作成**。API は `GET/POST /api/v1/alert-suppressions`）、#70（`agent.send_cmdline` の既定は true のまま — 要判断）、
+  #121（net 側の扱い）、#123（net_ids の attacker/victim 分離・資産台帳）、#132（UI の「取り下げ済み」表示）。
+- **Issue 未登録の修正**: Zeek `username`・nginx `remote_user`・Caddy `user_id` を raw で伏字（data-handling 調査で判明）。Gate の共有 httpx クライアントが上流の Cookie を保持していた。
+- **既定動作の変更**: Gate はヘッダ行 100 超を拒否（`gate.max_request_headers`、0 で無制限）し、検知に要るヘッダ（UA・Referer・Sec-Fetch-* 等）は位置に関係なく記録、
+  `Forwarded`・`X-Real-IP`・`CF-Connecting-IP` 等と `X-Original-URL` 系を上流へ渡さない、クライアントが送らないヘッダを補わない、gzip/deflate の要求ボディを展開して記録（上限付き）、
+  デコイ照合は大文字小文字・`;`・末尾 `/`・`%5c` 等の変形も照合、Gate が作る応答は `Cache-Control: no-store`、tarpit は全体 256 / 送信元ごと 8 まで（超過は 429）、
+  `gate run --token` は警告。Web 検知は上限超過分・JSON キー・カスタムヘッダも検査（`detection.web.inspect_custom_headers`）、デコード 8 段、同梱 Sigma の web ルールは
+  `web.*` に合流（重複アラートを出さない）、**誤検知にすると 168 時間抑制**（`detection.fp_suppress_hours`）、許可リスト（admin、CIDR と期間必須）。センサーは argv の秘密をマスク、
+  接続上限超過分を次周期へ持ち越し、Suricata の to_client を攻撃側に帰属、読めないログ行・時刻を数えて警告（`agent.log_timezone`）、取り下げアドバイザリで露出を閉じる。
+- **要判断（ユーザー）**: (1) `agent.send_cmdline` の既定（推奨は false。検知に使うので true のまま）。(2) `gate.max_request_headers=100`（64 にすれば穴は無いが正規要求を落とす可能性）。
+  (3) Gate 応答に `Vary` / `CDN-Cache-Control` を付けるか。(4) #166/#173 の UI を作るか（API のみ）。(5) 自動トリアージ中に誤検知へ変えると状態が `triaging` に戻る lost update（再現済み・未修正）。
+- **他レーンへの依頼（未対応）**: web_recon に「異常なヘッダ数」「展開できない圧縮ボディ」「X-Original-URL 等の出現」のシグナルを足す（gate-capture → web-detect）。
+- **チェック**: backend 2007 passed（約 193 秒）、ruff・format 緑、mypy 既知 4 件のみ、frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK。
+
+## 監査修正 第 2 弾（2026-11-22）— 系統 C AI 判定 / D デセプション / E 対処・通知 / F LLM・トリアージ（工数 S）
+
+- **何をしたか**: 高重大度の #19（未来時刻 1 件で AI 判定が全停止）と #133（カナリア GET 1 回で無実の IP に遮断提案）を含む工数 S の 23 件を、
+  4 レーン（aidetect / deception / llm-triage / respond-notify）で修正。同じブランチ・同じ PR（JUCK-Kurohasu/TOKIWA#179）。詳細は
+  `docs/handoff/2026-11-22-audit-<レーン>.md`。
+- **完全（9）**: #85 #68 #35 #172 #63 #64 #130 #128 #168。
+- **部分（14）**: #19（センサー別の時計ずれの可視化）、#88（追い出し時のサマリ引き継ぎ）、#124（katana 等の UA は一次情報で未確認）、#115（robots→本体の逐次パターン）、
+  #125（文書化のみ）、#133（訪問者ごとのカナリア値ほか (3)〜(5)）、#30（近似一致は理由付きで不採用 — Closes にするかは要判断）、#41（HTML 以外への展開）、
+  #65（上流 2xx の確認・承認画面表示）、#84（canary_style・実機計測）、#96（ノンス）、#98（通知・暗号化・DNS 解決先の検査）、#62（通知での「AI 要約（未検証）」表示）、
+  #118（SMTP 接続先 IP の固定）。
+- **統合担当が足したもの**: 弱いデセプション証拠（`provenance` が passive / induced の `deception.*` だけ）に基づく提案は自動承認しない
+  （`response.auto_approve_withheld`。実 LLM が block_ip を提案しても自動で実行されない）。要約プロンプトに「個人名・連絡先を書かない」（#168。prompt を alert v3 / incident v4 に）。
+- **既定動作の変更**: 未来方向のスキュー超過イベントは取り込み時刻にクランプ＋`clock_skew`、カナリア経路だけの GET は medium・ブラウザ誘発は low
+  （`deception.downgrade_browser_induced`）、カナリア照合は大文字小文字無視、カナリア挿入は `<body>` 直後と `</body>` 直前、`/` 相当や浅い前方一致のデコイパスは 422、
+  `data_dir/deception.key` を新規作成（既存のカナリア値は不変）、料金表にないモデルは最高単価で計上、base_url を変えると保存済みキーを破棄・https 必須、
+  却下・取り消し後 24 時間は同じ対象を自動承認しない、安全設定の変更で既存の active 対処も外れる、**メール通知の `password_env` は許可リスト外だと送信停止**、
+  平文 AUTH の SMTP は拒否、**通知に LLM の要約・理由を既定で載せない**（`notify.include_summary`）、承認後の reason は固定。
+- **要判断（ユーザー）**: (1) #118 で既存のメール通知チャネルが止まりうる（`SMTP_PASSWORD` 等の変数名は `notify.smtp_password_envs` に列挙が必要）。
+  (2) `notify.include_summary=false` は人間が書いた理由も通知から落とす。(3) #30 を Closes にするか。(4) `<img src=/.env>` の誘発で `web.sensitive_file_probe`（high）が立ち
+  rate_limit が提案される件は未対応（detect-web 側で `deception.provenance.induced_by` を使えば下げられる）。(5) Sec-Fetch を送らないリンクプレビュー等のトリップは critical のまま。
+- **チェック**: 下の第 1 弾と同じ項目をすべて通した（件数は PR 本文）。実 LLM・実 ARTEX・実 Slack/Discord の表示は未検証（`TODO(verify)`）。
+- **次の一手（案）**: 第 3 弾で A・B・H の工数 S を実施済み（上の節）。残りは系統 J 運用（#71 #161 #100 #104〜#111。compose / Dockerfile の硬化は Docker で検証が要る。#161 は全モジュールの設定読込に影響）と、各系統の工数 M / L、部分対応の残り。
+
+## 監査修正 第 1 弾（2026-11-21〜22）— 系統 G API・認証 / I フロントエンド / K 評価・文書
+
+- **何をしたか**: #16 の系統図のうち工数 S の割合が高い 3 系統（36 件）を修正した。**20 件は完全**（PR で Closes）、**16 件は部分**（Refs）、
+  #101 は dependabot の PR JUCK-Kurohasu/TOKIWA#17 に任せて対象外。レーン（ファイル所有で分割）ごとの詳細・要判断・未対応は
+  `docs/handoff/2026-11-21-audit-<レーン>.md`（http-hardening / auth / tokens-roles / frontend / eval-docs）、統合の記録は `…-audit-integration.md`。
+- **完全**: #91 #94 #66 #92 #170 #95 #56 #34 #102 #163 #157（G・I）、#144 #165 #151（I）、#178 #72 #83 #26 #107 #169（K）。
+- **部分（残りは各レーンの NOTES）**: #57（トークン単位レート・保持の既定有効）、#93（`/auth/status` の version・CORS）、#40（protected_cidrs・承認 UI の出所表示）、
+  #33（ポリシーからハニートークン値を外す）、#164（予算の用途別分割）、#167（アラート・インシデントの閲覧記録）、#158（IP 以外の識別子・インシデント要約）、
+  #97（許可ドメインの実行時設定）、#145（遮断後に 2xx が届いたら警告）、#175（NAT/IP 回転・PR 曲線・time-to-first-alert）、#127（残り 3 プロファイル）、
+  #174（感度曲線ほか）、#162（`sync_additive` は列・インデックスの追加だけ。移行機構は未導入）、
+  #177（`/health` の degraded 表示）、#150（サーバー側で双方向制御文字を検知シグナルにする）、#176（実 LLM での triage 単独評価と ablation）。
+- **共通の土台**: `tokiwa.db.schema_sync.sync_additive`（起動時に既存テーブルへ nullable / server_default 付きの列とインデックスを足す）。
+  既存テーブルに列を足すときは必ず nullable か server_default を付けること。`tests/core/test_schema_upgrade.py` が f993282 時点のスキーマで起動を確かめる。
+- **既定動作の変更（利用者に影響。PR 本文にも列挙）**: 初回セットアップにセットアップコード必須（`auth.setup_code_required`）、ログイン失敗で一時ロック（5 回 / IP 30 回 / 15 分）、
+  `server.secret_key` が 32 文字未満なら起動拒否、`tokiwa token create` の既定スコープが ingest のみ（Gate 用は `--scope ingest --scope gate`）、
+  viewer には生イベントを伏字で返す、Copilot は analyst 以上（`copilot.min_role`）、ボディ上限（API 1 MiB / ingest 32 MiB）と Event の文字列 65,536 文字で切り詰め、
+  CSP などのセキュリティヘッダ、未定義の `/api/*` は JSON 404、未認証の `/health` は version を返さない、Copilot の外部リンクは許可ドメイン以外クリック不可、
+  Sigma の既定パスがパッケージ基準、`eval compare` は比較不能なら終了コード 3。
+- **要判断（ユーザー）**: (1) `server.expose_docs` を本番既定 false にするか（現状 true）。(2) API トークンの既定有効期限（現状無期限。90 日にするなら期限通知とセット）。
+  (3) gate スコープの無いトークンからの `gate.*` を拒否する全体スイッチを作るか（現状は印を付けるだけ）。(4) ログイン失敗ロックはリバースプロキシ配下で
+  `FORWARDED_ALLOW_IPS` 未設定だと全員が同じ IP に見え、他人のアカウントをロックできる（運用での設定が前提）。(5) data-handling レーンが見つけた未登録の問題
+  （`…-audit-integration.md` に列挙。Zeek `username` が伏字にならない等）を Issue 化するか。
+- **チェック**: backend 1459 passed（約 156 秒。「1 分以内」の目標から更に伸びた — `--durations` で遅いテストを洗うこと）、ruff・format 緑、mypy は既知 4 件のみ、
+  frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK。
+- **未検証**: PostgreSQL でのロック（`FOR UPDATE`）、Docker の smoke（`scripts/docker-smoke.sh` の変更は CI で確認）、実 LLM、ARTEX 側の設定名（`TODO(verify)`）。
+- **次の一手（案）**: 残りの系統のうち工数 S が多く高重大度を含むもの — C の #19（未来時刻 1 件で AI 判定が全停止, high/S）、D の #133（カナリア GET 1 回で CRITICAL と遮断提案, high/S）、
+  F の #35（料金表にないモデルで予算が効かない）、E の #63（却下・取り消しが記憶されない）など。系統図（#16）と `docs/audit/2026-11/tools/taxonomy.json` を単位に、
+  ファイル所有でレーンを分ける。**並列 5〜6 体だと利用枠を 1〜2 時間で使い切った（3 回中断）**。各レーンに「Issue ごとにコミット + NOTES 更新」を指示しておけば
+  SendMessage で再開できる。
 
 ## 実運用・対 AI 攻撃ツール監査（2026-11）— 指摘は Issue 化済み
 

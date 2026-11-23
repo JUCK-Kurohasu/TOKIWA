@@ -4,10 +4,17 @@ The recommended ``log_format`` is in ``lab/nginx/tokiwa-json.conf`` (``escape=js
 Keys are nginx variable names without ``$``; ``http_*`` / ``sent_http_*`` become request / response headers.
 Unknown or missing keys are tolerated so hand-written formats (``request`` instead of ``request_uri``,
 ``msec`` instead of ``time_iso8601`` ...) work too.
+
+Without ``escape=json`` nginx writes ``"``, ``\\``, control characters and bytes >= 0x7F of a value as ``\\xHH``
+(``ngx_http_log_escape`` in ngx_http_log_module.c), which is not JSON: one ``"`` in a User-Agent used to drop
+the whole request silently (audit #131). Such lines are decoded and parsed; the count is in ``stats.recovered``.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 from typing import Any
 
 from tokiwa.schemas.events import Endpoint, Event, EventKind, HttpInfo
@@ -15,21 +22,23 @@ from tokiwa.sensors.logtail import LineParser
 from tokiwa.sensors.normalize import (
     ParseContext,
     clean_headers,
+    event_time,
     http_version,
     load_json_object,
     none_if_empty,
     normalize_ip,
-    parse_ts,
     red,
     split_uri,
     to_float,
     to_int,
     truncate_raw,
 )
-from tokiwa.util import utcnow
+
+log = logging.getLogger(__name__)
 
 DATASET = "nginx.access"
 _TIME_KEYS = ("time_iso8601", "time", "timestamp", "@timestamp", "msec", "time_local")
+_HEX_RUN = re.compile(r"(?:\\x[0-9A-Fa-f]{2})+")
 # Request variables that are not headers but carry header values.
 _EXTRA_HEADERS = {"content_type": "content-type", "content_length": "content-length"}
 
@@ -88,7 +97,7 @@ def parse_nginx_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
         http_version=http_version(protocol),
     )
     return Event(
-        timestamp=parse_ts(_first(rec, *_TIME_KEYS)) or utcnow(),
+        timestamp=event_time(_first(rec, *_TIME_KEYS), ctx),
         kind=EventKind.HTTP,
         dataset=DATASET,
         sensor_id=ctx.sensor_id,
@@ -107,15 +116,37 @@ def parse_nginx_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
     )
 
 
+def decode_escape_default(line: str) -> str:
+    """Turn nginx ``escape=default`` runs (``\\x22``, ``\\xE3\\x81\\x82``) into JSON string escapes."""
+
+    def repl(m: re.Match[str]) -> str:
+        raw = bytes(int(m.group(0)[i + 2 : i + 4], 16) for i in range(0, len(m.group(0)), 4))
+        return json.dumps(raw.decode("utf-8", errors="replace"))[1:-1]
+
+    return _HEX_RUN.sub(repl, line)
+
+
 class NginxJsonParser(LineParser):
     name = "nginx"
 
     def __init__(self, ctx: ParseContext) -> None:
         self.ctx = ctx
+        self._warned_escape = False
 
     def parse(self, line: str) -> list[Event]:
         rec = load_json_object(line)
+        if rec is None and "\\x" in line:
+            rec = load_json_object(decode_escape_default(line))
+            if rec is not None:
+                self.ctx.stats.recovered += 1
+                if not self._warned_escape:
+                    self._warned_escape = True
+                    log.warning(
+                        "nginx log line uses escape=default (\\xHH); decoded it. Set `escape=json` in log_format "
+                        "(see lab/nginx/tokiwa-json.conf)"
+                    )
         if rec is None:
+            self.ctx.stats.unparsed += 1
             return []
         ev = parse_nginx_record(rec, self.ctx)
         return [ev] if ev is not None else []

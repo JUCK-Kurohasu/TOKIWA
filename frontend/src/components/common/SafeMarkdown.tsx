@@ -2,74 +2,155 @@
  * Tiny, dependency-free Markdown renderer for LLM output (copilot answers).
  *
  * Safety: model text is untrusted. It is parsed into React elements only — never passed to
- * dangerouslySetInnerHTML — so raw HTML in the text is displayed literally. Links are rendered only for
- * http(s) URLs (external, rel=noopener) and same-origin absolute paths ("/alerts/..."); other schemes
- * (javascript:, data:, vbscript:) stay plain text.
+ * dangerouslySetInnerHTML — so raw HTML in the text is displayed literally. Which links become clickable is
+ * decided by `linkPolicy.ts` (audit #144 / #97):
+ * - internal links: only known UI routes on the page's own origin (parsed with the URL parser, so backslash
+ *   tricks such as "/" + "\" + "evil.example" are rejected); rendered with the router, same tab.
+ * - external links: only https hosts on the allowlist; always shown with the real host name next to the label,
+ *   with a warning when a URL-shaped label disagrees with the destination. Other external URLs stay plain text
+ *   (with their host shown), other schemes (javascript:, data:, vbscript:) stay plain text.
  *
  * Supported: paragraphs, line breaks, # headings, - / * / 1. lists (one nesting level by indent), > quotes,
  * ``` fenced code, `inline code`, **bold**, *italic* / _italic_, [text](url), bare URLs, --- rules, GFM tables.
  */
 import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
+import { getLang, type Lang, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { hasInvisible } from "./invisible";
+import { type LinkTarget, labelMismatch, safeHref } from "./linkPolicy";
+import { SafeText } from "./SafeText";
+
+export { safeHref };
 
 const URL_RE = /https?:\/\/[^\s<>()"'`]+[^\s<>()"'`.,;:!?]/g;
 
-export function safeHref(raw: string): { href: string; internal: boolean } | null {
-  const url = raw.trim();
-  if (/^https?:\/\/[^\s]+$/i.test(url)) return { href: url, internal: false };
-  if (/^\/(?!\/)[^\s]*$/.test(url)) return { href: url, internal: true };
-  return null;
+export interface MarkdownOptions {
+  /** "allowlist" (default): only allow-listed https hosts are clickable. "any": every http(s) URL is. */
+  externalLinks: "allowlist" | "any";
+  lang: Lang;
+  /** Internal: true while rendering a link label (no nested autolinks / anchors). */
+  inLink?: boolean;
 }
 
-function renderLink(href: string, label: ReactNode, key: string): ReactNode {
-  const safe = safeHref(href);
-  if (!safe) return <Fragment key={key}>{label}</Fragment>;
-  if (safe.internal) {
+const linkStrings = {
+  ja: {
+    blocked: "リンク無効",
+    blockedExternal: "許可リスト外の外部リンクのため、クリックできないようにしています",
+    blockedOther: "安全でないリンク先のため、クリックできないようにしています",
+    mismatch: "表示とリンク先が異なります",
+  },
+  en: {
+    blocked: "link disabled",
+    blockedExternal: "Not clickable: this external host is not on the allowlist",
+    blockedOther: "Not clickable: unsafe link target",
+    mismatch: "label and destination differ",
+  },
+};
+
+function defaultOptions(): MarkdownOptions {
+  return { externalLinks: "allowlist", lang: getLang() };
+}
+
+function HostNote({ host }: { host: string }) {
+  return <span className="ml-1 font-mono text-[11px] text-muted">({host})</span>;
+}
+
+function renderLink(
+  href: string,
+  label: ReactNode,
+  labelText: string,
+  key: string,
+  opts: MarkdownOptions,
+): ReactNode {
+  const S = linkStrings[opts.lang];
+  const isBare = labelText === href;
+  const safe: LinkTarget | null = safeHref(href);
+  if (!safe) {
+    if (isBare) return <Fragment key={key}>{label}</Fragment>;
     return (
-      <Link key={key} to={safe.href} className="text-accent underline-offset-2 hover:underline">
+      <span key={key} title={`${S.blockedOther}: ${href}`}>
         {label}
-      </Link>
+        <span className="ml-1 text-[11px] text-muted">[{S.blocked}]</span>
+      </span>
+    );
+  }
+  const mismatch =
+    !isBare && labelMismatch(labelText, safe) ? (
+      <span role="note" className="ml-1 text-[11px] font-medium text-sev-high">
+        ⚠ {S.mismatch}
+      </span>
+    ) : null;
+  if (safe.kind === "internal") {
+    return (
+      <Fragment key={key}>
+        <Link to={safe.href} className="text-accent underline-offset-2 hover:underline">
+          {label}
+        </Link>
+        {mismatch}
+      </Fragment>
+    );
+  }
+  if (!safe.allowed && opts.externalLinks !== "any") {
+    return (
+      <span key={key} title={`${S.blockedExternal}: ${safe.href}`} className="break-all">
+        {label}
+        {!isBare && (
+          <span className="ml-1 text-[11px] text-muted">
+            [<span className="font-mono">{safe.host}</span> — {S.blocked}]
+          </span>
+        )}
+        {mismatch}
+      </span>
     );
   }
   return (
-    <a
-      key={key}
-      href={safe.href}
-      target="_blank"
-      rel="noopener noreferrer nofollow"
-      className="break-all text-accent underline-offset-2 hover:underline"
-    >
-      {label}
-    </a>
+    <Fragment key={key}>
+      <a
+        href={safe.href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        className="break-all text-accent underline-offset-2 hover:underline"
+      >
+        {label}
+      </a>
+      {!isBare && <HostNote host={safe.host} />}
+      {mismatch}
+    </Fragment>
   );
 }
 
+/** Text run with invisible / bidi control characters made visible (#150: answers quote attacker data). */
+function visible(text: string, key: string, multiline = false): ReactNode {
+  return hasInvisible(text, multiline) ? <SafeText key={key} text={text} multiline={multiline} /> : text;
+}
+
 /** Plain text with bare URLs turned into links. */
-function autolink(text: string, key: string): ReactNode[] {
+function autolink(text: string, key: string, opts: MarkdownOptions): ReactNode[] {
+  if (opts.inLink) return [visible(text, key)];
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
   for (const m of text.matchAll(URL_RE)) {
     const idx = m.index ?? 0;
-    if (idx > last) out.push(text.slice(last, idx));
-    out.push(renderLink(m[0], m[0], `${key}-u${n++}`));
+    if (idx > last) out.push(visible(text.slice(last, idx), `${key}-p${n}`));
+    out.push(renderLink(m[0], visible(m[0], `${key}-v${n}`), m[0], `${key}-u${n++}`, opts));
     last = idx + m[0].length;
   }
-  if (last < text.length) out.push(text.slice(last));
+  if (last < text.length) out.push(visible(text.slice(last), `${key}-p${n}`));
   return out;
 }
 
 const isWordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}_]/u.test(c);
 
 /** Inline markup → React nodes. */
-export function renderInline(text: string, key = "i"): ReactNode[] {
+export function renderInline(text: string, key = "i", opts: MarkdownOptions = defaultOptions()): ReactNode[] {
   const out: ReactNode[] = [];
   let buf = "";
   let n = 0;
   const flush = () => {
     if (buf) {
-      out.push(...autolink(buf, `${key}-t${n++}`));
+      out.push(...autolink(buf, `${key}-t${n++}`, opts));
       buf = "";
     }
   };
@@ -86,7 +167,7 @@ export function renderInline(text: string, key = "i"): ReactNode[] {
             key={`${key}-c${n++}`}
             className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[0.85em] text-fg"
           >
-            {text.slice(i + 1, end)}
+            <SafeText text={text.slice(i + 1, end)} />
           </code>,
         );
         i = end + 1;
@@ -101,7 +182,7 @@ export function renderInline(text: string, key = "i"): ReactNode[] {
         flush();
         out.push(
           <strong key={`${key}-b${n++}`} className="font-semibold text-fg">
-            {renderInline(text.slice(i + 2, end), `${key}-b${n}`)}
+            {renderInline(text.slice(i + 2, end), `${key}-b${n}`, opts)}
           </strong>,
         );
         i = end + 2;
@@ -116,7 +197,9 @@ export function renderInline(text: string, key = "i"): ReactNode[] {
         while (end > 0 && ch === "_" && isWordChar(text[end + 1])) end = text.indexOf(ch, end + 1);
         if (end > i + 1 && text[end - 1] !== " ") {
           flush();
-          out.push(<em key={`${key}-e${n++}`}>{renderInline(text.slice(i + 1, end), `${key}-e${n}`)}</em>);
+          out.push(
+            <em key={`${key}-e${n++}`}>{renderInline(text.slice(i + 1, end), `${key}-e${n}`, opts)}</em>,
+          );
           i = end + 1;
           continue;
         }
@@ -127,7 +210,8 @@ export function renderInline(text: string, key = "i"): ReactNode[] {
       const m = /^\[([^\]\n]+)\]\(([^)\s]+)\)/.exec(text.slice(i));
       if (m) {
         flush();
-        out.push(renderLink(m[2], renderInline(m[1], `${key}-l${n}`), `${key}-l${n++}`));
+        const label = renderInline(m[1], `${key}-l${n}`, { ...opts, inLink: true });
+        out.push(renderLink(m[2], label, m[1], `${key}-l${n++}`, opts));
         i += m[0].length;
         continue;
       }
@@ -242,10 +326,10 @@ export function parseBlocks(src: string): Block[] {
   return blocks;
 }
 
-function withBreaks(text: string, key: string): ReactNode[] {
+function withBreaks(text: string, key: string, opts: MarkdownOptions): ReactNode[] {
   const parts = text.split("\n");
   return parts.flatMap((part, idx) => {
-    const nodes = renderInline(part, `${key}-${idx}`);
+    const nodes = renderInline(part, `${key}-${idx}`, opts);
     return idx < parts.length - 1 ? [...nodes, <br key={`${key}-br${idx}`} />] : nodes;
   });
 }
@@ -259,7 +343,18 @@ const headingClass: Record<number, string> = {
   3: "text-sm font-semibold",
 };
 
-export function SafeMarkdown({ text, className }: { text: string; className?: string }) {
+export function SafeMarkdown({
+  text,
+  className,
+  externalLinks = "allowlist",
+}: {
+  text: string;
+  className?: string;
+  /** See {@link MarkdownOptions}. Keep the default for anything a model (or telemetry) wrote. */
+  externalLinks?: MarkdownOptions["externalLinks"];
+}) {
+  const { lang } = useLang();
+  const opts: MarkdownOptions = { externalLinks, lang };
   const blocks = parseBlocks(text);
   return (
     <div className={cn("space-y-2.5 text-sm leading-relaxed break-words", className)}>
@@ -270,7 +365,7 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
             const H = HEADING_TAGS[Math.min(b.level, HEADING_TAGS.length) - 1];
             return (
               <H key={k} className={headingClass[b.level] ?? "text-sm font-semibold"}>
-                {renderInline(b.text, k)}
+                {renderInline(b.text, k, opts)}
               </H>
             );
           }
@@ -283,7 +378,9 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
                 {b.lang && (
                   <div className="mb-1 text-[10px] uppercase tracking-wider text-muted">{b.lang}</div>
                 )}
-                <code>{b.text}</code>
+                <code>
+                  <SafeText text={b.text} multiline />
+                </code>
               </pre>
             );
           case "list": {
@@ -292,11 +389,11 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
               <Tag key={k} className={cn("space-y-1 pl-5", b.ordered ? "list-decimal" : "list-disc")}>
                 {b.items.map((it, ii) => (
                   <li key={`${k}-${ii}`}>
-                    {renderInline(it.text, `${k}-${ii}`)}
+                    {renderInline(it.text, `${k}-${ii}`, opts)}
                     {it.children.length > 0 && (
                       <ul className="mt-1 list-[circle] space-y-1 pl-5">
                         {it.children.map((c, ci) => (
-                          <li key={`${k}-${ii}-${ci}`}>{renderInline(c, `${k}-${ii}-${ci}`)}</li>
+                          <li key={`${k}-${ii}-${ci}`}>{renderInline(c, `${k}-${ii}-${ci}`, opts)}</li>
                         ))}
                       </ul>
                     )}
@@ -308,7 +405,7 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
           case "quote":
             return (
               <blockquote key={k} className="border-l-2 border-line pl-3 text-muted">
-                {withBreaks(b.text, k)}
+                {withBreaks(b.text, k, opts)}
               </blockquote>
             );
           case "hr":
@@ -321,7 +418,7 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
                     <tr>
                       {b.head.map((c, ci) => (
                         <th key={ci} className="px-2 py-1.5 font-medium">
-                          {renderInline(c, `${k}-h${ci}`)}
+                          {renderInline(c, `${k}-h${ci}`, opts)}
                         </th>
                       ))}
                     </tr>
@@ -331,7 +428,7 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
                       <tr key={ri}>
                         {b.head.map((_, ci) => (
                           <td key={ci} className="px-2 py-1.5 align-top">
-                            {renderInline(r[ci] ?? "", `${k}-${ri}-${ci}`)}
+                            {renderInline(r[ci] ?? "", `${k}-${ri}-${ci}`, opts)}
                           </td>
                         ))}
                       </tr>
@@ -341,7 +438,7 @@ export function SafeMarkdown({ text, className }: { text: string; className?: st
               </div>
             );
           default:
-            return <p key={k}>{withBreaks(b.text, k)}</p>;
+            return <p key={k}>{withBreaks(b.text, k, opts)}</p>;
         }
       })}
     </div>

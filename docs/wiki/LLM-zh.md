@@ -36,8 +36,21 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 **会以明文保存在数据库中**。请注意数据库备份的管理，尽可能使用环境变量。
 密钥不会写入日志、审计日志或 LLM 的输入中。
 
+**从 UI / API 更改连接地址（`llm.anthropic_base_url` / `llm.openai_base_url`）时的限制**：必须使用 `https://`，
+`http://` 仅允许 `localhost` / `127.0.0.1` / `::1`。不能指定链路本地地址（`169.254.0.0/16`、`fe80::/10`）或云的元数据端点
+（`169.254.169.254`、`metadata.google.internal` 等，包括十进制、十六进制写法）。
+此外，**API 密钥与输入时的连接地址绑定**：在 UI 中更改 URL 后，已保存的密钥失效，在为新地址重新输入密钥之前，
+不会发送任何密钥（包括环境变量中的密钥）。可以在同一次保存中同时输入 URL 和密钥。
+如需以明文 HTTP 连接 localhost 以外的主机（例如 `http://ollama:11434/v1`），请通过环境变量或 `tokiwa.yaml` 设置
+（静态设置不受此限制）。
+
 设置完成后，可以通过 **LLM → Settings → Connection test**（连接测试）进行检查（对 fast / deep 每个 tier 各进行 1 次最小的结构化调用，计入预算和审计）。
 如果结果中的 **Provider**（提供方）为 `mock`，说明没有调用真实 API（提供方设置可能仍为 `mock`）。“Current status”（当前状态）除了设置值，还会显示实际在用的提供方。
+
+当实际在用的提供方为 `mock`（包括 `auto` 在没有 API 密钥时的回退）或提供方不可用时，
+所有页面顶部都会一直显示 **“No LLM is in use”**（未使用 LLM）提示条。mock 返回的分诊结果在告警 / 安全事件的 “LLM triage” 面板和 LLM 的 **Calls**（调用记录）中，
+会显示为 **mock (no LLM used)**（mock，未使用 LLM），而不是模型名称和层级。根据 mock 判定生成的处置提议会标记为 **Rule**（规则），而不是 **LLM**
+（此变更之前创建的提议保持原标记）。
 
 ## 模型与层级
 
@@ -69,7 +82,13 @@ export ANTHROPIC_API_KEY=sk-ant-...          # 或 TOKIWA_LLM__ANTHROPIC_API_KEY
 - 在 **LLM → Usage**（LLM → 用量）中，可以查看按日、按用途的费用和调用次数。**Dashboard**（仪表盘）上也会显示当天的费用。
 - 实际费用在很大程度上取决于流量、告警严重级别的分布以及模型设置。建议 **先用较小的预算运行，
   在用量页面实测之后** 再进行调整（尚未用真实 LLM 进行费用评估）。
-- 用于计算费用的单价表可以通过 `llm.pricing` 覆盖。
+- 用于计算费用的单价表可以通过 `llm.pricing` 覆盖或补充（每 100 万 token 的美元价格，例如 `{"my-model": {"input": 3, "output": 15}}`）。
+  带日期的快照 ID（`claude-opus-5-5-20261001`、`claude-opus-4-5@20251101`）和 Bedrock 形式的 ID（`us.anthropic.…-v1:0`）
+  按原模型的单价计算。
+- **单价表中没有的模型不会按免费计算**。为确保预算始终生效，会按表中最高的单价估算，并在 **LLM → 使用量** 中
+  显示为“单价表中没有的模型的调用”次数（设置页面也会显示警告）。**免费的本地 LLM**（通过 `openai_compat` 使用的 Ollama 等）
+  请在 `llm.pricing` 中登记为 0（例如 `{"llama3.1:8b": {"input": 0, "output": 0}}`），或设置 `llm.daily_budget_usd: 0`（不设预算）。
+  否则估算的费用会达到每日预算，TOKIWA 将切换为基于规则的判定。
 
 ## 安全设计
 

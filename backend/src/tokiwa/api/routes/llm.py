@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from tokiwa.access_log import record_access
 from tokiwa.api.deps import AdminUser, CurrentUser, DbSession
 from tokiwa.audit import record_audit
 from tokiwa.db.models.llm import LLMCallRow
@@ -20,8 +21,16 @@ from tokiwa.llm.base import LLMPurpose, LLMTier, StructuredRequest
 from tokiwa.llm.gateway import get_gateway
 from tokiwa.llm.mock import register_mock_responder
 from tokiwa.llm.models import ModelListing
+from tokiwa.llm.pricing import CostBasis
 from tokiwa.llm.prompting import UNTRUSTED_DATA_POLICY
-from tokiwa.llm.settings import LLMConfigOut, LLMConfigUpdate, config_view, update_config
+from tokiwa.llm.settings import (
+    LLMConfigOut,
+    LLMConfigUpdate,
+    UIOverrideLockedError,
+    config_view,
+    reset_overrides,
+    update_config,
+)
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.system import LLMCall, LLMCallDetail, LLMCallStatus
 from tokiwa.util import ensure_utc, utcnow
@@ -39,10 +48,14 @@ class LLMUsageDay(BaseModel):
     cache_write_tokens: int = 0
     by_purpose: dict[str, float] = Field(default_factory=dict)  # purpose -> cost_usd
     by_purpose_calls: dict[str, int] = Field(default_factory=dict)  # purpose -> calls
+    # Billed calls whose model was not in the pricing table: their cost is an estimate at the highest known rates
+    # (fail-closed, #35), not a price.
+    unpriced_calls: int = 0
 
 
 class LLMUsageResponse(BaseModel):
     days: list[LLMUsageDay]
+    unpriced_models: list[str] = Field(default_factory=list)  # models behind unpriced_calls in the period
 
 
 class LLMTestResult(BaseModel):
@@ -79,9 +92,20 @@ async def get_config(_: CurrentUser) -> LLMConfigOut:
 
 @router.put("/config", response_model=LLMConfigOut)
 async def put_config(body: LLMConfigUpdate, user: AdminUser) -> LLMConfigOut:
-    gateway, changes = await update_config(body)
+    try:
+        gateway, changes = await update_config(body)
+    except UIOverrideLockedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     # changes never contains secret values (only "set"/"cleared").
     await record_audit(user.username, "llm.config.update", "llm.config", {"changes": changes})
+    return await config_view(gateway)
+
+
+@router.delete("/config", response_model=LLMConfigOut)
+async def reset_config(user: AdminUser) -> LLMConfigOut:
+    """Remove every override saved from the UI; the gateway goes back to env / tokiwa.yaml / defaults (#172)."""
+    gateway, cleared = await reset_overrides()
+    await record_audit(user.username, "llm.config.reset", "llm.config", {"cleared": cleared})
     return await config_view(gateway)
 
 
@@ -109,6 +133,8 @@ async def get_usage(
                 LLMCallRow.output_tokens,
                 LLMCallRow.cache_read_tokens,
                 LLMCallRow.cache_write_tokens,
+                LLMCallRow.cost_basis,
+                LLMCallRow.model,
             ).where(LLMCallRow.created_at >= since)
         )
     ).all()
@@ -117,7 +143,8 @@ async def get_usage(
     }
     by_purpose: dict[date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     by_purpose_calls: dict[date, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    for created_at, purpose, cost, inp, out, cache_read, cache_write in rows:
+    unpriced_models: set[str] = set()
+    for created_at, purpose, cost, inp, out, cache_read, cache_write, cost_basis, model in rows:
         day = ensure_utc(created_at).date()
         bucket = buckets.get(day)
         if bucket is None:
@@ -130,13 +157,16 @@ async def get_usage(
         bucket.cache_write_tokens += int(cache_write or 0)
         by_purpose[day][purpose] += float(cost or 0.0)
         by_purpose_calls[day][purpose] += 1
+        if cost_basis == CostBasis.UNPRICED:
+            bucket.unpriced_calls += 1
+            unpriced_models.add(model)
     result = []
     for day, bucket in sorted(buckets.items()):
         bucket.cost_usd = round(bucket.cost_usd, 6)
         bucket.by_purpose = {k: round(v, 6) for k, v in sorted(by_purpose[day].items())}
         bucket.by_purpose_calls = dict(sorted(by_purpose_calls[day].items()))
         result.append(bucket)
-    return LLMUsageResponse(days=result)
+    return LLMUsageResponse(days=result, unpriced_models=sorted(unpriced_models))
 
 
 @router.get("/calls", response_model=Page[LLMCall])
@@ -168,10 +198,11 @@ async def list_calls(
 
 
 @router.get("/calls/{call_id}", response_model=LLMCallDetail)
-async def get_call(call_id: str, session: DbSession, _: AdminUser) -> LLMCallDetail:
+async def get_call(call_id: str, session: DbSession, admin: AdminUser) -> LLMCallDetail:
     row = await session.get(LLMCallRow, call_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "LLM call not found")
+    await record_access(session, admin, "llm.calls.get", target=call_id, count=1)  # audit #167
     return LLMCallDetail.model_validate(row)
 
 

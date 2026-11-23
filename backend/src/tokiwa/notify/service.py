@@ -32,6 +32,7 @@ from tokiwa.db.session import session_scope
 from tokiwa.notify.channels import (
     ChannelConfigError,
     deliver,
+    destination_label,
     mask_config,
     merge_masked,
     validate_config,
@@ -329,7 +330,7 @@ async def create_channel(body: NotificationChannelIn, *, actor: str) -> Notifica
             actor,
             "notify.channel_create",
             target=row.id,
-            details={"kind": row.kind, "name": row.name},
+            details={"kind": row.kind, "name": row.name, "destination": destination_label(body.kind, config)},
             session=session,
         )
     return _public(row)
@@ -342,9 +343,15 @@ async def update_channel(channel_id: str, patch: ChannelPatch, *, actor: str) ->
             raise ChannelNotFound(channel_id)
         kind = ChannelKind(row.kind)
         changed: list[str] = []
+        details: dict[str, Any] = {}
         if patch.config is not None:
+            before = destination_label(kind, dict(row.config or {}))
             row.config = validate_config(kind, merge_masked(kind, patch.config, dict(row.config or {})))
             changed.append("config")
+            after = destination_label(kind, row.config)
+            if after != before:
+                # Audit #118: a destination change is what moves stored secrets elsewhere; keep both ends.
+                details["destination"] = {"before": before, "after": after}
         if patch.name is not None:
             row.name = patch.name[:128]
             changed.append("name")
@@ -355,7 +362,11 @@ async def update_channel(channel_id: str, patch: ChannelPatch, *, actor: str) ->
             row.enabled = patch.enabled
             changed.append("enabled")
         await record_audit(
-            actor, "notify.channel_update", target=row.id, details={"fields": changed}, session=session
+            actor,
+            "notify.channel_update",
+            target=row.id,
+            details={"fields": changed, **details},
+            session=session,
         )
         return _public(row)
 
@@ -367,7 +378,14 @@ async def delete_channel(channel_id: str, *, actor: str) -> None:
             raise ChannelNotFound(channel_id)
         await session.delete(row)
         await record_audit(
-            actor, "notify.channel_delete", target=channel_id, details={"kind": row.kind}, session=session
+            actor,
+            "notify.channel_delete",
+            target=channel_id,
+            details={
+                "kind": row.kind,
+                "destination": destination_label(ChannelKind(row.kind), dict(row.config or {})),
+            },
+            session=session,
         )
 
 

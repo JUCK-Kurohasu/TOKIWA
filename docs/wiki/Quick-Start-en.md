@@ -36,7 +36,13 @@ cd backend && uv sync                                   # Install the backend de
 TOKIWA_SERVER__STATIC_DIR=../frontend/dist uv run tokiwa serve
 ```
 
-Open <http://localhost:8788> in your browser. The first time, you see the **setup page (/setup)**, where you create the first administrator.
+On first start, the server log shows a line like this:
+
+> `TOKIWA is not set up yet. Create the first admin at http://localhost:8788/setup#code=ABCD-EFGH-JKLM-NPQR ...`
+
+Open that URL in your browser: the **setup page (/setup)** appears with the **Setup code** already filled in, and you create the first administrator.
+If you open <http://localhost:8788> instead, enter the code from the log (also saved in `backend/data/setup-code`) in the **Setup code** field.
+The code works once and is deleted after setup (so that nobody else on the network can create the first admin before you).
 
 - Username: 3–64 characters (letters, digits, `_` `.` `-`)
 - Password: at least 10 characters
@@ -79,7 +85,7 @@ cd lab/victim
 
 ```bash
 cd backend
-uv run tokiwa token create gate-1        # tkw_... is shown only once; note it down
+uv run tokiwa token create gate-1 --scope ingest --scope gate   # tkw_... is shown only once; note it down
 export TOKIWA_GATE__INGEST_TOKEN=tkw_...  # Safer than a command-line argument (does not show up in ps)
 uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 127.0.0.1:8080 \
   --server http://127.0.0.1:8788 --trust-forwarded-for

@@ -10,7 +10,7 @@ UI 尚未构建，或者没有设置提供 UI 的目录。执行 `cd frontend &&
 使用 Docker 镜像时，请检查是否覆盖了 `TOKIWA_SERVER__STATIC_DIR`（默认 `/app/frontend/dist`）。
 
 **首次启动时出现的是登录界面，而不是管理员注册界面**
-首次的管理员注册界面（/setup）只会在服务器数据库中一个用户都没有时显示。请先确认状态。
+首次的管理员注册界面（/setup）只会在该服务器从未完成过初始设置时显示（设置过一次后，即使所有用户都被删除也不会再显示）。请先确认状态。
 
 ```bash
 curl -s http://localhost:8788/api/v1/auth/status
@@ -23,9 +23,21 @@ curl -s http://localhost:8788/api/v1/auth/status
 - 无法连接 → 服务器没有运行（`cd backend && uv run tokiwa serve`）。旧版本的 UI 在无法连接 API 时也会显示登录界面
   （现在会显示 **Cannot reach the server**（无法连接到服务器））。
 
+**初始设置界面提示“missing or wrong setup code”**
+创建第一个管理员需要服务器启动时写入日志和 `data/setup-code`（Docker 中为 `/data/setup-code`）的一次性设置码。
+请打开日志中 `TOKIWA is not set up yet ...` 一行里的 URL，或将该文件的内容填入 **Setup code**（设置码）栏。如果文件不存在，尝试设置时会重新生成并输出到日志。
+在其他人无法访问的主机上，可以用 `TOKIWA_AUTH__SETUP_CODE_REQUIRED=false` 关闭此功能（[配置参考](Configuration-zh)）。
+
+**一个管理员都没有了（启动日志中出现“no user has the admin role”）**
+在与服务器相同的设置下执行 `uv run tokiwa user create <名称> --role admin` 创建管理员（Docker 中为 `docker compose ... exec tokiwa tokiwa user create ...`）。
+
+**登录时提示“too many failed attempts”（429）**
+同一用户名和来源 IP 失败 5 次（`auth.login_max_failures`），或同一来源 IP 失败 30 次（`auth.login_max_failures_per_ip`）后，在旧的失败移出 15 分钟时间窗（`auth.login_lockout_minutes`）之前，即使密码正确也会被拒绝。
+请等待，或从其他终端（来源 IP）登录。失败和成功会以 `auth.login.failure` / `auth.login.success` 记录在审计日志（**Settings → System**）中（附带来源 IP，不记录密码）。
+
 **忘记了管理员密码**
-在与服务器相同的设置下执行 `uv run tokiwa user create <新名称> --role admin` 创建另一个管理员，
-然后在 **Settings → Users**（设置 → 用户）中通过 **Reset password**（重置密码）修改原账户的密码。
+在与服务器相同的设置下执行 `uv run tokiwa user reset-password <用户名>` 并设置新密码（Docker 中为 `docker compose ... exec tokiwa tokiwa user reset-password <用户名>`）。
+该用户已有的登录会失效。如果因登录失败而被暂时拒绝（429），约 15 分钟后会解除。
 
 **重启后被登出**
 签名密钥（`data/secret.key`）可能已丢失。请检查数据目录是否已持久化。

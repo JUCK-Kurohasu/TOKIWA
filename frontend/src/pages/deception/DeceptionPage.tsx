@@ -30,7 +30,7 @@ import {
   THead,
   TR,
 } from "@/components/ui";
-import { formatDateTime, formatNumber, timeAgo } from "@/lib/format";
+import { dateTimeTitle, formatDateTime, formatNumber, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { CreateAssetDialog } from "./CreateAssetDialog";
@@ -50,9 +50,9 @@ const strings = {
     kpiAssets: "有効な資産",
     kpiAssetsHint: "全 {n} 件",
     kpiTrips: "総トリップ数",
-    kpiTripsHint: "触れた時点で critical アラート",
+    kpiTripsHint: "触れた時点でアラート（第三者が誘発できる形は重みを下げる）",
     kpiAi: "AI カナリアのトリップ",
-    kpiAiHint: "AI エージェント断定の根拠",
+    kpiAiHint: "カナリアヘッダでの追従は AI エージェント断定の根拠",
     kpiLast: "最終トリップ",
     all: "すべて",
     colKind: "種類",
@@ -95,9 +95,9 @@ const strings = {
     kpiAssets: "Enabled assets",
     kpiAssetsHint: "{n} total",
     kpiTrips: "Total trips",
-    kpiTripsHint: "Each trip raises a critical alert",
+    kpiTripsHint: "Each trip raises an alert (weighted down when a third party could induce it)",
     kpiAi: "AI-canary trips",
-    kpiAiHint: "Basis for AI-agent attribution",
+    kpiAiHint: "A canary-header follow is the basis for AI-agent attribution",
     kpiLast: "Last trip",
     all: "All",
     colKind: "Kind",
@@ -139,11 +139,11 @@ const explainer = {
     what: "デコイページの HTML コメント・不可視要素・robots.txt・OpenAPI の description などに、人間には見えず、文章を読んで行動を決める LLM エージェントだけが従う「隠し指示」を埋め込みます（逆プロンプトインジェクション）。",
     ruleTitle: "判定ルール",
     rule1:
-      "カナリア値が隠し指示どおりの形で使われた — 例: 指定ヘッダ（X-Debug-Auth: <token> など）を付けて送信、指示されたパス（/api/internal/<token> など）へアクセス → AI スコア 0.99・カテゴリ「AI エージェント」の critical アラート",
+      "カナリア値が指定ヘッダ（X-Debug-Auth: <token> など）で送られた — クライアント自身にしか付けられない位置 → AI スコア 0.99・カテゴリ「AI エージェント」の critical アラート",
     rule2:
-      "カナリア値やデコイパスへの接触はあるが、指示と異なる形（ボディへの貼り付け等）→ デセプションの critical アラート（AI とは断定しない）",
+      "指示されたパス（/api/internal/<token> など）だけ、またはクエリ・本文に値がある → リンクや画像で第三者が誘発できるため medium（AI とは断定しない）。ブラウザがクロスサイト／画像などの部品として送ったトリップ（Sec-Fetch-*・別ホストの Referer）は種類を問わず low で、遮断提案の根拠にしない",
     whyTitle: "なぜ確度が高いか",
-    why: "正規ユーザーは不可視の指示を目にしません。従来型スキャナは自然言語の指示を解釈しません。指示に「従う」のは、ページの文章を理解して次の行動を決める LLM エージェントだけです。",
+    why: "正規ユーザーは不可視の指示を目にしません。従来型スキャナは自然言語の指示を解釈しません。指示に「従う」のは、ページの文章を理解して次の行動を決める LLM エージェントだけです。ただし従うかはモデル次第で確率的なので、反応しなかったことは「AI ではない」根拠になりません。",
     ethics:
       "倫理: 配信するのは偽データのみ。攻撃者の端末で何かを実行させる仕組み（ビーコン・エクスプロイト）は含まず、反撃も行いません。",
     example:
@@ -154,11 +154,11 @@ const explainer = {
     what: "Decoy pages embed a hidden instruction in HTML comments, invisible elements, robots.txt or OpenAPI descriptions. Humans never see it; only an LLM agent that reads the text and decides what to do next will follow it (reverse prompt injection).",
     ruleTitle: "Attribution rules",
     rule1:
-      "The canary value is used exactly as instructed — e.g. sent in the specified header (such as X-Debug-Auth: <token>) or by visiting the instructed path (such as /api/internal/<token>) → critical alert with AI score 0.99 and category “AI agent”",
+      "The canary value is sent in the specified header (such as X-Debug-Auth: <token>), which only the client itself can set → critical alert with AI score 0.99 and category “AI agent”",
     rule2:
-      "A canary value or decoy path is touched in a different form (e.g. pasted into a body) → critical deception alert, without AI attribution",
+      "Only the instructed path (such as /api/internal/<token>), or the value in a query or body → medium, without AI attribution, because a link or an image lets a third party induce it. Trips the browser sent cross-site or as a page part such as an image (Sec-Fetch-*, a foreign Referer) are low for every trap type and never a basis for a block proposal",
     whyTitle: "Why this is high-fidelity",
-    why: "Legitimate users never see the invisible instruction. Classic scanners do not interpret natural-language instructions. Only an LLM agent that understands the page text and acts on it will comply.",
+    why: "Legitimate users never see the invisible instruction. Classic scanners do not interpret natural-language instructions. Only an LLM agent that understands the page text and acts on it will comply. Whether it does depends on the model and is probabilistic, so a canary that did not fire is no evidence that a client is not an AI.",
     ethics:
       "Ethics: only fake data is served. Nothing is executed on the attacker's machine (no beacons, no exploits) and there is no hack-back.",
     example:
@@ -418,7 +418,7 @@ export function DeceptionPage() {
                         </TD>
                         <TD
                           className="whitespace-nowrap text-xs text-muted"
-                          title={formatDateTime(a.last_tripped)}
+                          title={dateTimeTitle(a.last_tripped)}
                         >
                           {a.last_tripped ? timeAgo(a.last_tripped) : L.never}
                         </TD>
@@ -525,7 +525,7 @@ export function DeceptionPage() {
                                   )}
                                 </button>
                               </TD>
-                              <TD className="whitespace-nowrap text-xs" title={formatDateTime(ev.timestamp)}>
+                              <TD className="whitespace-nowrap text-xs" title={dateTimeTitle(ev.timestamp)}>
                                 {timeAgo(ev.timestamp)}
                               </TD>
                               <TD>

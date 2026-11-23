@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tokiwa.schemas.common import ORMModel, Severity
 from tokiwa.schemas.triage import ActionType
@@ -60,6 +60,15 @@ class ResponseAction(ORMModel):
     expires_at: datetime | None
     reverted_at: datetime | None
     result: dict[str, Any]
+    # Audit #130: who proposed it through the API (None for rule / llm / policy), and later proposals made after
+    # approval (kept apart from ``reason``, which stays what the approver saw).
+    proposed_by_user: str | None = None
+    notes: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def _notes(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 class DecoyRoute(BaseModel):
@@ -84,9 +93,17 @@ class GatePolicy(BaseModel):
     tarpit: dict[str, int] = Field(default_factory=dict)  # ip/cidr -> added latency in ms
     deceive: list[str] = Field(default_factory=list)  # ip/cidr -> every request served from Mirage decoys
     decoys: list[DecoyRoute] = Field(default_factory=list)
-    # HTML snippet (e.g. hidden AI-canary instruction) the gate appends before </body> of upstream HTML
-    # responses. None = disabled.
+    # HTML snippet (e.g. hidden AI-canary instruction) the gate inserts into upstream HTML responses.
+    # None = disabled.
     html_injection: str | None = None
+    # Audit #64: {"blocked" | "rate_limited" | "tarpit" | "deceive": {entry: expires_at}}. Entries without an
+    # expiry are absent. The Gate lifts an entry at (its receive time + expires_at - generated_at) even while it
+    # cannot reach the server (fail-static keeps the last policy, but never past these expiries).
+    entry_expires_at: dict[str, dict[str, datetime]] = Field(default_factory=dict)
+    # Where: "head" (the snippet's leading HTML comment, after <head>), "body_start" (after <body>), "body_end"
+    # (before the last </body>). None = ["body_end"] (servers before audit #41). Plain strings so a gate ignores
+    # positions it does not know instead of rejecting the whole policy.
+    html_injection_positions: list[str] | None = None
 
 
 class DeceptionKind(StrEnum):
