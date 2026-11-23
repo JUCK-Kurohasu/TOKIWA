@@ -113,7 +113,10 @@ con la información de vulnerabilidades y para priorizar los incidentes (si corr
 ### Rules (Reglas de detección)
 
 - **Detectors** (Detectores): activación / desactivación de los detectores integrados (firmas de ataques web, comportamiento de IA, engaño, puertos, etc.)
-- **Sigma rules** (Reglas Sigma): gestión de reglas en formato Sigma (25 incluidas + las añadidas)
+- **Sigma rules** (Reglas Sigma): gestión de reglas en formato Sigma (25 incluidas + las añadidas). Cuando una de las 14 reglas
+  web incluidas coincide con una petición en la que también alerta el detector web integrado del mismo tipo, ambas se fusionan
+  (una sola alerta, registrada en `details.corroborated_by`); si el detector está activado pero no alerta, la alerta de la regla
+  se registra como low. La regla conserva su propia severidad solo mientras ese detector está desactivado
 - **LLM proposals** (Propuestas del LLM): reglas propuestas por el LLM a partir de la información de vulnerabilidades. **No se activan automáticamente**: se revisan y se adoptan
 
 ## Respond (Responder)

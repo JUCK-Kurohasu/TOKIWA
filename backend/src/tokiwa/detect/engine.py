@@ -13,6 +13,7 @@ from tokiwa.config import Settings, get_settings
 from tokiwa.db.models.detection import AlertRow
 from tokiwa.detect.base import Detector, registered_detectors
 from tokiwa.detect.context import DetectionContext
+from tokiwa.detect.sigma.overlap import merge_native_overlap
 from tokiwa.schemas.alerts import Alert, AlertDraft, AlertStatus
 from tokiwa.schemas.common import Severity
 from tokiwa.schemas.events import Event
@@ -64,7 +65,9 @@ class DetectionEngine:
         drafts: list[AlertDraft] = []
         self.ctx.scratch.clear()
         detectors = self.enabled_detectors()
+        enabled_ids = {d.id for d in detectors}
         for event in events:
+            event_drafts: list[AlertDraft] = []
             for det in detectors:
                 if not det.accepts(event):
                     continue
@@ -75,7 +78,9 @@ class DetectionEngine:
                     continue
                 for d in out:
                     d.details.setdefault("detector", det.id)
-                drafts.extend(out)
+                event_drafts.extend(out)
+            # Bundled Sigma web rules that duplicate a native web.* detector: one alert per finding (#76).
+            drafts.extend(merge_native_overlap(event_drafts, enabled_ids))
         return drafts
 
     async def persist(

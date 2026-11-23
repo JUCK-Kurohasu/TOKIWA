@@ -149,6 +149,9 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 
 ## 5. 誤検知抑制と性能
 
+- 同梱 Sigma の web ルール（`rules/sigma/web`）は同じイベントで同じ種類の `web.*` が発報したらそちらに合流し、`web.*` が
+  有効なのに沈黙したときは low に下がる（重複発報とネイティブの抑制のすり抜けを防ぐ。#76、docs/detection/sigma.md §5.1）。
+
 - 正常トラフィック fixture（`backend/tests/detect/fixtures/web_benign.json`: "select" を含む検索、アポストロフィ、
   `fields=name|id`、リッチテキスト JSON、JSON-LD の `@type`、XHTML DOCTYPE、正規の Next.js Server Action、
   開発者ブラウザの `Referer: http://localhost:3000/` 等）で web.* が 1 件も発火しないことをテストしている。

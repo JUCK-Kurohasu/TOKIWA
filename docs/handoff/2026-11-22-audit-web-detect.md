@@ -11,8 +11,8 @@
 | #51 | 完全 | `detect/web_common.py`: 構造の上限（JSON リーフ・深さ・multipart パート・パラメータ・Cookie・ヘッダ）を超えた分を捨てず、NUL 区切りで 1 つの `(overflow)` ターゲットにまとめて検査。JSON キーを `(json keys)` ターゲットとして検査（キーの絞り込みはしない: `rO0AB…` や内部 IP のように英数字だけのペイロードもあるため）。JSON の走査を反復化（深いネストでもスタックを使わない）。上限到達を `HttpView.truncated` に記録し、`web.*` 署名アラートの `details.inspection_truncated` とタグ `inspection-truncated` へ。上限を `detection.web.max_params / max_headers / max_json_leaves / max_json_depth / max_multipart_parts / max_decode_rounds` で設定可能に（既定は従来値）。新検知器 `web.inspection_evasion`（low, `detect/detectors/web_evasion.py`）: 上限の手前が詰め物（同一文字 90% 以上・空/同値のダミー要素 90% 以上）のときだけ発報（上限到達だけでは鳴らさない）。テスト `tests/detect/test_web_limits.py`。docs/detection/web.md §1.2.1・§4、wiki Configuration ×4 | 29e21a0 |
 | #52 | 完全 | `web_common.content_type_params()`: Content-Type を `;` 区切りの `name=value` として解析（名前は完全一致・大小無視、値は大小保持、引用符・バックスラッシュエスケープ対応）。前方一致の `_BOUNDARY` 正規表現を廃止。`boundary` が複数（値が違う）なら全候補で分割して検査し、`web.inspection_evasion` に `multipart_boundary_ambiguous`。どの候補でも分割できなければ `None` を返しボディ全体を `body` として検査（以前は空リストで `body_raw` にしか入らなかった）。テスト `tests/detect/test_web_multipart.py`。docs/detection/web.md §1.2.2 | a1460cb |
 | #53 | 完全 | 許可リスト方式を反転: 既知の反射ヘッダ（`header`）とフレーミング系（`header_other` = Accept*・Sec-CH-*/Sec-Fetch-*・If-*・Cache-Control・Content-Type・traceparent/tracestate/baggage・X-Requested-With ほか `FRAMING_HEADERS`）以外のヘッダを新 location `header_custom` とし、`INJECTION_LOCATIONS` に追加（SQLi・XSS・コマンド注入・LFI・SSTI）。トラバーサルは `header_custom` だけ追加（Referer はブラウザ正規化済み URL で、`/etc/hosts` の解説ページ等が os_file に当たるため対象外）、単発の `../`（dotdot_single, medium）はヘッダでは見ない（`X-Return-To: ../orders` 等）。デシリアライズ・SSRF メタデータは全ヘッダ（`HEADER_LOCATIONS`）。件数は `max_headers`、長さは `max_inspect_chars`（#51 のあふれ・打ち切り記録が効く）。設定 `detection.web.inspect_custom_headers`（既定 true）・`extra_framing_headers`（末尾 `*` で前方一致）。RFI の include パラメータ判定で `(overflow)` / `(json keys)` を 1 つの値として扱わないよう修正。良性 fixture に実在形のカスタムヘッダ 36 個（Stripe-Signature, X-Hub-Signature-256, sec-ch-ua, baggage, JSON 値ヘッダ等）。テスト `tests/detect/test_web_headers.py`。docs/detection/web.md §1.2・§4、wiki Configuration ×4 | 82add43 |
-| #89 | 完全（HTML 実体参照は「直す必要なし」と判断） | (1) URL 多重: デコード上限 3 → 8 ラウンド（安定したら止まるので通常の値のコストは不変。`max_decode_rounds`）。(2) base64: `query`/`body`/`cookie`/`header_custom` の値が base64/base64url（16 文字以上）でデコード結果が UTF-8・95% 以上表示可能なら `<名前>(base64)` を追加ターゲット化（1 要求 8 個まで。トークン・hex ID・JWT・バイナリは対象外をテスト）。(3) UTF-16 JSON: 交互 NUL パターン（先頭 256 文字で片側 90% 以上 NUL・もう片側 10% 以下）なら NUL を除去してから解析（ゼロ埋めバイナリは対象外）。(4) セミコロンなし実体参照: Python の `html.unescape` は既に `;` 省略を展開する。行列の取りこぼしは直後が 16 進数字（`&#x3dalert` → U+03DA）の場合で、仕様どおり貪欲に読むとブラウザでも壊れる形 = 行列の作り方の問題と判断（テストで挙動を固定、ブラウザ実機は未確認）。(5) %A0: 不正な UTF-8 単独バイトを U+FFFD ではなく Latin-1 に（surrogateescape → 0x80-0xFF）。NFKC で U+00A0 → 空白。(6) HPP: 同名パラメータ 2 回以上で `,` 連結した `<名前>(joined)`（ASP.NET の挙動。1 location 4 個まで）。L05 行列: url 4x / %a0 / base64 / UTF-16 / HPP の SQLi がすべて W に（残る `w` は HPP の cmdi: 分割位置でコマンドが壊れるため）。テスト `tests/detect/test_web_normalize.py`。docs/detection/web.md §1.1・§4、wiki Configuration ×4 | (このコミット) |
-| #76 | 未着手 | | |
+| #89 | 完全（HTML 実体参照は「直す必要なし」と判断） | (1) URL 多重: デコード上限 3 → 8 ラウンド（安定したら止まるので通常の値のコストは不変。`max_decode_rounds`）。(2) base64: `query`/`body`/`cookie`/`header_custom` の値が base64/base64url（16 文字以上）でデコード結果が UTF-8・95% 以上表示可能なら `<名前>(base64)` を追加ターゲット化（1 要求 8 個まで。トークン・hex ID・JWT・バイナリは対象外をテスト）。(3) UTF-16 JSON: 交互 NUL パターン（先頭 256 文字で片側 90% 以上 NUL・もう片側 10% 以下）なら NUL を除去してから解析（ゼロ埋めバイナリは対象外）。(4) セミコロンなし実体参照: Python の `html.unescape` は既に `;` 省略を展開する。行列の取りこぼしは直後が 16 進数字（`&#x3dalert` → U+03DA）の場合で、仕様どおり貪欲に読むとブラウザでも壊れる形 = 行列の作り方の問題と判断（テストで挙動を固定、ブラウザ実機は未確認）。(5) %A0: 不正な UTF-8 単独バイトを U+FFFD ではなく Latin-1 に（surrogateescape → 0x80-0xFF）。NFKC で U+00A0 → 空白。(6) HPP: 同名パラメータ 2 回以上で `,` 連結した `<名前>(joined)`（ASP.NET の挙動。1 location 4 個まで）。L05 行列: url 4x / %a0 / base64 / UTF-16 / HPP の SQLi がすべて W に（残る `w` は HPP の cmdi: 分割位置でコマンドが壊れるため）。テスト `tests/detect/test_web_normalize.py`。docs/detection/web.md §1.1・§4、wiki Configuration ×4 | 9ee199f |
+| #76 | 完全（fingerprint の path_key 化は不採用） | 3 案から「合流」を選択（理由は要判断）。新モジュール `detect/sigma/overlap.py`: 同梱 web ルール 14 本の Sigma id → ネイティブ検知器の対応表。`DetectionEngine.run()` でイベントごとに全検知器の後に適用: ネイティブが同じイベントで発報 → Sigma を落としネイティブに `details.corroborated_by` とタグ `sigma-corroborated`／ネイティブ有効だが沈黙 → Sigma を low に（`native_detector`・`native_verdict=silent`・`sigma_level_severity`、タグ `native-silent`）／ネイティブ無効 → ルールの level のまま。rules テーブル由来（利用者・LLM）のルールは対象外。L16 良性コーパス: アラート 42 → 31、mock LLM 82 → 64、提案 5 のまま。テスト `tests/sigma/test_sigma_overlap.py`（同梱 web ルール全件が対応表にあること・合流・無効時・沈黙時・利用者ルール）、`tests/sigma/test_sigma_api.py` の 2 テストはスキャナルール自身のアラート数を数えるため設定でネイティブ `web.scanner_ua` を無効化。docs/detection/sigma.md §5.1、web.md §5、wiki Web-UI ×4 | (このコミット) |
 | #166 + #173 | 未着手 | | |
 
 ## 計測（ベースライン = 95343eb、worktree の rules/sigma を指すよう harness のパスだけ書き換えて実行）
@@ -33,7 +33,18 @@
   誤検知の実測は良性 fixture（36 ヘッダ）と L16 コーパスのみ。社内固有のヘッダ（署名・暗号化済みトークン・検索 DSL を載せるもの）で
   鳴る場合は `extra_framing_headers` に足す運用。フレーミング系の一覧（`web_common.FRAMING_HEADERS`）は調整余地がある。
 
+- **#76**: 3 案（同梱ルールの既定無効化 / level の一律引き下げ / ネイティブとの合流）のうち合流を選んだ。無効化はネイティブが
+  取りこぼした変種への安全網（監査の行列で Sigma だけが拾っていた形）を失い、一律引き下げはネイティブを無効にした環境での
+  フォールバックとしての重大度を失うため。「ネイティブ有効だが沈黙」を low にしたのは、ネイティブの誤検知抑制（単発 `../` 等）を
+  Sigma 経由ですり抜けさせないため。ネイティブが見逃した本物の攻撃も low になる点はトレードオフ（low でも記録・インシデント化はされる）。
+  推奨 (2) の「Sigma の fingerprint を path_key ベースに」は採らなかった: IP ローテーションによる件数増（監査の 200 件）は path_key では
+  減らず、合流でほぼ解消するため。
+
 ## 既定動作の変更
+
+- **#76**: 同梱 Sigma の web ルールが同じイベントで同じ種類の `web.*` と重複したら Sigma のアラートは作られない（ネイティブ側の
+  `details.corroborated_by` に残る）。`web.*` が有効なのに沈黙したときの Sigma アラートは low。Sigma の rules API のヒット数
+  （`hit_count`）は従来どおり数える（アラートの件数とは一致しなくなる）。
 
 - **#53**: アプリ固有のヘッダ（`header` / `header_other` 以外）が SQLi・XSS・トラバーサル・コマンド注入・LFI の検査対象になった。
   アラートの `details.location` に新しい値 `header_custom` が出る。L16 コーパスではアラート数は不変（42）。
@@ -48,6 +59,11 @@
 ## 失敗した試み
 
 ## 担当外の変更
+
+- `backend/src/tokiwa/detect/engine.py`（#76）: `run()` でイベントごとの drafts を集め、`merge_native_overlap()` を 1 回呼ぶだけ
+  （+6 行）。ロジックは所有モジュール `detect/sigma/overlap.py`。
+- `backend/tests/sigma/test_sigma_api.py`（所有 `tests/sigma/` 内だが他レーンの API テスト）: 2 テストに `native_scanner_off()`
+  （設定でネイティブ `web.scanner_ua` を無効化）を追加。
 
 ## 他レーンへの依頼
 

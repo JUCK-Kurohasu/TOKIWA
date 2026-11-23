@@ -109,7 +109,10 @@ against vulnerability information and for prioritizing incidents (whether a KEV 
 ### Rules
 
 - **Detectors**: enable / disable the built-in detectors (web attack signatures, AI behavior, deception, ports, and so on)
-- **Sigma rules**: manage rules in Sigma format (25 bundled + any you add)
+- **Sigma rules**: manage rules in Sigma format (25 bundled + any you add). When one of the 14 bundled web attack rules
+  matches a request on which the built-in web detector of the same kind also fires, the two are merged (one alert, recorded
+  in `details.corroborated_by`); if the detector is enabled but stays silent, the rule's alert is recorded as low. The rule
+  keeps its own severity only while that detector is disabled
 - **LLM proposals**: rules the LLM proposed based on vulnerability information. **They are not enabled automatically**; you review and adopt them
 
 ## Respond
