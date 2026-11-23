@@ -140,6 +140,10 @@ deception:
 | `agent.interval_seconds` | 10 | ホストセンサーの収集間隔 |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | 取り込むログ |
 | `agent.verify_tls` | true | サーバーの TLS 証明書を検証する |
+| `agent.send_cmdline` | true | プロセスのコマンドラインを送る（秘密は送信前に伏字）。false なら名前・実行ファイル・ユーザーだけ |
+| `agent.max_connections_per_cycle` | 1000 | 1 周期に送る新しい接続の上限（超過分は次の周期へ） |
+| `agent.log_timezone` | なし | オフセットの無いログ時刻のタイムゾーン（`Asia/Tokyo`・`+09:00`・`UTC`）。未設定は UTC とみなして警告 |
+| `agent.health_report_seconds` | 300 | 読めなかった行・時刻を報告する最短間隔（`agent.health` イベント） |
 
 ### 通知（`notify.*`）・コパイロット（`copilot.*`）
 

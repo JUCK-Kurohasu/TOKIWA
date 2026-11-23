@@ -13,7 +13,7 @@
 | #123 Suricata to_client | 部分 | alert の source/destination を「攻撃側 / 被攻撃側」にする: (1) `alert.source`/`alert.target`（ルールの `target` キーワード）を優先、(2) `direction=to_client` かつ `metadata.attack_target` が `Client_Endpoint` ならパケット方向のまま（悪性サーバー → 自社クライアント。公式例）、(3) その他の `to_client` は入れ替え（フロー開始側＝クライアントを攻撃者に）、(4) それ以外はパケット方向。`labels` に `suricata.direction` / `suricata.attribution` / `suricata.swapped`、元の方向は raw に残る。公式例を含む fixture `suricata_eve_direction.json`。残り: 推奨 (2) net_ids の attacker/victim 分離、(3) 資産台帳の保護対象を protected_cidrs に — 他レーン | b82b27d |
 | #131 ログ書式・時刻 | 完全 | (1) 読めない行（不正 JSON・ヘッダ無し Zeek TSV）と解釈できない時刻を `ParseStats` で数え、`LogSource.health_event()` が警告ログ＋`agent.health` イベント（初回は即時、以降 `agent.health_report_seconds`=300 秒ごとに差分）。新検知器 `sensor.log_parse_failures`（読めない行 medium / 時刻のみ low、送信元 IP なし）。意図的なスキップ（Suricata stats、アクセスログでない JSON、Zeek ヘッダ）は数えない。(2) nginx `escape=default` の `\xHH`（nginx ソースで確認）を復号して取り込み（`recovered` として計数・初回警告）。(3) `agent.log_timezone`（IANA / `+09:00` / UTC。不正値は起動時に ValidationError）。未設定時はオフセット無し時刻を従来どおり UTC とみなしつつ計数・警告（アラートはしない）。Caddy の wall 時刻、µs/ns エポックも解釈。時刻の未来ずれのクランプはサーバー側 #19 の既存処理 | 7f7f1b5 |
 | #132 withdrawn アドバイザリ | 部分 | GHSA / OSV の取り下げを捨てずに `SourceResult.withdrawn` で渡し、`store.apply_withdrawals` が既存行に `data.withdrawn`（アドバイザリ ID → 日時）を記録。取り下げたアドバイザリがその feed のデータ提供元で、他の package feed が裏付けていなければ ecosystem 付きの affected を削除（NVD の CPE は残す）。他のソースが無い行（GHSA だけの行など）は affected を空にし `data.withdrawn_at`。更新理由 `withdrawn` で `intel.vuln_updated` を発行 → matcher が再照合し open の露出を `[auto-closed]` で mitigated に。未知 ID の取り下げは行を作らない。取り下げ解除（再公開）で印を消す。残り: UI の「取り下げ済み」バッジ（frontend）、OSV の取り下げが querybatch で返らない場合の扱い（未確認） | 3c3206a |
-| 未登録 Zeek username（Refs #169） | 完全 | `_SENSITIVE_KEYS` に `username`（Zeek http.log。`base/protocols/http/main.zeek` で確認）・`remote_user`（nginx `$remote_user`）・`user_id`（Caddy アクセスログ。`modules/caddyhttp/server.go` で確認）を追加し raw で伏字。検知器・enricher が raw のこれらを読んでいないことを確認。Data-Handling（4 言語）の表も更新 | (#169) |
+| 未登録 Zeek username（Refs #169） | 完全 | `_SENSITIVE_KEYS` に `username`（Zeek http.log。`base/protocols/http/main.zeek` で確認）・`remote_user`（nginx `$remote_user`）・`user_id`（Caddy アクセスログ。`modules/caddyhttp/server.go` で確認）を追加し raw で伏字。検知器・enricher が raw のこれらを読んでいないことを確認。Data-Handling（4 言語）の表も更新 | e8e1979 |
 
 ## 要判断
 
@@ -33,6 +33,9 @@
 ## 失敗した試み
 
 ## 担当外の変更
+
+- `docs/wiki/Configuration*.md`（共有）: Agent の表に `agent.send_cmdline` / `max_connections_per_cycle` / `log_timezone` / `health_report_seconds` の 4 行を追加のみ。
+- `docs/wiki/Data-Handling*.md`（data-handling の成果物）: センサー表の nginx/Caddy・Zeek・ホストセンサーの 3 行を現状に合わせて修正（#169・#70）。
 
 - `backend/src/tokiwa/api/routes/ingest.py`（api レーン）: `check_binding` で `agent.health` を dataset 縛りの例外に（定数 1 つ + 2 行、#131）。
 
@@ -71,7 +74,6 @@
 - #132: affected は出所なしの和集合なので、同じ CVE 行に複数の GHSA が畳み込まれ、データ提供元でない方が取り下げられた場合は印だけ付けて
   affected は変えない（重複 GHSA の取り下げで本物の露出を閉じないための保守的な選択）。
 
-- 利用者向け文書（`docs/wiki/Sensors*.md`・`Configuration*.md`）は最後にまとめて更新する（この行が残っていたら未更新）。
 - #131: nginx の `escape=default` の挙動は nginx の `src/http/modules/ngx_http_log_module.c`（`ngx_http_log_escape`: 0x00-0x1F, `"`, `\`,
   0x7F 以上を `\xHH`、大文字 16 進）を GitHub から取得して確認。Caddy の `time_format` の `wall` 系の実際の出力形式
   （`2006/01/02 15:04:05.000`）は Go のレイアウト名からの推定で、実機出力は未確認（TODO(verify)）。

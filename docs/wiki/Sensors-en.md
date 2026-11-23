@@ -111,6 +111,29 @@ uv run tokiwa agent run --server-url http://tokiwa.example.internal:8788 \
 - Reading other users' process information may require root-equivalent privileges.
 - Listeners found in the first port snapshot are, by default (`agent.ports_first_snapshot: info`), recorded with severity "info"
   (with `learn`, they are not recorded and are only memorized as the baseline). After that, any new listener that appears is detected.
+- **Command lines**: the agent masks secrets in the command line of listening / connected processes before sending
+  (arguments named like a secret such as `--password X` / `--api-key X`, options of common tools such as `mysql -pX`,
+  `redis-cli -a X`, `sshpass -p X`, `curl -u user:X`, `smbclient -U user%X`, environment assignments such as `*_KEY=X`,
+  credentials in URLs). Program names, option names and paths are kept. Passwords passed as positional arguments and the like
+  may not be masked, so on hosts that put secrets in argv we recommend `TOKIWA_AGENT__SEND_CMDLINE=false` (sends only name,
+  executable and user). Honeytokens passed as arguments are masked too and are not matched by deception.
+- **Limit on new connections**: when one cycle has more new connections than `agent.max_connections_per_cycle` (default 1000),
+  established, outbound and process-owned connections are sent first and the rest are carried over to the next cycle (not dropped).
+  The overflow shows in the port snapshot label `connections_truncated` and the detection `sensor.connections_truncated`
+  (medium) - a counter to hiding a C2 connection among masses of dummy connections.
+- **nginx log format**: use `log_format ... escape=json` (`lab/nginx/tokiwa-json.conf`). Without `escape=json`, `"` is written
+  as `\x22`, which is not valid JSON. The agent decodes such lines but warns.
+- **Log timestamps**: timestamps with an offset (ISO 8601 `+09:00` / `Z`, `$time_local`, ...) are safest. Timestamps without
+  an offset (custom formats, Caddy `wall`, ...) are read in `agent.log_timezone` (e.g. `Asia/Tokyo`, `+09:00`, `UTC`). Unset,
+  they are taken as UTC and the count is warned about (a JST log would be 9 hours off). An invalid value fails at startup.
+- **Lines that could not be read**: lines that are not valid JSON and timestamps that cannot be interpreted are counted; the
+  first time at once and then at most every `agent.health_report_seconds` (default 300 s), the agent logs a warning and sends
+  an `agent.health` event. Unreadable lines raise the detection `sensor.log_parse_failures`. `agent.health` is accepted even
+  from tokens bound to datasets.
+- **Direction of Suricata alerts**: the `src_ip` of an EVE alert follows the matching packet. For response-direction alerts
+  (`direction: to_client`, e.g. ATTACK_RESPONSE), the side that opened the connection becomes the attacker (source). A rule
+  `target` takes precedence, and when ET `metadata.attack_target` is `Client_Endpoint` nothing is swapped. The decision is in
+  the labels `suricata.direction` / `suricata.attribution` / `suricata.swapped`; the original direction stays in `raw`.
 
 ## Ingest API (direct sending and LLM app integration)
 

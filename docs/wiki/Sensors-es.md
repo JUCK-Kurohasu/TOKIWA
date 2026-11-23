@@ -111,6 +111,31 @@ uv run tokiwa agent run --server-url http://tokiwa.example.internal:8788 \
 - Para leer la información de procesos de otros usuarios pueden necesitarse privilegios equivalentes a root.
 - Los puertos en escucha encontrados en la primera instantánea se registran, por defecto (`agent.ports_first_snapshot: info`), con severidad "informativa"
   (con `learn` no se registran: solo se memorizan como línea base). A partir de ahí, se detecta cualquier nuevo puerto en escucha que aparezca.
+- **Líneas de comandos**: el agente enmascara los secretos de la línea de comandos de los procesos en escucha / conectados antes
+  de enviarla (argumentos cuyo nombre indica un secreto como `--password X` / `--api-key X`, opciones de herramientas comunes como
+  `mysql -pX`, `redis-cli -a X`, `sshpass -p X`, `curl -u user:X`, `smbclient -U user%X`, asignaciones de entorno como `*_KEY=X`,
+  credenciales en URL). Se conservan los nombres de programa, de opción y las rutas. Las contraseñas pasadas como argumentos
+  posicionales y similares pueden no enmascararse, por lo que en hosts que ponen secretos en argv recomendamos
+  `TOKIWA_AGENT__SEND_CMDLINE=false` (envía solo nombre, ejecutable y usuario). Los honeytokens pasados como argumentos también se
+  enmascaran y no los compara el engaño.
+- **Límite de conexiones nuevas**: cuando un ciclo tiene más conexiones nuevas que `agent.max_connections_per_cycle` (1000 por
+  defecto), se envían primero las establecidas, salientes y con proceso conocido, y el resto pasa al ciclo siguiente (no se descarta).
+  El exceso se ve en la etiqueta `connections_truncated` de la instantánea de puertos y en la detección `sensor.connections_truncated`
+  (media), contra la técnica de ocultar un C2 entre masas de conexiones falsas.
+- **Formato del log de nginx**: use `log_format ... escape=json` (`lab/nginx/tokiwa-json.conf`). Sin `escape=json`, `"` se escribe
+  como `\x22`, que no es JSON válido. El agente decodifica esas líneas, pero avisa.
+- **Hora de los logs**: lo más seguro son marcas con desplazamiento (ISO 8601 `+09:00` / `Z`, `$time_local`, ...). Las marcas sin
+  desplazamiento (formatos propios, `wall` de Caddy, ...) se interpretan en `agent.log_timezone` (p. ej. `Asia/Tokyo`, `+09:00`,
+  `UTC`). Sin configurar, se toman como UTC y se avisa de cuántas hubo (un log en JST quedaría desfasado 9 horas). Un valor no
+  válido falla al arrancar.
+- **Líneas que no se pudieron leer**: se cuentan las líneas que no son JSON válido y las horas que no se pueden interpretar; la primera
+  vez de inmediato y después como mucho cada `agent.health_report_seconds` (300 s por defecto), el agente registra un aviso y envía un
+  evento `agent.health`. Las líneas ilegibles generan la detección `sensor.log_parse_failures`. `agent.health` se acepta incluso
+  desde tokens restringidos a datasets.
+- **Dirección de las alertas de Suricata**: el `src_ip` de una alerta EVE sigue al paquete que coincidió. En alertas de dirección de
+  respuesta (`direction: to_client`, p. ej. ATTACK_RESPONSE), el lado que abrió la conexión pasa a ser el atacante (origen). El
+  `target` de la regla tiene prioridad, y si `metadata.attack_target` de ET es `Client_Endpoint` no se intercambia. La decisión queda
+  en las etiquetas `suricata.direction` / `suricata.attribution` / `suricata.swapped`; la dirección original queda en `raw`.
 
 ## API de ingesta (envío directo e integración con aplicaciones LLM)
 

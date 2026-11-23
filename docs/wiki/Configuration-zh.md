@@ -140,6 +140,10 @@ deception:
 | `agent.interval_seconds` | 10 | 主机传感器的采集间隔 |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | 要接入的日志 |
 | `agent.verify_tls` | true | 校验服务器的 TLS 证书 |
+| `agent.send_cmdline` | true | 发送进程的命令行（机密在发送前遮盖）。false 时只发送名称、可执行文件和用户 |
+| `agent.max_connections_per_cycle` | 1000 | 每个周期发送的新连接上限（超出部分顺延到下一个周期） |
+| `agent.log_timezone` | 无 | 不带偏移的日志时间的时区（`Asia/Tokyo`・`+09:00`・`UTC`）。未设置时视为 UTC 并警告 |
+| `agent.health_report_seconds` | 300 | 报告无法读取的行／时间的最短间隔（`agent.health` 事件） |
 
 ### 通知（`notify.*`）、Copilot（`copilot.*`）
 

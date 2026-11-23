@@ -110,6 +110,24 @@ uv run tokiwa agent run --server-url http://tokiwa.example.internal:8788 \
 - 读取其他用户的进程信息时，可能需要相当于 root 的权限。
 - 端口首次快照中发现的监听，在默认设置（`agent.ports_first_snapshot: info`）下会以严重级别“信息”记录
   （设为 `learn` 则不记录，只作为基准学习）。此后出现新的监听时就会被检测到。
+- **命令行**：监听／连接所属进程的命令行在发送前由代理遮盖其中的机密（`--password X`・`--api-key X` 等名称表明是机密的参数、
+  `mysql -pX`・`redis-cli -a X`・`sshpass -p X`・`curl -u user:X`・`smbclient -U user%X` 等常见工具的选项、`*_KEY=X` 等环境变量赋值、
+  URL 中的凭据）。程序名、选项名和路径会保留。作为位置参数传入的密码等可能不会被遮盖，因此在把机密放进参数的主机上，建议设置
+  `TOKIWA_AGENT__SEND_CMDLINE=false`（只发送名称、可执行文件和用户）。作为参数传入的蜜罐令牌也会被遮盖，不会参与欺骗匹配。
+- **新连接上限**：一个周期内的新连接超过 `agent.max_connections_per_cycle`（默认 1000）时，优先发送已建立、出站、进程可知的连接，
+  其余不丢弃而是顺延到下一个周期。超出情况可通过端口快照的标签 `connections_truncated` 和检测 `sensor.connections_truncated`（中）
+  得知（用于对抗用大量伪连接掩盖 C2 的手法）。
+- **nginx 日志格式**：请使用 `log_format ... escape=json`（`lab/nginx/tokiwa-json.conf`）。没有 `escape=json` 时，`"` 会被写成
+  `\x22`，不是合法的 JSON。代理会解码后摄取，但会发出警告。
+- **日志时间**：带偏移的时间（ISO 8601 的 `+09:00` / `Z`、`$time_local` 等）最可靠。不带偏移的时间（自定义格式、Caddy 的 `wall` 等）
+  按 `agent.log_timezone`（例如 `Asia/Tokyo`・`+09:00`・`UTC`）解释。未设置时视为 UTC 并对其数量发出警告（JST 的日志会偏差 9 小时）。
+  无效值会在启动时报错。
+- **无法读取的行**：无法作为 JSON 读取的行和无法解释的时间会被计数，第一次立即、此后最短每 `agent.health_report_seconds`
+  （默认 300 秒）输出警告日志并发送 `agent.health` 事件。存在无法读取的行时会产生检测 `sensor.log_parse_failures`。
+  即使令牌限定了 dataset，也会接受 `agent.health`。
+- **Suricata 告警的方向**：EVE 告警的 `src_ip` 是所匹配数据包的方向。对于响应方向（`direction: to_client`，例如 ATTACK_RESPONSE）的告警，
+  把发起连接的一方作为攻击者（来源）。规则有 `target` 时优先使用；ET 的 `metadata.attack_target` 为 `Client_Endpoint` 时不交换。
+  判断结果保留在标签 `suricata.direction` / `suricata.attribution` / `suricata.swapped` 中，原始方向保留在 `raw` 中。
 
 ## 摄取 API（直接发送、LLM 应用集成）
 
