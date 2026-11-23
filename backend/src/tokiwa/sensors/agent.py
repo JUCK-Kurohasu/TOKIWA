@@ -68,6 +68,7 @@ class Agent:
                 collect_connections=cfg.connections,
                 max_connections=cfg.max_connections_per_cycle,
                 ignore_ephemeral_udp=cfg.udp_ignore_ephemeral,
+                send_cmdline=cfg.send_cmdline,
             )
         self.host_sensor = host_sensor
         ctx = ParseContext(sensor_id=self.sensor_id, host=HostInfo(name=hostname))

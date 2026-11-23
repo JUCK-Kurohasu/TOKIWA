@@ -370,6 +370,9 @@ class AgentSettings(BaseModel):
     max_connections_per_cycle: int = 1000
     # Skip unconnected UDP sockets on ephemeral ports (client sockets; would make PORT_CHANGE noisy).
     udp_ignore_ephemeral: bool = True
+    # Send the command line of socket-owning processes (audit #70). Secrets in argv (--password X, -pX,
+    # curl -u user:pass, NAME_KEY=X ...) are masked on the host first; false sends only name / exe / user.
+    send_cmdline: bool = True
     # Where log tailing starts on first open: "end" (only new lines) or "beginning" (replay the file).
     log_start_at: Literal["end", "beginning"] = "end"
     log_poll_seconds: float = 1.0

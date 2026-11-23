@@ -36,6 +36,7 @@ from tokiwa.schemas.events import (
     PortInfo,
     ProcessInfo,
 )
+from tokiwa.sensors.cmdline import mask_argv
 from tokiwa.sensors.normalize import normalize_ip
 from tokiwa.util import utcnow
 
@@ -98,6 +99,7 @@ class HostSensor:
         max_connections: int = 1000,
         ignore_ephemeral_udp: bool = True,
         ephemeral_range: tuple[int, int] | None = None,
+        send_cmdline: bool = True,
         psutil_module: Any = psutil,
     ) -> None:
         self.hostname = hostname or socket.gethostname()
@@ -108,6 +110,9 @@ class HostSensor:
         # reporting them as listeners would make PORT_CHANGE noisy. Trade-off: a UDP backdoor bound to an
         # ephemeral port is missed — disable via AgentSettings if that matters more.
         self.ignore_ephemeral_udp = ignore_ephemeral_udp
+        # Audit #70: argv often carries passwords; it is masked (cmdline.mask_argv + redact_text) and can be
+        # withheld entirely (name / exe / user are still sent).
+        self.send_cmdline = send_cmdline
         self._ps = psutil_module
         self._seen_conns: set[tuple[str, str, int, str, int]] | None = None
         self._ephemeral = ephemeral_range or _ephemeral_range()
@@ -140,14 +145,19 @@ class HostSensor:
             proc = ps.Process(pid)
             values: dict[str, Any] = {}
             with proc.oneshot():
-                for attr in ("name", "exe", "cmdline", "username"):
+                attrs = (
+                    ("name", "exe", "cmdline", "username")
+                    if self.send_cmdline
+                    else ("name", "exe", "username")
+                )
+                for attr in attrs:
                     try:
                         values[attr] = getattr(proc, attr)()
                     except (ps.AccessDenied, ps.ZombieProcess):
                         self.degraded.add("process_details")
                         values[attr] = None
-            cmd = values.get("cmdline")
-            cmdline = " ".join(str(c) for c in cmd) if isinstance(cmd, list | tuple) else cmd
+            cmd = values.get("cmdline") if self.send_cmdline else None
+            cmdline = mask_argv(cmd) if isinstance(cmd, list | tuple | str) and cmd else None
             cmdline = redact_text(cmdline) if cmdline else None
             info = ProcessInfo(
                 pid=pid,
