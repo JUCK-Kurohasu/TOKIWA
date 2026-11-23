@@ -117,6 +117,18 @@ Content-Type のパラメータを `;` 区切りの `name=value` として解析
 backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で Content-Type 不明なら最大 high、
 2xx で HTML なら SPA のフォールバックとみなし昇格しない（`details.exposure` に理由）。
 
+### 2.1 リクエスト形状の異常（`detect/detectors/web_anomaly.py`）
+
+署名では見えない「検査から隠す・見た目を偽る」形のリクエスト。Gate が捕捉しきれなかったときに付けるタグ・ラベル
+（`gate/capture.py`・`gate/app.py`）を入力に使うので、ヘッダ全体を見られない他のセンサー（アクセスログ等）では大半が鳴らない。
+アラートの `details.signatures` に指標 ID が入るので、誤検知マーク（§5.1）は指標単位で効く。fingerprint は `rule|ip|最も重い指標`。
+**どれも low / medium で、単独では送信元 IP の遮断提案の根拠にならない**（ルールベースのトリアージが対処を提案するのは high 以上。
+medium は LLM トリアージ（`triage.min_severity_for_llm` 既定 medium）に乗り、low はインシデントの起点にはなりうる）。
+
+| id | 意図 | MITRE | 重大度 | 指標（`details.signatures`） |
+|---|---|---|---|---|
+| `web.header_anomaly` | ヘッダ数の異常・非リストヘッダの重複（#140） | T1190 | low / medium | `header_anomaly.count`（ヘッダ行数が `header_count_low`（既定 40）超で low、`header_count_medium`（既定 64）超で medium）, `header_anomaly.capture_dropped`(medium: Gate が 64 名に収まらず記録しなかったヘッダがある = `gate.headers_dropped`), `header_anomaly.rejected`(medium: `gate.max_request_headers` 超で 431 = `gate:too_many_headers`), `header_anomaly.duplicate_framing`(medium: Host / Content-Length / Transfer-Encoding の重複), `header_anomaly.duplicate`(low: User-Agent・Referer・X-Real-IP 等の重複 = `gate.duplicate_headers`)。ヘッダ数は Gate が捕捉を打ち切ったときの `gate.header_count`（実数）、それ以外は記録したヘッダ名の数（同名の繰り返しは畳まれるので過小になりうる）。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らない |
+
 ## 3. レート / 振る舞い検知器（`ctx.window`, 送信元 IP ごと, イベント時刻基準）
 
 | id | 意図 | MITRE | 既定重大度 | 条件（既定値） |
@@ -139,6 +151,7 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 | `max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる。#89 で 3 → 8） |
 | `inspect_custom_headers` | true | アプリ固有ヘッダ（`header_custom`）を注入系の検知器でも検査する（#53）。false で従来の挙動（既知の反射ヘッダだけ） |
 | `extra_framing_headers` | `[]` | 注入系の検知器で検査しないヘッダ名の追加（小文字。末尾 `*` で前方一致、例 `x-internal-*`）。値が不透明・自動生成のヘッダで誤検知するときに使う。Log4Shell 等は引き続き検査する |
+| `header_count_low` / `header_count_medium` | 40 / 64 | `web.header_anomaly` のヘッダ行数のしきい値（超えたら low / medium。0 でその段を無効）。ブラウザは 10〜25 行程度（Client Hints を全部要求すると増える）、CDN・ロードバランサが 1 段ごとに数行足す |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |
 | `login_path_regex` | login, signin, auth, session, token, wp-login.php, xmlrpc.php, j_security_check ... | ログイン系パス（大小無視）。不正/2000 文字超の正規表現は既定値にフォールバック |
 | `credential_window_seconds` / `_fail_statuses` / `_min_failures` / `_min_unique_users` | 300 / [401, 403] / 10 / 4 | credential_stuffing |

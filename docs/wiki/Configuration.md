@@ -98,6 +98,7 @@ deception:
 | `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 署名検知の検査上限。個数の上限を超えたパラメータ・ヘッダ・JSON の値・multipart のパートは捨てずにまとめて検査する。文字数の上限を超えた部分は検査しない。上限に達するとアラートの `details.inspection_truncated` とタグ `inspection-truncated` に残り、上限の手前が詰め物（同じ文字の繰り返し・空のダミー要素）なら `web.inspection_evasion`（low）が出る |
 | `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | アプリ固有のヘッダ（X-Tenant-Id など）も SQLi・XSS・トラバーサル・コマンド注入の検査対象にする。Accept・Sec-*・If-*・トレース系などのフレーミング系ヘッダは対象外で、`extra_framing_headers` に名前（末尾 `*` で前方一致）を足すと除外を増やせる。false で以前の挙動（User-Agent・Referer・X-Forwarded-* などだけ） |
 | `web.max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードを繰り返す最大回数（多重エンコード対策。値が変わらなくなった時点で止まる） |
+| `web.header_count_low` / `web.header_count_medium` | 40 / 64 | 1 リクエストのヘッダ行数がこれを超えたら `web.header_anomaly` を low / medium で出す（ヘッダを大量に足して検知に要るヘッダを捕捉から押し出す手口の検出）。ブラウザは 10〜25 行程度で、CDN やロードバランサが 1 段ごとに数行足す。正規のリクエストで鳴るなら上げる。0 でその段を無効 |
 
 ### トリアージ・相関（`triage.*`）
 

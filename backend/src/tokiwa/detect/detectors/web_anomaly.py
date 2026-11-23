@@ -1,0 +1,169 @@
+"""Request-shape anomalies that the signature detectors cannot see: the request is built to hide from inspection.
+
+These detectors read what the Gate records about a request it could not capture completely (tags / labels set
+by ``tokiwa.gate.capture``), plus the parts of the request itself that only make sense as evasion:
+
+* ``web.header_anomaly`` (audit #140) - far more header lines than a client sends (padding to push headers out
+  of the sensor's capture), or one of the non-list headers (Host, Content-Length ...) sent twice.
+
+Each alert carries ``details.signatures`` (indicator ids), ``location`` and ``param`` like the ``web.*``
+signature alerts, so marking one false positive suppresses that indicator only (``detect.suppress.match_of``).
+Severities stay at low / medium: these say "something was hidden or disguised", not what. Rule-based triage
+proposes response actions only from high, so none of these alone puts the source IP on a block proposal.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from tokiwa.detect.base import Detector, register_detector
+from tokiwa.detect.context import DetectionContext
+from tokiwa.detect.web_common import HttpView, clean_label, get_view, web_settings
+from tokiwa.schemas.alerts import AlertCategory, AlertDraft
+from tokiwa.schemas.common import Severity
+from tokiwa.schemas.events import Event, EventKind
+
+_M, _L = Severity.MEDIUM, Severity.LOW
+
+# Gate tags / labels (tokiwa.gate.capture / tokiwa.gate.app). Read as data: the Gate is the only sensor that sees
+# the raw header block, an access log or another sensor simply never sets them.
+TAG_HEADERS_TRUNCATED = "gate:headers_truncated"
+TAG_TOO_MANY_HEADERS = "gate:too_many_headers"
+TAG_DUPLICATE_HEADER = "gate:duplicate_header"
+LABEL_HEADER_COUNT = "gate.header_count"  # header lines received (set when the capture was truncated)
+LABEL_HEADERS_DROPPED = "gate.headers_dropped"  # lines whose names did not fit the 64 recorded names
+LABEL_DUPLICATE_HEADERS = "gate.duplicate_headers"  # non-list headers that arrived more than once
+
+# Duplicates of these decide where a request goes or where it ends: RFC 9112 requires a 400 for several Host
+# lines and rejecting differing Content-Length values, so a front end and a back end that pick different copies
+# route or frame the request differently (request smuggling / routing confusion).
+FRAMING_DUPLICATES = frozenset({"host", "content-length", "transfer-encoding"})
+MAX_NAMES_SAMPLE = 8
+
+
+def _draft(
+    det: Detector,
+    event: Event,
+    view: HttpView,
+    found: list[tuple[Severity, str, str]],
+    *,
+    location: str,
+    param: str | None,
+    extra: dict[str, Any],
+    confidence: float = 0.6,
+) -> list[AlertDraft]:
+    """One alert from (severity, indicator id, human label) findings; the most severe drives the title."""
+    found = sorted(found, key=lambda f: f[0].rank, reverse=True)
+    severity, top, label = found[0]
+    ids = list(dict.fromkeys(f[1] for f in found))
+    details: dict[str, Any] = {
+        "matched": label,
+        "signature": top,
+        "signatures": ids,
+        "location": location,
+        "param": param,
+        "indicators": [{"signature": f[1], "severity": f[0].value, "detail": f[2]} for f in found],
+        "method": view.method,
+        "status": view.status,
+    }
+    details.update(extra)
+    return [
+        det.draft(
+            event,
+            title=f"{det.name}: {label}"[:200],
+            description=det.description,
+            severity=severity,
+            confidence=round(min(0.9, confidence + 0.05 * (len(ids) - 1)), 2),
+            entities=view.entities(param),
+            tags=list(dict.fromkeys(["web", det.id.removeprefix("web."), *ids])),
+            fingerprint=f"{det.id}|{event.source_ip or '-'}|{top}",
+            details=details,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------------------------------------
+# web.header_anomaly (audit #140)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def header_line_count(event: Event) -> tuple[int, bool]:
+    """(header lines, exact). The Gate records the exact count only when it had to cut the capture; otherwise the
+    recorded names / arrival order are the best estimate (repeats of one name are folded, so it can be low)."""
+    raw = (event.labels or {}).get(LABEL_HEADER_COUNT, "")
+    if raw.isdigit():
+        return int(raw), True
+    http = event.http
+    if http is None:
+        return 0, False
+    return max(len(http.headers), len(http.header_order)), False
+
+
+@register_detector
+class HeaderAnomalyDetector(Detector):
+    id = "web.header_anomaly"
+    name = "Abnormal request headers"
+    description = (
+        "Far more header lines than browsers and HTTP libraries send (padding that pushes headers out of the "
+        "sensor's capture: the Gate records 64 names and refuses more than gate.max_request_headers lines), or a "
+        "non-list header such as Host or Content-Length sent twice (front end and application may read "
+        "different copies). Compare the recorded headers with the request the application logged."
+    )
+    category = AlertCategory.ANOMALY
+    kinds = frozenset({EventKind.HTTP})
+    mitre = ("T1190",)
+    default_severity = _L
+
+    async def process(self, event: Event, ctx: DetectionContext) -> list[AlertDraft]:
+        view = get_view(event, ctx)
+        if view is None or event.http is None:
+            return []
+        cfg = web_settings(ctx.settings)
+        tags = set(event.tags)
+        labels = event.labels or {}
+        count, exact = header_line_count(event)
+        dropped_raw = labels.get(LABEL_HEADERS_DROPPED, "")
+        dropped = int(dropped_raw) if dropped_raw.isdigit() else 0
+        found: list[tuple[Severity, str, str]] = []
+
+        if TAG_TOO_MANY_HEADERS in tags:
+            found.append((_M, "header_anomaly.rejected", "header lines over the Gate limit (431)"))
+        if dropped > 0:
+            found.append(
+                (_M, "header_anomaly.capture_dropped", f"{count} header lines, {dropped} not recorded")
+            )
+        if cfg.header_count_medium and count > cfg.header_count_medium:
+            found.append((_M, "header_anomaly.count", f"{count} header lines"))
+        elif cfg.header_count_low and count > cfg.header_count_low:
+            found.append((_L, "header_anomaly.count", f"{count} header lines"))
+
+        duplicates = [
+            d.strip().lower() for d in labels.get(LABEL_DUPLICATE_HEADERS, "").split(",") if d.strip()
+        ]
+        if duplicates or TAG_DUPLICATE_HEADER in tags:
+            shown = ", ".join(clean_label(d, 40) for d in duplicates[:8]) or "?"
+            if any(d in FRAMING_DUPLICATES for d in duplicates):
+                found.append((_M, "header_anomaly.duplicate_framing", f"duplicate {shown}"))
+            else:
+                found.append((_L, "header_anomaly.duplicate", f"duplicate {shown}"))
+        if not found:
+            return []
+
+        names = event.http.header_order or list(event.http.headers)
+        return _draft(
+            self,
+            event,
+            view,
+            found,
+            location="header",
+            param=None,
+            extra={
+                "header_count": count,
+                "header_count_exact": exact,
+                "headers_dropped": dropped,
+                "headers_truncated": TAG_HEADERS_TRUNCATED in tags,
+                "duplicate_headers": duplicates[:16],
+                # attacker-chosen names: a short, printable sample of the tail (the padding is usually there)
+                "header_names_sample": [clean_label(n, 40) for n in names[-MAX_NAMES_SAMPLE:]],
+            },
+        )

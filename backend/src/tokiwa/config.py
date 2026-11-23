@@ -159,6 +159,11 @@ class WebDetectionSettings(BaseModel):
     inspect_custom_headers: bool = True
     # More header names those detectors skip (framing / opaque values); a trailing "*" matches a prefix.
     extra_framing_headers: list[str] = Field(default_factory=list)
+    # web.header_anomaly (audit #140): header lines per request. Browsers send about 10-25 (more with every client
+    # hint requested), each CDN / load balancer hop adds a few. Over ``header_count_low`` = low alert, over
+    # ``header_count_medium`` (the Gate records 64 names) = medium. 0 turns that tier off.
+    header_count_low: int = Field(default=40, ge=0, le=4096)
+    header_count_medium: int = Field(default=64, ge=0, le=4096)
     # web.error_burst: 4xx storm from one source (directory brute force)
     error_burst_window_seconds: float = 60.0
     error_burst_min_errors: int = 30
