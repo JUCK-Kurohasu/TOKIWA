@@ -125,6 +125,27 @@ uv run tokiwa agent run --server-url http://tokiwa.example.internal:8788 \
 - 他ユーザーのプロセス情報を読むには root 相当の権限が必要になる場合があります。
 - ポートの初回スナップショットで見つかった待ち受けは、既定（`agent.ports_first_snapshot: info`）では重大度「情報」として
   記録されます（`learn` にすると記録せずに基準として覚えるだけ）。以後、新しい待ち受けが現れると検知されます。
+- **コマンドライン**: 待ち受け・接続のプロセスのコマンドラインは、送信前にエージェント側で秘密を伏字にします
+  （`--password X`・`--api-key X` など名前で分かる引数、`mysql -pX`・`redis-cli -a X`・`sshpass -p X`・`curl -u user:X`・
+  `smbclient -U user%X` など代表的なツールのオプション、`*_KEY=X` などの環境変数代入、URL 中の資格情報）。プログラム名・
+  オプション名・パスは残します。位置引数で渡したパスワードなどは伏字にならないことがあるため、引数に秘密を置くホストでは
+  `TOKIWA_AGENT__SEND_CMDLINE=false`（名前・実行ファイル・ユーザーだけを送る）を推奨します。引数で渡したハニートークンも伏字になり、
+  デセプションの照合には掛かりません。
+- **新しい接続の上限**: 1 周期の新しい接続が `agent.max_connections_per_cycle`（既定 1000）を超えると、確立済み・外向き・
+  プロセスの分かる接続から先に送り、残りは捨てずに次の周期へ回します。超過はポートのスナップショットのラベル
+  `connections_truncated` と検知 `sensor.connections_truncated`（中）で分かります（大量のダミー接続で C2 を隠す手口への対策）。
+- **nginx のログ書式**: `log_format ... escape=json` を使ってください（`lab/nginx/tokiwa-json.conf`）。`escape=json` が無いと
+  `"` が `\x22` と書かれて JSON として不正になります。エージェントは復号して取り込みますが、警告を出します。
+- **ログの時刻**: オフセット付き（ISO 8601 の `+09:00` / `Z`、`$time_local` など）が確実です。オフセットの無い時刻（独自書式、
+  Caddy の `wall` など）は `agent.log_timezone`（例 `Asia/Tokyo`・`+09:00`・`UTC`）で解釈します。未設定だと UTC とみなし、
+  その件数を警告します（JST のログなら 9 時間ずれます）。不正な値は起動時にエラーになります。
+- **読めなかった行**: JSON として読めない行・解釈できない時刻は数えられ、最初はすぐ、以後は最短 `agent.health_report_seconds`
+  （既定 300 秒）ごとに警告ログと `agent.health` イベントを送ります。読めない行があると検知 `sensor.log_parse_failures` が出ます。
+  `agent.health` は dataset を縛ったトークンでも受け付けられます。
+- **Suricata のアラートの向き**: EVE のアラートの `src_ip` は一致したパケットの向きです。応答方向（`direction: to_client`、
+  例: ATTACK_RESPONSE）のアラートでは、接続を始めた側を攻撃者（送信元）にします。ルールの `target` があればそれを優先し、
+  ET の `metadata.attack_target` が `Client_Endpoint` なら入れ替えません。判断はラベル `suricata.direction` /
+  `suricata.attribution` / `suricata.swapped` に、元の向きは `raw` に残ります。
 
 ## 取り込み API（直接送信・LLM アプリ連携）
 

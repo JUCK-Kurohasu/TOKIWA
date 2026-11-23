@@ -32,10 +32,10 @@
 |---|---|---|---|
 | **Gate**（`gate.http`） | 来源 / 目标的 IP 与端口、方法、Host、路径、查询、请求头（最多 64 种；用于检测的请求头无论位置都会保留）及其顺序、User-Agent、Referer、Content-Type、**文本类请求体的前 `gate.capture_body_bytes`（默认 4,096）字节**、请求体大小、状态码、响应大小与 Content-Type、处理时间 | `llm.redaction.sensitive_headers` 中请求头的值（`Authorization`、`Cookie` 等），以及下文“会被遮盖”的项目 | 响应正文、响应头（Content-Type 除外）、二进制请求体（只记录大小）、超过 64 种的请求头（只保留标签 `gate:headers_truncated` 和请求头数量） |
 | **Gate 的诱饵响应**（`gate.deception`） | 与上面相同的 HTTP 内容再记录一条（包括输入到诱饵登录表单中的值） | 同上 | 同上（这些请求不会转发给受保护的应用） |
-| **nginx / Caddy**（`nginx.access` / `caddy.access`） | 来源 IP 与端口、方法、Host、路径、查询、日志中包含的请求头、状态码、大小、处理时间、原始日志行（`raw`，脱敏后，最多 4 KB） | 请求头的值（同上）、`password`、`token`、`cookie` 等键的值，以及下文“会被遮盖”的项目 | 请求体（访问日志中不包含） |
-| **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 连接（IP、端口、字节数、状态）、HTTP（路径、查询、UA、Referer、状态码）、notice、原始行（`raw`，最多 4 KB） | `password` 等键的值，以及下文“会被遮盖”的项目 | 上述 3 种以外的日志。另外，`http.log` 的 **`username` 列不在遮盖范围内**，会原样保留在 `raw` 中 |
+| **nginx / Caddy**（`nginx.access` / `caddy.access`） | 来源 IP 与端口、方法、Host、路径、查询、日志中包含的请求头、状态码、大小、处理时间、原始日志行（`raw`，脱敏后，最多 4 KB） | 请求头的值（同上）、`password`、`token`、`cookie` 等键的值、认证用户名（nginx `remote_user`、Caddy `user_id`），以及下文“会被遮盖”的项目 | 请求体（访问日志中不包含） |
+| **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 连接（IP、端口、字节数、状态）、HTTP（路径、查询、UA、Referer、状态码）、notice、原始行（`raw`，最多 4 KB） | `password`、`username` 等键的值，以及下文“会被遮盖”的项目 | 上述 3 种以外的日志 |
 | **Suricata**（`suricata.eve`） | `alert` / `http` / `flow` / `dns` 记录（IP 与端口、HTTP 的路径、查询和请求头、DNS 的查询名与应答）、原始 EVE 记录（`raw`，最多 4 KB） | 请求头的值、按键名遮盖，以及下文“会被遮盖”的项目 | `tls`、`fileinfo`、`stats` 等其他类型。如果 EVE 配置为输出载荷（payload），其内容可能在 4 KB 范围内进入 `raw` |
-| **主机传感器**（`host.ports` / `host.connections`） | 主机名、主机 IP（最多 32 个）、OS、监听套接字、新的 TCP 连接（双方的 IP 与端口），以及相应进程的名称、可执行文件、命令行（最多 512 个字符）、OS 用户名 | 命令行中 `password=...` 形式的值等 | —（作为普通参数传入的密码可能不会被遮盖） |
+| **主机传感器**（`host.ports` / `host.connections`） | 主机名、主机 IP（最多 32 个）、OS、监听套接字、新的 TCP 连接（双方的 IP 与端口），以及相应进程的名称、可执行文件、命令行（最多 512 个字符）、OS 用户名 | 命令行中的机密（`password=...` 形式、`--password X`・`--api-key X` 等名称表明是机密的参数、`mysql -pX`・`redis-cli -a X`・`curl -u user:X` 等常见工具的选项、`*_KEY=X` 等环境变量赋值） | 设置 `agent.send_cmdline=false` 时完全不发送命令行（默认遮盖后发送；作为位置参数传入的密码等可能不会被遮盖） |
 | **接收 API**（直接发送） | 所发送事件的全部内容 | **无**（服务器不做脱敏） | — |
 | **欺骗防御的触发记录** | 被触碰的资产、来源 IP、事件 ID、路径、方法、UA、陷阱值（TOKIWA 生成的伪造值）以及该值出现的字段名 | — | —（删除资产后触发记录仍会保留） |
 

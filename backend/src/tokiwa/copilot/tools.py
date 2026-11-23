@@ -46,6 +46,7 @@ from tokiwa.schemas.events import EventKind
 from tokiwa.schemas.intel import MatchStatus
 from tokiwa.schemas.response import ActionStatus
 from tokiwa.schemas.triage import ActionType
+from tokiwa.sensors.cmdline import mask_argv
 from tokiwa.util import ensure_utc, utcnow
 
 log = logging.getLogger(__name__)
@@ -519,6 +520,8 @@ def event_brief(row: EventRow) -> dict[str, Any]:
             }
         )
     out["process"] = _pick(d.get("process"), ("pid", "name", "cmdline", "username"))
+    if out["process"] and isinstance(out["process"].get("cmdline"), str):  # #70: events from older agents
+        out["process"]["cmdline"] = mask_argv(out["process"]["cmdline"])
     return _prune(out)
 
 

@@ -144,6 +144,10 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `agent.interval_seconds` | 10 | Host sensor collection interval |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | Logs to ingest |
 | `agent.verify_tls` | true | Verify the server's TLS certificate |
+| `agent.send_cmdline` | true | Send process command lines (secrets masked before sending). false: only name, executable and user |
+| `agent.max_connections_per_cycle` | 1000 | New connections sent per cycle (the overflow goes to the next cycle) |
+| `agent.log_timezone` | none | Time zone of log timestamps without an offset (`Asia/Tokyo`, `+09:00`, `UTC`). Unset: read as UTC with a warning |
+| `agent.health_report_seconds` | 300 | Minimum interval for reporting unreadable lines / timestamps (`agent.health` event) |
 
 ### Notifications (`notify.*`) and Copilot (`copilot.*`)
 

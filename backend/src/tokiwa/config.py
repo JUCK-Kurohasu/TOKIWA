@@ -382,9 +382,18 @@ class AgentSettings(BaseModel):
     max_connections_per_cycle: int = 1000
     # Skip unconnected UDP sockets on ephemeral ports (client sockets; would make PORT_CHANGE noisy).
     udp_ignore_ephemeral: bool = True
+    # Send the command line of socket-owning processes (audit #70). Secrets in argv (--password X, -pX,
+    # curl -u user:pass, NAME_KEY=X ...) are masked on the host first; false sends only name / exe / user.
+    send_cmdline: bool = True
     # Where log tailing starts on first open: "end" (only new lines) or "beginning" (replay the file).
     log_start_at: Literal["end", "beginning"] = "end"
     log_poll_seconds: float = 1.0
+    # Time zone of log timestamps written without a UTC offset (audit #131), e.g. "Asia/Tokyo", "+09:00", "UTC".
+    # Unset: they are read as UTC and counted (agent.health event / warning). Offsets in the log always win.
+    log_timezone: str | None = None
+    # A log source with unparseable lines / timestamps is reported (warning + agent.health event) at once, then
+    # at most every N seconds with the counts in between.
+    health_report_seconds: float = 300.0
     # Shipper: events per POST (server max 5000), in-memory buffer cap while the server is unreachable.
     batch_size: int = 500
     max_buffer_events: int = 50_000
@@ -397,6 +406,14 @@ class AgentSettings(BaseModel):
     scan_window_seconds: float = 60.0
     scan_port_threshold: int = 20  # distinct destination ports from one source within the window
     scan_host_threshold: int = 10  # distinct destination hosts from one source within the window
+
+    @field_validator("log_timezone")
+    @classmethod
+    def _valid_log_timezone(cls, v: str | None) -> str | None:
+        from tokiwa.sensors.tz import resolve_timezone  # stdlib-only module
+
+        resolve_timezone(v)  # a typo must fail at startup, not silently mean UTC
+        return v
 
 
 class NotifySettings(BaseModel):

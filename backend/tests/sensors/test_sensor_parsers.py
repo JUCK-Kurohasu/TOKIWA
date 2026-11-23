@@ -148,6 +148,9 @@ def test_zeek_logs(variant: str) -> None:
     # credentials logged by Zeek's http.log never leave the host
     dumped = _dump(http)
     assert "s3cr3tpass" not in dumped and "letmein" not in dumped
+    # ... and neither do the account names (personal data, #169)
+    assert '"alice"' not in dumped and '"bob"' not in dumped
+    assert h.raw is not None and h.raw.get("username") == "[REDACTED:secret]"
 
     if variant == "zeek":
         assert len(conn) == 2
@@ -227,3 +230,18 @@ def test_normalize_helpers() -> None:
     assert parse_ts("1792663200123") is not None  # milliseconds
     assert parse_ts("garbage") is None
     assert parse_ts("-") is None
+
+
+@pytest.mark.usefixtures("settings")
+def test_http_auth_user_names_are_masked_in_raw() -> None:
+    nginx = NginxJsonParser(CTX).parse(
+        '{"time_iso8601":"2026-10-22T10:00:00+00:00","remote_addr":"203.0.113.9","remote_user":"alice",'
+        '"request_method":"GET","request_uri":"/admin","status":"401"}'
+    )
+    caddy = CaddyJsonParser(CTX).parse(
+        '{"ts":1729591200.5,"user_id":"bob","request":{"remote_ip":"203.0.113.7","method":"GET","uri":"/"}}'
+    )
+    dumped = _dump(nginx + caddy)
+    assert '"alice"' not in dumped and '"bob"' not in dumped
+    assert nginx[0].raw is not None and nginx[0].raw["remote_user"] == "[REDACTED:secret]"
+    assert nginx[0].http is not None and nginx[0].http.path == "/admin"  # detection fields untouched

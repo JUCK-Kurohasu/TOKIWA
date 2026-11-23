@@ -145,6 +145,10 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `agent.interval_seconds` | 10 | Intervalo de recopilación del sensor de host |
 | `agent.nginx_json_logs` / `caddy_json_logs` / `suricata_eve_logs` / `zeek_log_dirs` | `[]` | Logs que se ingieren |
 | `agent.verify_tls` | true | Verificar el certificado TLS del servidor |
+| `agent.send_cmdline` | true | Enviar la línea de comandos de los procesos (secretos enmascarados antes del envío). false: solo nombre, ejecutable y usuario |
+| `agent.max_connections_per_cycle` | 1000 | Conexiones nuevas enviadas por ciclo (el exceso pasa al ciclo siguiente) |
+| `agent.log_timezone` | ninguno | Zona horaria de las horas de log sin desplazamiento (`Asia/Tokyo`, `+09:00`, `UTC`). Sin configurar: UTC con aviso |
+| `agent.health_report_seconds` | 300 | Intervalo mínimo para informar de líneas / horas ilegibles (evento `agent.health`) |
 
 ### Notificaciones (`notify.*`) y copiloto (`copilot.*`)
 
