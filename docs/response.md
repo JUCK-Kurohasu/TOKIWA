@@ -100,6 +100,11 @@ proposed ──approve──▶ approved ──executor 成功──▶ active �
 | notify | IP / CIDR（正規化のみ）または識別子 `[A-Za-z0-9][A-Za-z0-9._:/@-]*` | `channel_id`（32 hex または `default`、任意） | なし（指定は無視・note） |
 | webhook | IP / CIDR（ネットワーク対象と同じ保護チェック）または識別子 | `endpoint` = `response.webhook_urls` のキー（既定 `default`） | なし |
 
+tarpit は **防御側の資源も消費する**（Gate は要求ごとに接続とタスクを最大 30 秒保持する）。Gate は同時に保持する数を
+`gate.tarpit_max_concurrent`（既定 256）/ `gate.tarpit_max_per_client`（同じ IP、既定 8）で制限し、超えた分には 429 を返す。
+待っている間にクライアントが切断すれば保持をやめる（監査 #99。docs/gate.md §2）。共有 IP（NAT）や大量の IP に tarpit を
+かけるより、rate_limit / block_ip の方が安い場面が多い。
+
 ネットワーク対象の拒否条件:
 - IP/CIDR として解釈できない（ホスト名・空白・`;`・スコープ ID `%` 等）。
 - `min_prefix_v4`（16）/ `min_prefix_v6`（48）より広い（`0.0.0.0/0` 等）。

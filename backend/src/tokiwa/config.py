@@ -351,6 +351,18 @@ class GateSettings(BaseModel):
     flush_interval_seconds: float = 1.0
     policy_refresh_seconds: float = 5.0
     trust_forwarded_for: bool = False
+    # Requests with more header lines than this are answered 431 instead of being forwarded (events keep at most
+    # 64 header names, so the rest would reach the upstream unseen). Apache's LimitRequestFields default. 0 = off.
+    max_request_headers: int = Field(default=100, ge=0)
+    # Client-address / scheme / routing headers (Forwarded, X-Real-IP, CF-Connecting-IP, X-Original-URL, ...) are
+    # removed before forwarding, so a client cannot claim another address to the upstream. List the ones a
+    # trusted proxy in front of the Gate sets and the upstream reads (e.g. ["cf-connecting-ip"] behind Cloudflare)
+    # to pass them through unchanged. Case-insensitive.
+    forward_client_headers: list[str] = Field(default_factory=list)
+    # Tarpit holds each matching request for up to 30 s. Requests beyond these many held at once (in total / per
+    # client IP) get 429 instead of a slot, so a flood of fire-and-forget requests cannot pile up in the Gate. 0 = no cap.
+    tarpit_max_concurrent: int = Field(default=256, ge=0)
+    tarpit_max_per_client: int = Field(default=8, ge=0)
 
 
 class AgentSettings(BaseModel):

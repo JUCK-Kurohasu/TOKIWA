@@ -25,7 +25,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from email.utils import formatdate
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from starlette.applications import Starlette
@@ -36,10 +38,12 @@ from starlette.routing import Mount, Route
 from tokiwa.config import GateSettings, RedactionSettings, get_settings
 from tokiwa.gate.capture import BodyCapture, EventBuilder, Exchange, mime_type
 from tokiwa.gate.netmatch import parse_ip
-from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager
+from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager, path_anomalies
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
+    HTTPX_FRAMING,
     LEGACY_POSITIONS,
+    ROUTE_OVERRIDE_HEADERS,
     Headers,
     UpstreamTarget,
     decode_content,
@@ -48,6 +52,7 @@ from tokiwa.gate.proxy import (
     inject_html,
     raw_path_of,
     strip_hop_by_hop,
+    stripped_client_headers,
 )
 from tokiwa.gate.ratelimit import TokenBucketLimiter
 from tokiwa.gate.shipper import EventShipper
@@ -65,6 +70,7 @@ HEALTH_PATH = "/__tokiwa/health"
 BLOCKED_BODY = b"Forbidden\n"
 RATE_LIMITED_BODY = b"Too Many Requests\n"
 WEBSOCKET_BODY = b"Not Implemented: WebSocket is not supported by this gateway\n"
+TOO_MANY_HEADERS_BODY = b"Request Header Fields Too Large\n"
 BAD_GATEWAY_BODY = b"Bad Gateway\n"
 GATEWAY_TIMEOUT_BODY = b"Gateway Timeout\n"
 GENERIC_404 = (
@@ -72,6 +78,8 @@ GENERIC_404 = (
     b"<body><h1>Not Found</h1><p>The requested URL was not found on this server.</p></body></html>\n"
 )
 _NO_INJECT_STATUS = frozenset({204, 206, 304})
+# Request body held in memory while a tarpitted request waits (watching for a disconnect reads the body too).
+TARPIT_BUFFER_BYTES = 64 * 1024
 _DECOY_HEADER_DENY = HOP_BY_HOP | {b"content-length", b"content-encoding", b"content-type", b"date"}
 
 
@@ -118,6 +126,8 @@ class Gate:
         self.target = UpstreamTarget(settings.upstream)
         opts = self.options
         # trust_env=False: never route upstream/server traffic through HTTP(S)_PROXY from the environment.
+        # cookies=_no_cookie_jar(): one client serves every visitor, and httpx would otherwise store each upstream
+        # Set-Cookie and add it to the next request that carries no Cookie header -- someone else's session.
         self.upstream_client = httpx.AsyncClient(
             transport=upstream_transport,
             timeout=httpx.Timeout(opts.upstream_timeout, connect=opts.upstream_connect_timeout),
@@ -127,8 +137,11 @@ class Gate:
             ),
             follow_redirects=False,
             trust_env=False,
+            cookies=_no_cookie_jar(),
         )
-        self.server_client = httpx.AsyncClient(transport=server_transport, timeout=10.0, trust_env=False)
+        self.server_client = httpx.AsyncClient(
+            transport=server_transport, timeout=10.0, trust_env=False, cookies=_no_cookie_jar()
+        )
         self.policy = PolicyManager(
             self.server_client,
             settings.server_url,
@@ -148,8 +161,15 @@ class Gate:
             sensor_id=settings.sensor_id,
             capture_body_bytes=settings.capture_body_bytes,
             redaction=redaction or get_settings().llm.redaction,
+            # The server's deception settings, when this process shares its config (else the default name).
+            priority_headers=(get_settings().deception.canary_header,),
+        )
+        self._pass_through = frozenset(
+            h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
         self._sleep = sleep
+        self._tarpit_active = 0  # requests currently held by the tarpit (#99)
+        self._tarpit_per_client: Counter[str] = Counter()
         self.counters: Counter[str] = Counter()
         self._tasks: list[asyncio.Task[None]] = []
         self._upstream_server: bytes | None = None  # mimicked on gate-generated responses
@@ -278,6 +298,12 @@ class Gate:
         ip = parse_ip(ex.client_ip)
         if policy.version is not None:
             ex.labels["gate.policy"] = policy.version
+        anomalies = path_anomalies(ex.path)
+        if (
+            anomalies
+        ):  # ;params, NUL, backslash, double encoding ...: only a lenient upstream resolves these (#54)
+            ex.tag("gate:path_anomaly")
+            ex.labels["gate.path_anomaly"] = ",".join(anomalies)
 
         blocked = policy.blocked.lookup(ip)
         if blocked is not None:
@@ -318,16 +344,107 @@ class Gate:
             delay_ms = min(tarpit[1], TARPIT_MAX_MS)
             ex.tag("gate:tarpit")
             ex.labels["gate.tarpit_ms"] = str(delay_ms)
-            await self._sleep(delay_ms / 1000.0)
+            key = ex.client_ip or "unknown"
+            if not self._tarpit_acquire(key):
+                # Holding more of this client's requests would cost the Gate more than the client (#99).
+                ex.tag("gate:tarpit_overflow")
+                ex.labels["gate.action"] = "tarpit_overflow"
+                retry = str(max(1, delay_ms // 1000)).encode()
+                await self._respond(
+                    send, ex, 429, RATE_LIMITED_BODY, b"text/plain; charset=utf-8", [(b"retry-after", retry)]
+                )
+                return
+            try:
+                waited = await self._tarpit_wait(receive, delay_ms / 1000.0)
+            finally:
+                self._tarpit_release(key)
+            if waited is None:  # the client hung up while held: nothing left to answer or forward
+                ex.tag("gate:client_disconnect")
+                ex.labels["gate.action"] = "client_disconnect"
+                ex.status = 499
+                return
+            receive = waited
 
         decoy = policy.decoys.match(ex.path)
+        override = _route_override_path(ex)
+        if override is not None:
+            # X-Original-URL & co. never reach the upstream (gate.proxy strips them), but asking for a decoy
+            # through them is the same probe as asking for it directly: answer with the decoy (audit #147).
+            ex.tag("gate:route_override")
+            if decoy is None:
+                decoy = policy.decoys.match(override)
         deceived = policy.deceive.lookup(ip) is not None
         if decoy is not None or deceived:
             await self._serve_decoy(receive, send, ex, decoy, deceived)
             return
 
+        max_headers = self.settings.max_request_headers
+        if max_headers > 0 and len(ex.raw_headers) > max_headers:
+            # The event keeps at most MAX_CAPTURED_HEADERS names: never forward more than the SOC can see (#140).
+            ex.tag("gate:too_many_headers")
+            ex.labels["gate.action"] = "too_many_headers"
+            await self._respond(send, ex, 431, TOO_MANY_HEADERS_BODY, b"text/plain; charset=utf-8")
+            return
+
         ex.labels["gate.action"] = "proxy"
         await self._proxy(scope, receive, send, ex, policy)
+
+    # -------------------------------------------------------------------------------------------- tarpit
+    def _tarpit_acquire(self, key: str) -> bool:
+        s = self.settings
+        if s.tarpit_max_concurrent and self._tarpit_active >= s.tarpit_max_concurrent:
+            return False
+        if s.tarpit_max_per_client and self._tarpit_per_client[key] >= s.tarpit_max_per_client:
+            return False
+        self._tarpit_active += 1
+        self._tarpit_per_client[key] += 1
+        return True
+
+    def _tarpit_release(self, key: str) -> None:
+        self._tarpit_active -= 1
+        self._tarpit_per_client[key] -= 1
+        if self._tarpit_per_client[key] <= 0:
+            del self._tarpit_per_client[key]
+
+    async def _tarpit_wait(self, receive: Receive, seconds: float) -> Receive | None:
+        """Hold the request for ``seconds`` unless the client disconnects first (then None).
+
+        Watching for ``http.disconnect`` means calling ``receive()``, which also yields request-body chunks; those
+        are kept (up to TARPIT_BUFFER_BYTES) and replayed by the returned ``receive`` so the body still reaches
+        the capture and the upstream. Past that bound the wait finishes without disconnect detection.
+        """
+        buffered: list[Message] = []
+        size = 0
+        sleeper = asyncio.ensure_future(self._sleep(seconds))
+        pending: asyncio.Future[Message] | None = None
+        try:
+            while not sleeper.done():
+                if size > TARPIT_BUFFER_BYTES:
+                    await sleeper
+                    break
+                pending = asyncio.ensure_future(receive())
+                await asyncio.wait({sleeper, pending}, return_when=asyncio.FIRST_COMPLETED)
+                if not pending.done():
+                    break  # slept the full delay; the receive() in flight is cancelled below
+                message = pending.result()
+                pending = None
+                if message.get("type") == "http.disconnect":
+                    return None
+                buffered.append(message)
+                size += len(message.get("body", b""))
+        finally:
+            for fut in (pending, sleeper):
+                if fut is not None and not fut.done():
+                    fut.cancel()
+        if not buffered:
+            return receive
+
+        async def replay() -> Message:
+            if buffered:
+                return buffered.pop(0)
+            return await receive()
+
+        return replay
 
     # -------------------------------------------------------------------------------------------- decoys
     async def _serve_decoy(
@@ -391,13 +508,26 @@ class Gate:
             preserve_host=self.options.preserve_host,
             upstream_host=self.target.host_header,
             restrict_encoding=policy.html_injection is not None,
+            client_ip=ex.client_ip,
+            pass_through=self._pass_through,
         )
+        stripped = stripped_client_headers(ex.raw_headers, self._pass_through)
+        if stripped:
+            ex.tag(
+                "gate:client_ip_header"
+            )  # the client claimed an address / scheme / route itself (#138/#147)
+            ex.labels["gate.stripped_headers"] = ",".join(stripped)
         content = self._body_stream(receive, ex) if _has_body(ex) else None
         if content is None:
             ex.body.complete = True
         request = self.upstream_client.build_request(
             ex.method, url, headers=headers, content=content, extensions={"target": target}
         )
+        # httpx merges its client defaults (User-Agent: python-httpx, Accept, Accept-Encoding) into every request:
+        # a client that sent none would reach the upstream as the Gate's own library (#149).
+        sent = {k.decode("latin-1") for k, _ in headers}
+        for name in [n for n in request.headers if n not in sent and n not in HTTPX_FRAMING]:
+            del request.headers[name]
         t_upstream = time.perf_counter()
         try:
             response = await self.upstream_client.send(request, stream=True)
@@ -534,7 +664,7 @@ class Gate:
         encoding = b", ".join(v for k, v in headers if k == b"content-encoding").decode("latin-1")
         decoded = decode_content(body, encoding, limit)
         injected = (
-            inject_html(decoded, encode_snippet(snippet, content_type), positions)
+            inject_html(decoded, encode_snippet(snippet, content_type, decoded), positions)
             if decoded is not None
             else None
         )
@@ -572,7 +702,9 @@ class Gate:
         ]
         if mimic_server and self._upstream_server:
             headers.append((b"server", self._upstream_server))
-        if status in (403, 429, 501):
+        # Never let a shared cache / CDN keep an answer meant for one client (a deceive-mode 404, a 502 during an
+        # upstream hiccup) and serve it to everyone else (#148). A decoy's own Cache-Control wins.
+        if not any(k == b"cache-control" for k, _ in extra_headers or ()):
             headers.append((b"cache-control", b"no-store"))
         if extra_headers:
             headers.extend(extra_headers)
@@ -609,6 +741,15 @@ class Gate:
             self._capture(ex)
 
 
+def _no_cookie_jar() -> CookieJar:
+    """A cookie jar that never stores nor sends anything (the Gate is a shared, transparent proxy).
+
+    Passed to httpx as a raw ``CookieJar`` so httpx keeps it (a ``dict`` / ``httpx.Cookies`` would be copied into a
+    default jar without this policy).
+    """
+    return CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
+
+
 async def _raw_chunks(response: httpx.Response) -> AsyncIterator[bytes]:
     """Raw (still content-encoded) body bytes; falls back to the buffered content of a pre-read response."""
     if response.is_stream_consumed:
@@ -622,6 +763,22 @@ async def _raw_chunks(response: httpx.Response) -> AsyncIterator[bytes]:
 def _is_websocket_upgrade(ex: Exchange) -> bool:
     upgrade = (ex.header("upgrade") or "").lower()
     return "websocket" in upgrade
+
+
+def _route_override_path(ex: Exchange) -> str | None:
+    """The path an ``X-Original-URL`` / ``X-Rewrite-URL`` / ``X-Override-URL`` header asks for (decoded once, like
+    ``scope['path']``), or None when the request has none."""
+    for k, v in ex.raw_headers:
+        if k.lower() not in ROUTE_OVERRIDE_HEADERS:
+            continue
+        value = v.decode("latin-1").strip()
+        if "://" in value:
+            try:
+                value = urlsplit(value).path
+            except ValueError:
+                value = ""
+        return unquote(value.split("?", 1)[0].split("#", 1)[0]) or "/"
+    return None
 
 
 def _has_body(ex: Exchange) -> bool:

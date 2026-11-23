@@ -30,7 +30,7 @@ TOKIWA が **何を受け取り、何を保存し、何を外部へ送り、ど�
 
 | センサー（dataset） | 保存するもの | 伏字にするもの | 保存しないもの |
 |---|---|---|---|
-| **Gate**（`gate.http`） | 送信元 / 宛先の IP・ポート、メソッド、Host、パス、クエリ、リクエストヘッダ（先頭 64 個）とその順序、User-Agent、Referer、Content-Type、**テキスト系ボディの先頭 `gate.capture_body_bytes`（既定 4,096）バイト**、ボディのサイズ、ステータス、応答のサイズと Content-Type、処理時間 | `llm.redaction.sensitive_headers` のヘッダ値（`Authorization`・`Cookie` など）と、下の「伏字になるもの」 | 応答の本文、応答ヘッダ（Content-Type 以外）、バイナリのボディ（サイズだけ記録）、65 個目以降のヘッダ |
+| **Gate**（`gate.http`） | 送信元 / 宛先の IP・ポート、メソッド、Host、パス、クエリ、リクエストヘッダ（64 種類まで。検知に使うヘッダは位置に関係なく残す）とその順序、User-Agent、Referer、Content-Type、**テキスト系ボディの先頭 `gate.capture_body_bytes`（既定 4,096）バイト**、ボディのサイズ、ステータス、応答のサイズと Content-Type、処理時間 | `llm.redaction.sensitive_headers` のヘッダ値（`Authorization`・`Cookie` など）と、下の「伏字になるもの」 | 応答の本文、応答ヘッダ（Content-Type 以外）、バイナリのボディ（サイズだけ記録）、64 種類を超えたヘッダ（タグ `gate:headers_truncated` とヘッダ数だけ残る） |
 | **Gate のデコイ配信**（`gate.deception`） | 上と同じ HTTP の内容をもう 1 件（デコイのログインフォームに入力された値も含む） | 同上 | 同上（このリクエストは守りたいアプリへ転送されない） |
 | **nginx / Caddy**（`nginx.access` / `caddy.access`） | 送信元 IP・ポート、メソッド、Host、パス、クエリ、ログに含まれるヘッダ、ステータス、サイズ、処理時間、元のログ行（`raw`。伏字の後、4 KB まで） | ヘッダ値（同上）、`password`・`token`・`cookie` などのキーの値、下の「伏字になるもの」 | リクエストボディ（アクセスログには含まれない） |
 | **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 接続（IP・ポート・バイト数・状態）、HTTP（パス・クエリ・UA・Referer・ステータス）、notice、元の行（`raw`、4 KB まで） | `password` などのキーの値、下の「伏字になるもの」 | 上の 3 種類以外のログ。なお `http.log` の **`username` 列は伏字の対象外** で、`raw` にそのまま残る |

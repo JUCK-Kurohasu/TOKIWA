@@ -79,6 +79,7 @@ class Upstream:
             routes=[
                 Route("/html", self.html),
                 Route("/html-sjis", self.html_sjis),
+                Route("/html-sjis-meta", self.html_sjis_meta),
                 Route("/gzip-html", self.gzip_html),
                 Route("/deflate-html", self.deflate_html),
                 Route("/br-html", self.br_html),
@@ -129,6 +130,14 @@ class Upstream:
         await self._record(request)
         body = "<html><body>こんにちは</body></html>".encode("shift_jis")
         return Response(body, headers={"content-type": "text/html; charset=Shift_JIS"})
+
+    async def html_sjis_meta(self, request: Request) -> Response:
+        """Common on older Japanese sites: no charset in the header, only in the document (audit #146)."""
+        await self._record(request)
+        body = '<html><head><meta charset="Shift_JIS"></head><body>こんにちは</body></html>'.encode(
+            "shift_jis"
+        )
+        return Response(body, headers={"content-type": "text/html"})
 
     async def gzip_html(self, request: Request) -> Response:
         await self._record(request)

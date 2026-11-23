@@ -28,16 +28,20 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | listen_host / listen_port | `--listen host:port` | 0.0.0.0:8080 | `[::]:8080`, `:8080` 可 |
 | server_url | `--server` | http://127.0.0.1:8788 | |
 | token_file | `--token-file` | なし | 変更（mtime/サイズ/inode）時と 401 受信時に読み直す。空・読めないときは直前のトークンを維持 |
-| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示） |
+| ingest_token | `--token-file` / env（`--token` は非推奨） | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示）。`--token` は引数が `ps`・`docker inspect` に見えるので起動時に警告する（監査 #143、docs/deploy.md §4） |
 | sensor_id | `--sensor-id` | gate-1 | イベントの `sensor_id` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 0 で本文捕捉なし |
 | batch_size / flush_interval_seconds | `--batch-size` / `--flush-interval` | 100 / 1.0 | |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ±10% ジッタ |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 信頼できる LB の背後でのみ |
+| max_request_headers | — | 100 | ヘッダ行がこれを超える要求は上流へ転送せず **431**（`gate:too_many_headers`）。0 で無効。Apache の `LimitRequestFields` と同じ既定 |
+| forward_client_headers | — | `[]` | 既定では除去する送信元 IP 系・ルーティング上書きヘッダ（§6）のうち、そのまま上流へ渡すもの。Gate の前段の信頼できるプロキシが付け、上流が読むものだけ（例: Cloudflare 配下で `["cf-connecting-ip"]`） |
+| tarpit_max_concurrent | — | 256 | tarpit で同時に保持する要求の上限（全体）。超えた要求は **429**（`gate:tarpit_overflow`）。0 で無制限 |
+| tarpit_max_per_client | — | 8 | 同じ送信元 IP から同時に保持する要求の上限。超えた要求は 429。0 で無制限 |
 
 `GateSettings` に無い運用ノブ（`GateOptions`、CLI のみ）: `--upstream-timeout`（30s, 接続 5s）、
 `--max-queue`（10000 件）、`--preserve-host/--rewrite-host`（既定は Caddy 同様にクライアントの Host を転送）、
-`--access-log`。HTML 注入上限 2 MiB、デコイ時の本文読み取りタイムアウト 5s はコード定数。
+`--access-log`、`--limit-concurrency`（uvicorn の同時接続・タスク上限。超えると 503。既定は無制限）。HTML 注入上限 2 MiB、デコイ時の本文読み取りタイムアウト 5s はコード定数。
 
 ヘルスチェック: `GET /__tokiwa/health` → `{"status":"ok"}`。ループバック/プライベート IP からは
 ポリシー版・シッパー統計・処理件数も返す（インターネットには内部情報を出さない）。プロキシもイベント化もしない。
@@ -48,24 +52,53 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 2. `blocked` に一致 → **403**（本文を読まずに即応答。タグ `gate:blocked`, label `gate.rule`）
 3. `rate_limited` に一致 → クライアント IP ごとのトークンバケット（容量 N、N/60 個/秒で補充）。空なら **429** + `Retry-After`
 4. WebSocket（`Upgrade: websocket` / websocket scope）→ **501**（v1 は非対応。ログ + `gate:websocket_unsupported`）
-5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）
+5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）。保持中の要求が `tarpit_max_concurrent`（全体）/
+   `tarpit_max_per_client`（同じ IP）に達していれば待たせずに **429** + `Retry-After`（`gate:tarpit_overflow`）。待っている間に
+   クライアントが切断したら、その時点でやめて上流へ転送しない（`gate:client_disconnect`, status 499。監査 #99: 以前は撃ちっ放しの
+   要求でも 30 秒ずつ Gate の資源を保持し、攻撃者より防御側の負担になっていた）。切断の監視中に読んだ本文（64 KiB まで）は
+   そのまま上流・捕捉に渡す
 6. パスが `DecoyRoute` に一致 → デコイを返す（**アップストリームへは一切転送しない**）。HTTP イベント（`gate:decoy`）+
-   `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る
+   `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る。`X-Original-URL` / `X-Rewrite-URL` /
+   `X-Override-URL` の値がデコイに一致する場合も同じ（`gate:route_override`。監査 #147: 上流がこのヘッダでルーティングする構成では
+   要求行を `/static/app.js` にしたままデコイの実体に届いていた）
 7. `deceive` に一致する IP → 全リクエストをデコイで応答。ルール不一致なら汎用 404 デコイ（`gate:decoy_generic`。
    DECEPTION イベントは出さない＝ノイズ回避）
-8. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
+8. ヘッダ行が `max_request_headers` を超える → **431**（イベントに残せるのは 64 名までなので、見えない分を上流へ渡さない）
+9. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
 
 ゲート生成の応答（403/429/デコイ）には直近のアップストリームの `Server` ヘッダを付け、デコイが浮かないようにする。
+ゲート生成の応答には **すべて `Cache-Control: no-store`** を付ける（403/429/431/501 に加え、deceive の汎用 404・デコイ・上流障害の
+502/504。監査 #148: CDN・共有キャッシュの背後で、deceive 中の 1 IP への 404 や一時的な 502 が他の利用者に配られ得た）。
+デコイ自身が `Cache-Control` を持つ場合はそちらを使う。CDN 側で「404 も強制的にキャッシュする」設定（Edge TTL の上書き等）が
+あると `no-store` が無視され得るので、Gate の前に CDN を置く場合は確認すること（TODO(verify): 製品ごとの既定）。
+deceive の汎用 404 に付く `no-store` は、上流の本物の 404 と見比べると差になる（デコイを見破る手掛かりとしては小さい）。
 
 ## 3. 捕捉イベント（`gate.http`）
 
 - `http.method/scheme/host/path/query/headers/header_order/user_agent/referrer/content_type`
+- `headers` は最大 64 名（Web 検知器が見る上限と同じ）。**検知に使うヘッダは位置に関係なく必ず残す**（`gate.capture.PRIORITY_HEADERS`:
+  UA・Referer・Host・Origin・Cookie・Content-*・Accept-*・`Sec-Fetch-*`・Client Hints・`X-Forwarded-*`・`Forwarded`・`X-Real-IP` 等の
+  送信元 IP 系・`X-Original-URL` 等のルーティング上書き・Web 検知器が名前で見るヘッダ・デセプションのカナリアヘッダ）。残りの枠を
+  到着順に使う（監査 #140: ダミーヘッダ 64 個を前に置くと UA 等が消えていた）。同名ヘッダは `, `（Cookie は `; `）で連結し、
+  連結は 8192 文字で打ち切る。`header_order` は到着順で、同じ名前は 2 回まで
 - `request_body`: 先頭 `capture_body_bytes` を UTF-8（置換）で。テキスト系 Content-Type のみ。不明・multipart は内容で判定、
   バイナリはサイズ（`request_body_size`）のみ。多バイト文字の途中で切れた末尾は捨てる
+- `Content-Encoding: gzip` / `x-gzip` / `deflate`（zlib 形式・raw の両方、2 段まで、gzip の複数メンバーも）の要求ボディは、捕捉した
+  先頭を **展開してから** `request_body` に入れる（監査 #141: Express の body-parser 等は展開して処理するのに、検知器は圧縮バイト列を
+  見ていた）。展開後も `capture_body_bytes` で打ち切る（圧縮爆弾対策。展開するのは捕捉した先頭だけ）。`request_body_size` は
+  転送路上の（圧縮された）サイズのまま。上流へは元の圧縮バイト列をそのまま送る
 - `status / response_size / response_content_type / duration_ms`（tarpit 込みのクライアント体感）/ `http_version`
 - `timestamp` = リクエスト到着時刻（AI リズム特徴量用）
-- tags: `gate:blocked|rate_limited|tarpit|decoy|decoy_generic|deceive|html_injected|inject_skipped|upstream_error|client_disconnect|websocket_unsupported|body_timeout`
-- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket）, `gate.rule`, `gate.policy`,
+- tags: `gate:blocked|rate_limited|tarpit|decoy|decoy_generic|deceive|html_injected|inject_skipped|upstream_error|client_disconnect|websocket_unsupported|body_timeout`、
+  `gate:headers_truncated`（64 名を超えた・連結を打ち切った。label `gate.header_count`=受信したヘッダ行数, `gate.headers_dropped`, `gate.headers_clipped`）、
+  `gate:duplicate_header`（Host・Content-Length・User-Agent・`Sec-Fetch-*` などリストでないヘッダが 2 回以上。label `gate.duplicate_headers`）、
+  `gate:too_many_headers`（431）、
+  `gate:req_encoded`（要求ボディを展開した。label `gate.request_encoding`, `gate.request_body_decoded_bytes`）、
+  `gate:req_encoding_unknown`（br・zstd・3 段以上など展開できない符号化。本文は記録しない）、`gate:req_decode_failed`（gzip/deflate と
+  宣言したが壊れている）、`gate:client_ip_header`（§6 で除去したヘッダがあった。label `gate.stripped_headers`）、
+  `gate:route_override`（`X-Original-URL` 等があった）、`gate:path_anomaly`（§5。label `gate.path_anomaly`）、
+  `gate:tarpit_overflow`（tarpit の枠が埋まっていて 429）
+- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers/tarpit_overflow/client_disconnect）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
 **送信前に `tokiwa.llm.redact`** を適用: ヘッダ（`sensitive_headers` は値を丸ごとマスク）、パス、クエリ、Referer、UA、本文。
@@ -102,6 +135,13 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   IPv4-mapped IPv6 は IPv4 に正規化。不正エントリはスキップして WARN。重複時は rate_limited=厳しい方、tarpit=長い方。
 - デコイパス: 完全一致、または `*` 終端で接頭辞一致（最長一致）。照合前に `//` と `.`/`..` を正規化するので
   `/static/../.env` でも回避できない。`*` / `/*` のような全体デコイは拒否（サイト全体を乗っ取るため）。
+  さらに照合キー（`gate.policy.match_key`）では、**どこかの上流が同じファイルとみなす変形** も同じデコイに当てる（監査 #54）:
+  2 回目のパーセントデコード（`%252e`）、`\`（`%5c`）を `/` に、各セグメントの NUL・`;` 以降を除去（`/.env;x`、`/x/..;/.env`、
+  `config.php%3b.css`）、ドットセグメント解決の後に末尾のドット・空白と NTFS の `::$DATA` を除去、**大文字小文字を区別しない**、
+  末尾 `/` の有無を区別しない（`/admin/*` は `/admin` にも一致）。上流へ送る要求ターゲットは従来どおり生のまま。
+  照合キーがルート（`/`）になる完全一致ルート（`/;x` など）も拒否する。`;`・NUL・`\`・二重エンコード・不正な UTF-8・末尾ドット・
+  `::$` を含むパスはタグ `gate:path_anomaly`（label `gate.path_anomaly` に理由）。overlong UTF-8（`%c0%ae`）は `.` として扱わない
+  （`invalid_utf8` の印だけ）。サーバー側の検証・保存（`normalize_path`、docs/deception.md）は大文字小文字を保つ。
 - デコイヘッダ: hop-by-hop・Content-Length/Type/Encoding・Date・CR/LF を含むものは除外。
 
 ## 6. プロキシの挙動
@@ -111,17 +151,36 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 - `X-Forwarded-For/Proto/Host`: `trust_forwarded_for=false` ならクライアント送信値を **破棄してゲートの観測値で置換**
   （ゲート経由で上流に IP を偽装させない）。`true` なら既存チェーンに実ピアを追記し、送信元 IP は **右端** の有効 IP
   （信頼 LB が付けた値。左端はクライアントが自由に書ける）。
+- それ以外の送信元 IP・スキーム・ルーティングの申告（`Forwarded`, `X-Real-IP`, `True-Client-IP`, `CF-Connecting-IP`, `X-Client-IP`,
+  `X-Cluster-Client-IP`, `Fastly-Client-IP`, `X-Originating-IP`, `Client-IP`, `X-Original-Forwarded-For`, `X-Forwarded-Port/Prefix/Server/Scheme/Ssl`,
+  `Front-End-Https`, `X-Url-Scheme`, `X-Original-URL`, `X-Rewrite-URL`, `X-Override-URL`。`gate.proxy.STRIPPED_CLIENT_HEADERS`）は
+  **除去** し（監査 #138/#147。以前は X-Forwarded-For/Proto/Host 以外は素通しで、上流が `X-Real-IP` や `Forwarded` を読む構成では
+  クライアントが任意の IP・https を名乗れた）、Gate が `X-Real-IP: <送信元 IP>` と `Forwarded: for=<送信元 IP>;proto=...;host=...`（1 要素）を
+  付ける。送信元 IP は Gate がイベントに記録するのと同じ値（`trust_forwarded_for=true` なら X-Forwarded-For の右端）。`Forwarded` は
+  X-Forwarded-For のチェーンから組み立てない（左側はクライアントが書けるので `1.2.3.4;proto=https` で引数を足せてしまう）。
+  除去したヘッダ名はイベントに `gate:client_ip_header` + label `gate.stripped_headers` として残り、値自体も `http.headers` に残る。
+  前段の信頼できるプロキシが付けたヘッダを上流が読む構成では `forward_client_headers` に列挙する（列挙したものは除去せず、
+  `x-real-ip` / `forwarded` を列挙すると Gate は自分の値を付けない）。
+- クライアントが送っていないヘッダを足さない（監査 #149）: httpx が既定で付ける `User-Agent: python-httpx/...`・`Accept`・
+  `Accept-Encoding` を送信前に取り除く（UA なしのクライアントが上流のログ・WAF で Gate 自身に見えていた）。付けるのは
+  Host・ボディのフレーミング・Connection と、上記の Gate 自身のヘッダだけ。
 - リクエストターゲットは生のまま転送（httpcore `target` 拡張。httpx の `..` 正規化を避け nginx の `proxy_pass` URI なしと同等）。
   イベントの `path` もクライアントが実際に送った値。
 - 本文はストリーミング転送しつつ先頭だけ捕捉。上流障害 **502**、タイムアウト **504**、応答途中の障害は接続中断。
 - `Set-Cookie` 等の重複ヘッダを保持。uvicorn は `server_header/date_header/proxy_headers` 無効で起動（上流の値を転送）。
+- 上流クライアントはクッキーを一切保存・送信しない（全訪問者で 1 つの httpx クライアントを共有するため。保存すると上流の
+  `Set-Cookie` が Cookie を送らない別の訪問者の要求に付いてしまう）。
 
 ### HTML カナリア注入
 対象: `text/html`、HEAD 以外、204/206/304 以外、宣言サイズ ≤ 2 MiB。gzip/deflate は解凍して注入し非圧縮で返す
 （`Content-Encoding`/`ETag`/`Content-MD5`/`Digest` を削除、`Content-Length` 再計算）。br/zstd・多重エンコード・破損・
 展開後 2 MiB 超（圧縮爆弾対策）・`</body>` 無し → 無加工で通す（`gate:inject_skipped`）。注入が有効な間は
 `Accept-Encoding` を gzip/deflate/identity に絞り、br を使うクライアントでも注入できるようにする。
-スニペットは `Content-Type` の charset でエンコード（表せない文字は数値文字参照）。
+スニペットは文書の文字コードでエンコード（表せない文字は数値文字参照）: UTF-8 の BOM → `Content-Type` の charset →
+先頭 1024 バイト内の `<meta charset>` / `<meta http-equiv="Content-Type" content="...; charset=...">` の順（監査 #146: ヘッダに charset が
+無く `<meta charset=Shift_JIS>` だけのページに日本語の注記を UTF-8 で入れて文字化けしていた）。どれでも決まらない・未知の名前のときは
+**ASCII だけ**（日本語はすべて `&#NNNN;`）で書く。どの ASCII 互換の文字コードでも同じに読めるが、`head` 位置の HTML コメント内の
+文字参照はブラウザでは展開されない（生の HTML を読む AI には読める）。
 
 ## 7. 性能（ラボ, `backend/scripts/bench_gate.py`）
 
@@ -146,6 +205,10 @@ uv run python scripts/bench_gate.py [--duration 10 --concurrency 32 --inject --p
 - 単一プロセス（uvicorn workers=1）前提。レートリミット状態はプロセス内メモリ（LRU 10 万キー。溢れたキーは満タンから
   再開＝fail-open 側）。複数ワーカー/複数ゲートでは IP ごとの上限が台数倍になる。
 - 捕捉は**リクエスト**本文のみ。応答本文は保存しない（サイズと型のみ）。
+- 上流が **要求ボディを展開するか**（例: Express の body-parser、ASP.NET Core の RequestDecompression。対応する符号化は製品・版による。
+  TODO(verify): 版ごとの br 対応）を
+  確認すること。Gate は br・zstd を展開できない（`gate:req_encoding_unknown` だけ残る）ので、上流がそれらを展開する構成では
+  圧縮ボディ内の攻撃は検知されない。
 - 本文の redact は正規表現ベース。未知形式の秘密は残りうる。`capture_body_bytes=0` で本文捕捉を止められる。
 - `trust_forwarded_for` は信頼 LB が 1 段の構成を想定（右端 1 個を採用）。多段構成は未対応。
 - `/__tokiwa/health` の詳細は RFC1918 等の「プライベート」判定（Python `ipaddress.is_private`）に依存。

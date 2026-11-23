@@ -53,10 +53,14 @@ docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --s
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # ホストセンサー（ホストのポート・プロセスを見るため host の PID / ネットワーク名前空間を使う）
+# トークンは権限 600 の env ファイル /etc/tokiwa/agent.env（中身は TOKIWA_AGENT__INGEST_TOKEN=tkw_... の 1 行）で渡す
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **API トークンを `--token tkw_...` のようにコマンドライン引数で渡さないでください。** 引数は同じホストのほかのユーザーにも `ps` で、
+  Docker の管理者には `docker inspect` で見えます。Gate は `--token-file`（変更時に読み直します）、Agent は環境変数
+  `TOKIWA_AGENT__INGEST_TOKEN`（`--env-file` や compose の `.env`）を使います。手順は `docs/deploy.md` §4 にあります。
 - HTTP を持たないロール（agent / sim）は `TOKIWA_HEALTHCHECK_URL=none` を付けます。Gate のヘルスチェックは
   `http://127.0.0.1:8080/__tokiwa/health` です。
 - Agent は他ユーザーのプロセス情報を読むのに root 相当の権限が要る場合があります（イメージは非 root）。

@@ -68,20 +68,35 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | upstream | `--upstream` | `http://127.0.0.1:3000` | 転送先。パス接頭辞も可（`http://app/base`） |
 | listen | `--listen host:port` | `0.0.0.0:8080` | 待ち受けアドレス |
 | server_url | `--server` | `http://127.0.0.1:8788` | TOKIWA サーバー |
-| ingest_token | `--token` / `--token-file` | なし | スコープ `ingest` と `gate` が必要 |
+| ingest_token | `--token-file`（`--token` は `ps` で見えるので使わない） | なし | スコープ `ingest` と `gate` が必要。環境変数 `TOKIWA_GATE__INGEST_TOKEN` でも可 |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕捉するリクエストボディの先頭バイト数（0 で捕捉しない） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ポリシーを取りに行く間隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |
+| max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431（0 で無効） |
+| forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 既定では除去するヘッダ（下記）のうち、そのまま上流へ渡すもの |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit で同時に保持する要求の上限（全体 / 同じ IP）。超えた要求は 429（0 で無制限） |
 
 CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue`（送信待ちイベントの上限 10,000 件）、
-`--preserve-host / --rewrite-host`、`--access-log`。
+`--preserve-host / --rewrite-host`、`--access-log`、`--limit-concurrency`（同時接続の上限。超えると 503。既定は無制限）。
 
 ### 知っておくべき挙動
 
 - **`--trust-forwarded-for` は信頼できるロードバランサの背後でのみ** 使ってください。付けないと、クライアントが送った
   `X-Forwarded-*` は捨てられ、Gate が観測した値に置き換えられます（送信元 IP の偽装を防ぐため）。
+- `X-Real-IP`・`Forwarded`・`True-Client-IP`・`CF-Connecting-IP` など、送信元 IP・スキームを名乗るほかのヘッダと、`X-Original-URL` /
+  `X-Rewrite-URL` は **上流へ渡しません**。代わりに Gate が `X-Real-IP` と `Forwarded` に自分が判定した送信元 IP を付けます。
+  Cloudflare などの前段が付けるヘッダを上流が読む場合は、`forward_client_headers` に列挙してください（例: `["cf-connecting-ip"]`）。
+  クライアントが送っていない `User-Agent` などを Gate が補うこともありません。
+- デコイの照合は大文字小文字・末尾の `/` や `.`・`;` 以降・`%5c`（`\`）・二重エンコードの違いを同じパスとみなします
+  （`/.ENV` や `/.env;x` も `/.env` のデコイに当たります）。こうした変形を含むパスにはタグ `gate:path_anomaly` が付きます。
+- Gate 自身が返す応答（遮断の 403、デコイ、上流障害の 502/504 など）には `Cache-Control: no-store` を付けます。Gate の前に CDN を
+  置く場合は、CDN が 404 などを強制的にキャッシュする設定になっていないか確認してください。
+- `Content-Encoding: gzip` / `deflate` の要求ボディは展開してから記録します（タグ `gate:req_encoded`。上流には圧縮したまま送ります）。
+  br・zstd は展開できず、タグ `gate:req_encoding_unknown` だけが残ります。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、
   `password=` などのパラメータ値、トークン・鍵・メールアドレスなど）。
+- イベントに残すリクエストヘッダは 64 種類までです。User-Agent・Referer・`Sec-Fetch-*`・`X-Forwarded-*` など検知に使うヘッダは
+  位置に関係なく必ず残し、超えた分はタグ `gate:headers_truncated` とヘッダ数（label `gate.header_count`）で分かるようにします。
 - **fail-open**: TOKIWA サーバーが止まっても、Gate のプロキシは止まりません（イベントは一時的に溜めて再送します）。
 - **fail-static**: ポリシーが取れないときは最後のポリシーを維持します（サーバーを落として遮断を外させる、という抜け道を作らないため）。ただし各遮断の期限（TTL）は Gate 側でも守り、期限を過ぎたものは外します。
 - ヘルスチェック: `GET /__tokiwa/health` → `{"status":"ok"}`。ローカル／プライベート IP からは送信統計なども返します。

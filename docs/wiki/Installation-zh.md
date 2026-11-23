@@ -53,10 +53,14 @@ docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --s
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # 主机传感器（为了查看主机的端口和进程，使用 host 的 PID / 网络命名空间）
+# 令牌通过权限为 600 的 env 文件 /etc/tokiwa/agent.env 传入（内容为一行 TOKIWA_AGENT__INGEST_TOKEN=tkw_...）
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **不要像 `--token tkw_...` 这样通过命令行参数传递 API 令牌。** 同一主机上的其他用户可以通过 `ps` 看到参数，
+  Docker 管理员也可以通过 `docker inspect` 看到。Gate 请使用 `--token-file`（文件变化时会重新读取），Agent 请使用环境变量
+  `TOKIWA_AGENT__INGEST_TOKEN`（`--env-file` 或 compose 的 `.env`）。具体步骤见 `docs/deploy.md` §4。
 - 没有 HTTP 的角色（agent / sim）需要加上 `TOKIWA_HEALTHCHECK_URL=none`。Gate 的健康检查地址是
   `http://127.0.0.1:8080/__tokiwa/health`。
 - Agent 读取其他用户的进程信息时，可能需要相当于 root 的权限（镜像以非 root 运行）。

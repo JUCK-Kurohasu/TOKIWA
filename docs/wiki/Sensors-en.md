@@ -69,20 +69,35 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | upstream | `--upstream` | `http://127.0.0.1:3000` | Where to forward requests. A path prefix is also allowed (`http://app/base`) |
 | listen | `--listen host:port` | `0.0.0.0:8080` | Listen address |
 | server_url | `--server` | `http://127.0.0.1:8788` | TOKIWA server |
-| ingest_token | `--token` / `--token-file` | None | Requires the `ingest` and `gate` scopes |
+| ingest_token | `--token-file` (avoid `--token`: visible in `ps`) | None | Requires the `ingest` and `gate` scopes. The environment variable `TOKIWA_GATE__INGEST_TOKEN` also works |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Number of leading bytes of the request body to capture (0 disables capture) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | How often to pull the policy |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |
+| max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
+| forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Headers normally removed (see below) to pass to the upstream unchanged |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Max requests held by the tarpit at once (in total / per IP); requests beyond get 429 (0 = no cap) |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),
-`--preserve-host / --rewrite-host`, `--access-log`.
+`--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (cap on concurrent connections; 503 beyond it; unlimited by default).
 
 ### Behavior you should know about
 
 - **Use `--trust-forwarded-for` only behind a trusted load balancer**. Without it, `X-Forwarded-*` headers sent by the client
   are discarded and replaced with the values the Gate observed (to prevent source IP spoofing).
+- Other headers that claim a client address or scheme (`X-Real-IP`, `Forwarded`, `True-Client-IP`, `CF-Connecting-IP`, ...) and `X-Original-URL` /
+  `X-Rewrite-URL` are **not passed to the upstream**. Instead, the Gate sets `X-Real-IP` and `Forwarded` to the client address it determined.
+  If your upstream reads a header that a front proxy such as Cloudflare sets, list it in `forward_client_headers` (e.g. `["cf-connecting-ip"]`).
+  The Gate also never adds a `User-Agent` or similar header that the client did not send.
+- Decoy matching treats differences in case, a trailing `/` or `.`, anything after `;`, `%5c` (`\`) and double encoding as the same path
+  (`/.ENV` and `/.env;x` also hit a `/.env` decoy). Paths containing such variations get the tag `gate:path_anomaly`.
+- Responses the Gate generates itself (403 for blocks, decoys, 502/504 on upstream failures, ...) carry `Cache-Control: no-store`. If a CDN sits in front of the Gate,
+  check that it is not configured to force-cache 404s and similar responses.
+- Request bodies with `Content-Encoding: gzip` / `deflate` are recorded decompressed (tag `gate:req_encoded`; the upstream still gets the compressed bytes).
+  br and zstd cannot be decompressed; only the tag `gate:req_encoding_unknown` is recorded.
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,
   parameter values such as `password=`, tokens, keys, email addresses, and so on).
+- Events keep up to 64 distinct request headers. Headers used for detection (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
+  are always kept wherever they appear; anything beyond is visible as the tag `gate:headers_truncated` with the header count (label `gate.header_count`).
 - **fail-open**: If the TOKIWA server goes down, the Gate keeps proxying (events are buffered temporarily and resent).
 - **fail-static**: If the Gate cannot fetch the policy, it keeps the last policy (so that taking the server down does not become a loophole for lifting blocks). Each block's own expiry (TTL) is still honoured by the Gate: entries past it are lifted.
 - Health check: `GET /__tokiwa/health` → `{"status":"ok"}`. Requests from local / private IPs also get send statistics and more.

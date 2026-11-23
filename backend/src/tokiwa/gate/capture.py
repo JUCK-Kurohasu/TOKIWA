@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import codecs
 import time
+import zlib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -22,7 +24,108 @@ from tokiwa.util import utcnow
 
 DATASET_HTTP = "gate.http"
 DATASET_DECEPTION = "gate.deception"
+# Distinct header names kept per event. The web detectors inspect the first 64 entries of ``http.headers``
+# (``detect.web_common.MAX_HEADERS``), so a larger map would hide its tail from them anyway.
 MAX_CAPTURED_HEADERS = 64
+# Repeats of one name recorded in ``header_order`` (enough to show "sent twice" without letting one repeated
+# header fill the list).
+MAX_ORDER_REPEATS = 2
+# Repeated header lines are joined into one value; the join stops growing here (one header sent 10,000 times).
+MAX_JOINED_HEADER_CHARS = 8192
+
+# Captured wherever they appear in the request (audit #140): before, only the first 64 header lines were kept,
+# so 64 dummy headers in front made User-Agent, Referer, Sec-Fetch-* ... vanish from the event while the
+# upstream still received them. These are the headers detectors, deception provenance (``Sec-Fetch-*``,
+# Origin, Referer), the respond auto-approval guard, client fingerprints and AI attribution read, plus every
+# header the Gate strips or rewrites before forwarding (spoofing attempts stay visible). Kept well below
+# MAX_CAPTURED_HEADERS so the arrival-order tail still has room.
+PRIORITY_HEADERS = frozenset(
+    {
+        # identity of the client / request framing
+        "host",
+        "user-agent",
+        "referer",
+        "origin",
+        "cookie",
+        "authorization",
+        "proxy-authorization",
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "connection",
+        # fingerprints (aidetect STABLE_FINGERPRINT_HEADERS) and header anomalies
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "dnt",
+        "sec-gpc",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "x-requested-with",
+        # fetch metadata: deception provenance / respond auto-approval guard (audit #133)
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-dest",
+        "sec-fetch-user",
+        "sec-purpose",
+        "purpose",
+        # client address / scheme claims (stripped or rewritten by gate.proxy, audit #138)
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-forwarded-port",
+        "x-forwarded-prefix",
+        "x-forwarded-server",
+        "x-forwarded-scheme",
+        "x-forwarded-ssl",
+        "front-end-https",
+        "x-url-scheme",
+        "x-original-forwarded-for",
+        "x-real-ip",
+        "true-client-ip",
+        "cf-connecting-ip",
+        "x-client-ip",
+        "x-cluster-client-ip",
+        "fastly-client-ip",
+        "x-originating-ip",
+        "client-ip",
+        # routing / method overrides (stripped by gate.proxy, audit #147)
+        "x-original-url",
+        "x-rewrite-url",
+        "x-override-url",
+        "x-http-method-override",
+        "x-http-method",
+        "x-method-override",
+        # payload carriers the web detectors inspect by name (detect.web_common.INJECTABLE_HEADERS)
+        "x-api-version",
+        "x-wap-profile",
+    }
+)
+# Header fields that are not lists (RFC 9110 §5.3): a request carrying one of them twice is malformed, and the
+# upstream may read either copy (Host / Content-Length disagreement is the classic smuggling and routing trick).
+SINGLETON_HEADERS = frozenset(
+    {
+        "host",
+        "content-length",
+        "content-type",
+        "user-agent",
+        "referer",
+        "origin",
+        "authorization",
+        "x-forwarded-host",
+        "x-real-ip",
+        "true-client-ip",
+        "cf-connecting-ip",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-dest",
+        "x-original-url",
+        "x-rewrite-url",
+    }
+)
 
 _TEXT_MIME_EXACT = frozenset(
     {
@@ -96,6 +199,89 @@ def decode_prefix(prefix: bytes, truncated: bool) -> str:
     return codecs.getincrementaldecoder("utf-8")(errors="replace").decode(prefix, final=not truncated)
 
 
+def body_text(data: bytes, truncated: bool, content_type: str | None) -> str | None:
+    """Decoded text of a (prefix of a) textual body; None for binary or empty bodies."""
+    if not data:
+        return None
+    kind = classify_content_type(content_type)
+    if kind is False or (kind is None and not looks_textual(data[:512])):
+        return None
+    return decode_prefix(data, truncated)
+
+
+# Request Content-Encoding the Gate undoes before capture (audit #141). Upstreams such as Express body-parser or
+# ASP.NET Core's request decompression inflate these, so a compressed SQLi reached the app but not the detectors.
+_REQUEST_CODINGS: dict[str, tuple[int, ...]] = {
+    "gzip": (16 + zlib.MAX_WBITS,),
+    "x-gzip": (16 + zlib.MAX_WBITS,),
+    "deflate": (zlib.MAX_WBITS, -zlib.MAX_WBITS),  # zlib-wrapped (correct) or raw (common in the wild)
+}
+MAX_REQUEST_CODINGS = 2  # "gzip, gzip" is decoded; deeper stacks are reported as unknown
+
+
+@dataclass(slots=True)
+class DecodedBody:
+    data: bytes
+    truncated: bool
+    codings: tuple[str, ...] = ()  # the codings listed in Content-Encoding (minus identity)
+    # identity | decoded | unknown (unsupported coding) | failed (corrupt stream) | empty (nothing captured)
+    status: str = "identity"
+
+
+def _inflate(data: bytes, wbits: int, limit: int) -> tuple[bytes, bool] | None:
+    """Inflate at most ``limit`` output bytes. Returns (output, incomplete) or None when ``data`` is not this format.
+
+    Concatenated gzip members are one valid gzip stream (and inflated as such by upstreams), so every member is
+    read: a harmless first member must not hide the payload in the second.
+    """
+    out = bytearray()
+    rest = data
+    while True:
+        d = zlib.decompressobj(wbits)
+        try:
+            out += d.decompress(rest, limit - len(out))
+        except zlib.error:
+            return (bytes(out), True) if out else None
+        if len(out) >= limit and (d.unconsumed_tail or not d.eof):
+            return bytes(out[:limit]), True  # output limit reached: the decompression-bomb guard
+        if not d.eof:
+            return bytes(out), True  # the captured compressed prefix ends mid-stream
+        rest = d.unused_data
+        if not rest or wbits != 16 + zlib.MAX_WBITS or len(out) >= limit:
+            return bytes(out), bool(rest)
+
+
+def decode_request_body(
+    prefix: bytes, content_encoding: str | None, limit: int, truncated: bool
+) -> DecodedBody:
+    """Undo the request's ``Content-Encoding`` on the captured prefix, producing at most ``limit`` bytes.
+
+    Only the prefix is inflated and the output is capped at the capture limit, so neither a decompression bomb
+    nor a large compressed body costs more than ``capture_body_bytes`` of work and memory.
+    """
+    codings = tuple(
+        c for c in (p.strip().lower() for p in (content_encoding or "").split(",")) if c and c != "identity"
+    )
+    if not codings:
+        return DecodedBody(prefix, truncated)
+    if not prefix or limit <= 0:  # nothing captured (and limit 0 would mean "unlimited" to zlib)
+        return DecodedBody(prefix, truncated, codings, "empty")
+    if len(codings) > MAX_REQUEST_CODINGS or any(c not in _REQUEST_CODINGS for c in codings):
+        return DecodedBody(prefix, truncated, codings, "unknown")
+    data = prefix
+    for coding in reversed(codings):  # the last listed coding was applied last
+        result = None
+        for wbits in _REQUEST_CODINGS[coding]:
+            result = _inflate(data, wbits, limit)
+            if result is not None:
+                break
+        if result is None:
+            return DecodedBody(prefix, truncated, codings, "failed")
+        data, incomplete = result
+        truncated = truncated or incomplete
+    return DecodedBody(data, truncated, codings, "decoded")
+
+
 class BodyCapture:
     """Keeps the first ``limit`` bytes of a streamed body and counts the total size."""
 
@@ -125,28 +311,70 @@ class BodyCapture:
 
     def text(self, content_type: str | None) -> str | None:
         """Decoded prefix for textual bodies; None for binary or empty bodies (size is still recorded)."""
-        if not self._buf:
-            return None
-        kind = classify_content_type(content_type)
-        if kind is False or (kind is None and not looks_textual(bytes(self._buf[:512]))):
-            return None
-        return decode_prefix(bytes(self._buf), self.truncated)
+        return body_text(bytes(self._buf), self.truncated, content_type)
 
 
-def capture_headers(raw: list[tuple[bytes, bytes]]) -> tuple[dict[str, str], list[str]]:
-    """Lower-cased header map (duplicates joined with ", ") + arrival order (incl. repeats) for fingerprinting."""
-    headers: dict[str, str] = {}
-    order: list[str] = []
-    for name_b, value_b in raw[:MAX_CAPTURED_HEADERS]:
-        name = name_b.decode("latin-1").lower()
-        value = value_b.decode("latin-1")
-        order.append(name)
+@dataclass(slots=True)
+class HeaderCapture:
+    """What :func:`capture_headers` kept of a request's header block, and what it had to leave out."""
+
+    headers: dict[str, str]  # lower-cased name -> value (repeats joined), in arrival order
+    order: list[str]  # arrival order of the kept names, each repeated at most MAX_ORDER_REPEATS times
+    total: int  # header lines received
+    dropped: int = 0  # header lines not kept (names beyond MAX_CAPTURED_HEADERS)
+    clipped: int = 0  # names whose joined repeats were cut at MAX_JOINED_HEADER_CHARS
+    duplicated: list[str] = field(default_factory=list)  # SINGLETON_HEADERS that arrived more than once
+
+    @property
+    def truncated(self) -> bool:
+        return self.dropped > 0 or self.clipped > 0
+
+
+def capture_headers(
+    raw: list[tuple[bytes, bytes]],
+    *,
+    priority: frozenset[str] = PRIORITY_HEADERS,
+    limit: int = MAX_CAPTURED_HEADERS,
+) -> HeaderCapture:
+    """Lower-cased header map + arrival order for fingerprinting, bounded to ``limit`` distinct names.
+
+    ``priority`` names present in the request are always kept, wherever they are; the remaining room goes to
+    the other names in arrival order. Every line is still counted (``total`` / ``dropped``) so a truncated
+    capture is visible on the event instead of looking like a request without those headers.
+    """
+    lines = [(k.decode("latin-1").lower(), v.decode("latin-1")) for k, v in raw]
+    reserved = {name for name, _ in lines if name in priority}
+    room = max(0, limit - len(reserved))
+    cap = HeaderCapture(headers={}, order=[], total=len(lines))
+    headers = cap.headers
+    seen: dict[str, int] = {}
+    clipped: set[str] = set()
+    others = 0
+    for name, value in lines:
         if name in headers:
-            sep = "; " if name == "cookie" else ", "
-            headers[name] = headers[name] + sep + value
-        else:
+            current = headers[name]
+            if len(current) >= MAX_JOINED_HEADER_CHARS:
+                clipped.add(name)
+            else:
+                joined = current + ("; " if name == "cookie" else ", ") + value
+                if len(joined) > MAX_JOINED_HEADER_CHARS:
+                    clipped.add(name)
+                    joined = joined[:MAX_JOINED_HEADER_CHARS]
+                headers[name] = joined
+            if name in SINGLETON_HEADERS and name not in cap.duplicated:
+                cap.duplicated.append(name)
+        elif name in reserved or others < room:
+            if name not in reserved:
+                others += 1
             headers[name] = value
-    return headers, order
+        else:
+            cap.dropped += 1
+            continue
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] <= MAX_ORDER_REPEATS:
+            cap.order.append(name)
+    cap.clipped = len(clipped)
+    return cap
 
 
 @dataclass(slots=True)
@@ -204,7 +432,14 @@ def _endpoint(host: str | None, port: int | None) -> Endpoint:
 class EventBuilder:
     """Builds redacted events. Holds the redaction config so the hot path does no settings lookups."""
 
-    def __init__(self, *, sensor_id: str, capture_body_bytes: int, redaction: RedactionSettings) -> None:
+    def __init__(
+        self,
+        *,
+        sensor_id: str,
+        capture_body_bytes: int,
+        redaction: RedactionSettings,
+        priority_headers: Iterable[str] = (),
+    ) -> None:
         self.sensor_id = sensor_id
         self.capture_body_bytes = capture_body_bytes
         self.redaction = redaction
@@ -212,17 +447,61 @@ class EventBuilder:
         self.body_redaction = redaction.model_copy(
             update={"max_field_chars": max(redaction.max_field_chars or 0, capture_body_bytes)}
         )
+        # e.g. the deception canary header: following the AI-canary instruction must stay visible (#140)
+        self.priority_headers = PRIORITY_HEADERS | {h.strip().lower() for h in priority_headers if h.strip()}
 
-    def http_info(self, ex: Exchange) -> HttpInfo:
+    def capture(self, ex: Exchange) -> HeaderCapture:
+        """Capture the headers and mark the exchange when the capture is incomplete or the block is malformed."""
+        cap = capture_headers(ex.raw_headers, priority=self.priority_headers)
+        if cap.truncated:
+            ex.tag("gate:headers_truncated")
+            ex.labels["gate.header_count"] = str(cap.total)
+            if cap.dropped:
+                ex.labels["gate.headers_dropped"] = str(cap.dropped)
+            if cap.clipped:
+                ex.labels["gate.headers_clipped"] = str(cap.clipped)
+        if cap.duplicated:
+            ex.tag("gate:duplicate_header")
+            ex.labels["gate.duplicate_headers"] = ",".join(cap.duplicated)
+        return cap
+
+    def decode_body(self, ex: Exchange, cap: HeaderCapture) -> DecodedBody:
+        """Undo the request Content-Encoding on the captured prefix and say on the event that it was encoded."""
+        body = decode_request_body(
+            ex.body.prefix, cap.headers.get("content-encoding"), self.capture_body_bytes, ex.body.truncated
+        )
+        if body.status in ("identity", "empty"):
+            return body
+        known = [c for c in body.codings if c in _REQUEST_CODINGS]
+        ex.labels["gate.request_encoding"] = ",".join(known) if len(known) == len(body.codings) else "unknown"
+        if body.status == "decoded":
+            # request_body is the inflated text; request_body_size stays the wire size
+            ex.tag("gate:req_encoded")
+            ex.labels["gate.request_body_decoded_bytes"] = str(len(body.data))
+        elif body.status == "unknown":
+            ex.tag("gate:req_encoding_unknown")  # br / zstd / compress / deeper stacks: body not inspectable
+        else:
+            ex.tag("gate:req_decode_failed")  # declared gzip/deflate but not a valid stream
+        return body
+
+    def http_info(
+        self, ex: Exchange, cap: HeaderCapture | None = None, body: DecodedBody | None = None
+    ) -> HttpInfo:
         cfg = self.redaction
-        headers, order = capture_headers(ex.raw_headers)
+        cap = cap or capture_headers(ex.raw_headers, priority=self.priority_headers)
+        headers, order = cap.headers, cap.order
         content_type = headers.get("content-type")
         body_size = ex.body.size
         if not ex.body.complete:
             declared = headers.get("content-length", "")
             if declared.isdigit():
                 body_size = max(body_size, int(declared))
-        body_text = ex.body.text(content_type)
+        if body is None:
+            body = decode_request_body(
+                ex.body.prefix, headers.get("content-encoding"), self.capture_body_bytes, ex.body.truncated
+            )
+        # An unsupported coding stays opaque bytes: sniffing them could only produce garbage "text".
+        text = body_text(body.data, body.truncated, content_type) if body.status != "unknown" else None
         return HttpInfo(
             method=ex.method,
             scheme=ex.scheme,
@@ -235,7 +514,7 @@ class EventBuilder:
             referrer=redact_text(headers.get("referer"), cfg),
             content_type=content_type,
             request_body_size=body_size,
-            request_body=redact_text(body_text, self.body_redaction) if body_text else None,
+            request_body=redact_text(text, self.body_redaction) if text else None,
             status=ex.status,
             response_size=ex.response_size,
             response_content_type=ex.response_content_type,
@@ -246,7 +525,8 @@ class EventBuilder:
     def build(self, ex: Exchange) -> list[Event]:
         """One HTTP event per exchange, plus a DECEPTION event when a Mirage decoy was served."""
         ex.finish()
-        http = self.http_info(ex)
+        cap = self.capture(ex)
+        http = self.http_info(ex, cap, self.decode_body(ex, cap))
         source = _endpoint(ex.client_ip, ex.client_port)
         destination = _endpoint(ex.server_ip, ex.server_port)
         message = f"{ex.method} {http.path} -> {ex.status}"
