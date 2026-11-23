@@ -138,6 +138,7 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `gate.capture_body_bytes` | 4096 | Número de bytes iniciales del cuerpo que se capturan |
 | `gate.trust_forwarded_for` | false | Confiar en `X-Forwarded-For` |
 | `gate.max_request_headers` | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
+| `gate.forward_client_headers` | `[]` | Encabezados que normalmente se eliminan (`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `X-Original-URL`, ...) y que se pasan sin cambios al upstream (solo los que añade un proxy de confianza situado delante) |
 | `agent.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `agent.ingest_token` | Ninguno | Token de API (ámbito: ingest) |
 | `agent.interval_seconds` | 10 | Intervalo de recopilación del sensor de host |

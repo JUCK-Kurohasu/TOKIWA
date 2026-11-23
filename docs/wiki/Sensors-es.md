@@ -74,6 +74,7 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
+| forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Encabezados que normalmente se eliminan (ver abajo) y que se pasan sin cambios al upstream |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),
 `--preserve-host / --rewrite-host`, `--access-log`.
@@ -82,6 +83,10 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
 
 - **Use `--trust-forwarded-for` solo detrás de un balanceador de carga de confianza**. Sin esta opción, los encabezados
   `X-Forwarded-*` enviados por el cliente se descartan y se sustituyen por los valores observados por Gate (para impedir la suplantación de la IP de origen).
+- Los demás encabezados que declaran una IP o un esquema de cliente (`X-Real-IP`, `Forwarded`, `True-Client-IP`, `CF-Connecting-IP`, ...) y `X-Original-URL` /
+  `X-Rewrite-URL` **no se pasan al upstream**. En su lugar, Gate pone en `X-Real-IP` y `Forwarded` la IP de cliente que ha determinado.
+  Si el upstream lee un encabezado que añade un proxy delante (por ejemplo, Cloudflare), inclúyalo en `forward_client_headers` (p. ej. `["cf-connecting-ip"]`).
+  Gate tampoco añade un `User-Agent` ni otros encabezados que el cliente no haya enviado.
 - Los cuerpos de solicitud con `Content-Encoding: gzip` / `deflate` se registran descomprimidos (etiqueta `gate:req_encoded`; el upstream sigue recibiendo los bytes comprimidos).
   br y zstd no se pueden descomprimir; solo queda la etiqueta `gate:req_encoding_unknown`.
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,

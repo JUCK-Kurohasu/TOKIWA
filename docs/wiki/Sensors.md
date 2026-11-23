@@ -73,6 +73,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ポリシーを取りに行く間隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431（0 で無効） |
+| forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 既定では除去するヘッダ（下記）のうち、そのまま上流へ渡すもの |
 
 CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue`（送信待ちイベントの上限 10,000 件）、
 `--preserve-host / --rewrite-host`、`--access-log`。
@@ -81,6 +82,10 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
 
 - **`--trust-forwarded-for` は信頼できるロードバランサの背後でのみ** 使ってください。付けないと、クライアントが送った
   `X-Forwarded-*` は捨てられ、Gate が観測した値に置き換えられます（送信元 IP の偽装を防ぐため）。
+- `X-Real-IP`・`Forwarded`・`True-Client-IP`・`CF-Connecting-IP` など、送信元 IP・スキームを名乗るほかのヘッダと、`X-Original-URL` /
+  `X-Rewrite-URL` は **上流へ渡しません**。代わりに Gate が `X-Real-IP` と `Forwarded` に自分が判定した送信元 IP を付けます。
+  Cloudflare などの前段が付けるヘッダを上流が読む場合は、`forward_client_headers` に列挙してください（例: `["cf-connecting-ip"]`）。
+  クライアントが送っていない `User-Agent` などを Gate が補うこともありません。
 - `Content-Encoding: gzip` / `deflate` の要求ボディは展開してから記録します（タグ `gate:req_encoded`。上流には圧縮したまま送ります）。
   br・zstd は展開できず、タグ `gate:req_encoding_unknown` だけが残ります。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、

@@ -354,6 +354,11 @@ class GateSettings(BaseModel):
     # Requests with more header lines than this are answered 431 instead of being forwarded (events keep at most
     # 64 header names, so the rest would reach the upstream unseen). Apache's LimitRequestFields default. 0 = off.
     max_request_headers: int = Field(default=100, ge=0)
+    # Client-address / scheme / routing headers (Forwarded, X-Real-IP, CF-Connecting-IP, X-Original-URL, ...) are
+    # removed before forwarding, so a client cannot claim another address to the upstream. List the ones a
+    # trusted proxy in front of the Gate sets and the upstream reads (e.g. ["cf-connecting-ip"] behind Cloudflare)
+    # to pass them through unchanged. Case-insensitive.
+    forward_client_headers: list[str] = Field(default_factory=list)
 
 
 class AgentSettings(BaseModel):

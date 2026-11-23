@@ -35,6 +35,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ±10% ジッタ |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 信頼できる LB の背後でのみ |
 | max_request_headers | — | 100 | ヘッダ行がこれを超える要求は上流へ転送せず **431**（`gate:too_many_headers`）。0 で無効。Apache の `LimitRequestFields` と同じ既定 |
+| forward_client_headers | — | `[]` | 既定では除去する送信元 IP 系・ルーティング上書きヘッダ（§6）のうち、そのまま上流へ渡すもの。Gate の前段の信頼できるプロキシが付け、上流が読むものだけ（例: Cloudflare 配下で `["cf-connecting-ip"]`） |
 
 `GateSettings` に無い運用ノブ（`GateOptions`、CLI のみ）: `--upstream-timeout`（30s, 接続 5s）、
 `--max-queue`（10000 件）、`--preserve-host/--rewrite-host`（既定は Caddy 同様にクライアントの Host を転送）、
@@ -51,7 +52,9 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 4. WebSocket（`Upgrade: websocket` / websocket scope）→ **501**（v1 は非対応。ログ + `gate:websocket_unsupported`）
 5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）
 6. パスが `DecoyRoute` に一致 → デコイを返す（**アップストリームへは一切転送しない**）。HTTP イベント（`gate:decoy`）+
-   `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る
+   `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る。`X-Original-URL` / `X-Rewrite-URL` /
+   `X-Override-URL` の値がデコイに一致する場合も同じ（`gate:route_override`。監査 #147: 上流がこのヘッダでルーティングする構成では
+   要求行を `/static/app.js` にしたままデコイの実体に届いていた）
 7. `deceive` に一致する IP → 全リクエストをデコイで応答。ルール不一致なら汎用 404 デコイ（`gate:decoy_generic`。
    DECEPTION イベントは出さない＝ノイズ回避）
 8. ヘッダ行が `max_request_headers` を超える → **431**（イベントに残せるのは 64 名までなので、見えない分を上流へ渡さない）
@@ -81,7 +84,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   `gate:too_many_headers`（431）、
   `gate:req_encoded`（要求ボディを展開した。label `gate.request_encoding`, `gate.request_body_decoded_bytes`）、
   `gate:req_encoding_unknown`（br・zstd・3 段以上など展開できない符号化。本文は記録しない）、`gate:req_decode_failed`（gzip/deflate と
-  宣言したが壊れている）
+  宣言したが壊れている）、`gate:client_ip_header`（§6 で除去したヘッダがあった。label `gate.stripped_headers`）、
+  `gate:route_override`（`X-Original-URL` 等があった）
 - labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
@@ -128,6 +132,19 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 - `X-Forwarded-For/Proto/Host`: `trust_forwarded_for=false` ならクライアント送信値を **破棄してゲートの観測値で置換**
   （ゲート経由で上流に IP を偽装させない）。`true` なら既存チェーンに実ピアを追記し、送信元 IP は **右端** の有効 IP
   （信頼 LB が付けた値。左端はクライアントが自由に書ける）。
+- それ以外の送信元 IP・スキーム・ルーティングの申告（`Forwarded`, `X-Real-IP`, `True-Client-IP`, `CF-Connecting-IP`, `X-Client-IP`,
+  `X-Cluster-Client-IP`, `Fastly-Client-IP`, `X-Originating-IP`, `Client-IP`, `X-Original-Forwarded-For`, `X-Forwarded-Port/Prefix/Server/Scheme/Ssl`,
+  `Front-End-Https`, `X-Url-Scheme`, `X-Original-URL`, `X-Rewrite-URL`, `X-Override-URL`。`gate.proxy.STRIPPED_CLIENT_HEADERS`）は
+  **除去** し（監査 #138/#147。以前は X-Forwarded-For/Proto/Host 以外は素通しで、上流が `X-Real-IP` や `Forwarded` を読む構成では
+  クライアントが任意の IP・https を名乗れた）、Gate が `X-Real-IP: <送信元 IP>` と `Forwarded: for=<送信元 IP>;proto=...;host=...`（1 要素）を
+  付ける。送信元 IP は Gate がイベントに記録するのと同じ値（`trust_forwarded_for=true` なら X-Forwarded-For の右端）。`Forwarded` は
+  X-Forwarded-For のチェーンから組み立てない（左側はクライアントが書けるので `1.2.3.4;proto=https` で引数を足せてしまう）。
+  除去したヘッダ名はイベントに `gate:client_ip_header` + label `gate.stripped_headers` として残り、値自体も `http.headers` に残る。
+  前段の信頼できるプロキシが付けたヘッダを上流が読む構成では `forward_client_headers` に列挙する（列挙したものは除去せず、
+  `x-real-ip` / `forwarded` を列挙すると Gate は自分の値を付けない）。
+- クライアントが送っていないヘッダを足さない（監査 #149）: httpx が既定で付ける `User-Agent: python-httpx/...`・`Accept`・
+  `Accept-Encoding` を送信前に取り除く（UA なしのクライアントが上流のログ・WAF で Gate 自身に見えていた）。付けるのは
+  Host・ボディのフレーミング・Connection と、上記の Gate 自身のヘッダだけ。
 - リクエストターゲットは生のまま転送（httpcore `target` 拡張。httpx の `..` 正規化を避け nginx の `proxy_pass` URI なしと同等）。
   イベントの `path` もクライアントが実際に送った値。
 - 本文はストリーミング転送しつつ先頭だけ捕捉。上流障害 **502**、タイムアウト **504**、応答途中の障害は接続中断。

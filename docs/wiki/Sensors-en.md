@@ -74,6 +74,7 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | How often to pull the policy |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
+| forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Headers normally removed (see below) to pass to the upstream unchanged |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),
 `--preserve-host / --rewrite-host`, `--access-log`.
@@ -82,6 +83,10 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
 
 - **Use `--trust-forwarded-for` only behind a trusted load balancer**. Without it, `X-Forwarded-*` headers sent by the client
   are discarded and replaced with the values the Gate observed (to prevent source IP spoofing).
+- Other headers that claim a client address or scheme (`X-Real-IP`, `Forwarded`, `True-Client-IP`, `CF-Connecting-IP`, ...) and `X-Original-URL` /
+  `X-Rewrite-URL` are **not passed to the upstream**. Instead, the Gate sets `X-Real-IP` and `Forwarded` to the client address it determined.
+  If your upstream reads a header that a front proxy such as Cloudflare sets, list it in `forward_client_headers` (e.g. `["cf-connecting-ip"]`).
+  The Gate also never adds a `User-Agent` or similar header that the client did not send.
 - Request bodies with `Content-Encoding: gzip` / `deflate` are recorded decompressed (tag `gate:req_encoded`; the upstream still gets the compressed bytes).
   br and zstd cannot be decompressed; only the tag `gate:req_encoding_unknown` is recorded.
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,

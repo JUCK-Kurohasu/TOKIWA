@@ -136,6 +136,7 @@ deception:
 | `gate.capture_body_bytes` | 4096 | 捕获请求体的前多少字节 |
 | `gate.trust_forwarded_for` | false | 信任 `X-Forwarded-For` |
 | `gate.max_request_headers` | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
+| `gate.forward_client_headers` | `[]` | 默认会移除的 `X-Real-IP`、`Forwarded`、`CF-Connecting-IP`、`X-Original-URL` 等请求头中，要原样转发给上游的那些（仅限前置的可信代理所添加的） |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `agent.ingest_token` | 无 | API 令牌（scope: ingest） |
 | `agent.interval_seconds` | 10 | 主机传感器的采集间隔 |

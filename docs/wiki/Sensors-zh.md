@@ -73,6 +73,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | 拉取策略的间隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
+| forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 默认会移除的请求头（见下文）中，要原样转发给上游的那些 |
 
 仅 CLI 提供的运维参数：`--upstream-timeout`（30 秒）、`--max-queue`（待发送事件上限 10,000 条）、
 `--preserve-host / --rewrite-host`、`--access-log`。
@@ -81,6 +82,10 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 - **`--trust-forwarded-for` 只能在可信的负载均衡器之后** 使用。不加此选项时，客户端发送的
   `X-Forwarded-*` 会被丢弃，并替换为 Gate 观测到的值（以防止伪造来源 IP）。
+- `X-Real-IP`、`Forwarded`、`True-Client-IP`、`CF-Connecting-IP` 等其他声明来源 IP 或协议的请求头，以及 `X-Original-URL` /
+  `X-Rewrite-URL`，**不会转发给上游**。Gate 会改为在 `X-Real-IP` 和 `Forwarded` 中填入自己判定的来源 IP。
+  如果上游读取 Cloudflare 等前置代理添加的请求头，请将其列入 `forward_client_headers`（例如 `["cf-connecting-ip"]`）。
+  Gate 也不会补充客户端没有发送的 `User-Agent` 等请求头。
 - `Content-Encoding: gzip` / `deflate` 的请求体会先解压再记录（标签 `gate:req_encoded`；发给上游的仍是压缩后的字节）。
   br、zstd 无法解压，只记录标签 `gate:req_encoding_unknown`。
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，

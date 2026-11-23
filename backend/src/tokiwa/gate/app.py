@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from starlette.applications import Starlette
@@ -40,7 +41,9 @@ from tokiwa.gate.netmatch import parse_ip
 from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
+    HTTPX_FRAMING,
     LEGACY_POSITIONS,
+    ROUTE_OVERRIDE_HEADERS,
     Headers,
     UpstreamTarget,
     decode_content,
@@ -49,6 +52,7 @@ from tokiwa.gate.proxy import (
     inject_html,
     raw_path_of,
     strip_hop_by_hop,
+    stripped_client_headers,
 )
 from tokiwa.gate.ratelimit import TokenBucketLimiter
 from tokiwa.gate.shipper import EventShipper
@@ -157,6 +161,9 @@ class Gate:
             redaction=redaction or get_settings().llm.redaction,
             # The server's deception settings, when this process shares its config (else the default name).
             priority_headers=(get_settings().deception.canary_header,),
+        )
+        self._pass_through = frozenset(
+            h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
         self._sleep = sleep
         self.counters: Counter[str] = Counter()
@@ -330,6 +337,13 @@ class Gate:
             await self._sleep(delay_ms / 1000.0)
 
         decoy = policy.decoys.match(ex.path)
+        override = _route_override_path(ex)
+        if override is not None:
+            # X-Original-URL & co. never reach the upstream (gate.proxy strips them), but asking for a decoy
+            # through them is the same probe as asking for it directly: answer with the decoy (audit #147).
+            ex.tag("gate:route_override")
+            if decoy is None:
+                decoy = policy.decoys.match(override)
         deceived = policy.deceive.lookup(ip) is not None
         if decoy is not None or deceived:
             await self._serve_decoy(receive, send, ex, decoy, deceived)
@@ -408,13 +422,26 @@ class Gate:
             preserve_host=self.options.preserve_host,
             upstream_host=self.target.host_header,
             restrict_encoding=policy.html_injection is not None,
+            client_ip=ex.client_ip,
+            pass_through=self._pass_through,
         )
+        stripped = stripped_client_headers(ex.raw_headers, self._pass_through)
+        if stripped:
+            ex.tag(
+                "gate:client_ip_header"
+            )  # the client claimed an address / scheme / route itself (#138/#147)
+            ex.labels["gate.stripped_headers"] = ",".join(stripped)
         content = self._body_stream(receive, ex) if _has_body(ex) else None
         if content is None:
             ex.body.complete = True
         request = self.upstream_client.build_request(
             ex.method, url, headers=headers, content=content, extensions={"target": target}
         )
+        # httpx merges its client defaults (User-Agent: python-httpx, Accept, Accept-Encoding) into every request:
+        # a client that sent none would reach the upstream as the Gate's own library (#149).
+        sent = {k.decode("latin-1") for k, _ in headers}
+        for name in [n for n in request.headers if n not in sent and n not in HTTPX_FRAMING]:
+            del request.headers[name]
         t_upstream = time.perf_counter()
         try:
             response = await self.upstream_client.send(request, stream=True)
@@ -648,6 +675,22 @@ async def _raw_chunks(response: httpx.Response) -> AsyncIterator[bytes]:
 def _is_websocket_upgrade(ex: Exchange) -> bool:
     upgrade = (ex.header("upgrade") or "").lower()
     return "websocket" in upgrade
+
+
+def _route_override_path(ex: Exchange) -> str | None:
+    """The path an ``X-Original-URL`` / ``X-Rewrite-URL`` / ``X-Override-URL`` header asks for (decoded once, like
+    ``scope['path']``), or None when the request has none."""
+    for k, v in ex.raw_headers:
+        if k.lower() not in ROUTE_OVERRIDE_HEADERS:
+            continue
+        value = v.decode("latin-1").strip()
+        if "://" in value:
+            try:
+                value = urlsplit(value).path
+            except ValueError:
+                value = ""
+        return unquote(value.split("?", 1)[0].split("#", 1)[0]) or "/"
+    return None
 
 
 def _has_body(ex: Exchange) -> bool:
