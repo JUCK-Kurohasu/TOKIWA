@@ -21,7 +21,13 @@ from tokiwa.util import ensure_utc, utcnow
 RAW_LIMIT_BYTES = 4096
 _EMPTY = {"", "-", "(empty)"}
 # Keys whose values must never leave the host, whatever they contain (Zeek http.log has ``password``).
+# Account names from HTTP authentication are personal data and not needed for detection (data handling, #169):
+# Zeek http.log ``username`` (Basic auth user, base/protocols/http/main.zeek), nginx ``$remote_user``,
+# Caddy access log ``user_id`` (modules/caddyhttp/server.go).
 _SENSITIVE_KEYS = {
+    "username",
+    "remote_user",
+    "user_id",
     "password",
     "passwd",
     "pass",

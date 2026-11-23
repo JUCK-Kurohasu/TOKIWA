@@ -12,8 +12,8 @@
 | #121 新規接続上限 | 部分 | 上限超過時は優先度順（ESTABLISHED > SYN_RECV、outbound > inbound > loopback、プロセス付き > 無し）に報告し、超過分は既知扱いにせず次周期へ持ち越す（seen = 既報告で継続中 ∪ 今回報告分）。PORT_SNAPSHOT に `connections_new` / `connections_truncated` と `degraded=connections_truncated`、新検知器 `sensor.connections_truncated`（medium、送信元 IP なし＝対処提案の対象にならない）。上限は既存の `agent.max_connections_per_cycle` | c053ad2 |
 | #123 Suricata to_client | 部分 | alert の source/destination を「攻撃側 / 被攻撃側」にする: (1) `alert.source`/`alert.target`（ルールの `target` キーワード）を優先、(2) `direction=to_client` かつ `metadata.attack_target` が `Client_Endpoint` ならパケット方向のまま（悪性サーバー → 自社クライアント。公式例）、(3) その他の `to_client` は入れ替え（フロー開始側＝クライアントを攻撃者に）、(4) それ以外はパケット方向。`labels` に `suricata.direction` / `suricata.attribution` / `suricata.swapped`、元の方向は raw に残る。公式例を含む fixture `suricata_eve_direction.json`。残り: 推奨 (2) net_ids の attacker/victim 分離、(3) 資産台帳の保護対象を protected_cidrs に — 他レーン | b82b27d |
 | #131 ログ書式・時刻 | 完全 | (1) 読めない行（不正 JSON・ヘッダ無し Zeek TSV）と解釈できない時刻を `ParseStats` で数え、`LogSource.health_event()` が警告ログ＋`agent.health` イベント（初回は即時、以降 `agent.health_report_seconds`=300 秒ごとに差分）。新検知器 `sensor.log_parse_failures`（読めない行 medium / 時刻のみ low、送信元 IP なし）。意図的なスキップ（Suricata stats、アクセスログでない JSON、Zeek ヘッダ）は数えない。(2) nginx `escape=default` の `\xHH`（nginx ソースで確認）を復号して取り込み（`recovered` として計数・初回警告）。(3) `agent.log_timezone`（IANA / `+09:00` / UTC。不正値は起動時に ValidationError）。未設定時はオフセット無し時刻を従来どおり UTC とみなしつつ計数・警告（アラートはしない）。Caddy の wall 時刻、µs/ns エポックも解釈。時刻の未来ずれのクランプはサーバー側 #19 の既存処理 | 7f7f1b5 |
-| #132 withdrawn アドバイザリ | 部分 | GHSA / OSV の取り下げを捨てずに `SourceResult.withdrawn` で渡し、`store.apply_withdrawals` が既存行に `data.withdrawn`（アドバイザリ ID → 日時）を記録。取り下げたアドバイザリがその feed のデータ提供元で、他の package feed が裏付けていなければ ecosystem 付きの affected を削除（NVD の CPE は残す）。他のソースが無い行（GHSA だけの行など）は affected を空にし `data.withdrawn_at`。更新理由 `withdrawn` で `intel.vuln_updated` を発行 → matcher が再照合し open の露出を `[auto-closed]` で mitigated に。未知 ID の取り下げは行を作らない。取り下げ解除（再公開）で印を消す。残り: UI の「取り下げ済み」バッジ（frontend）、OSV の取り下げが querybatch で返らない場合の扱い（未確認） | (#132) |
-| 未登録 Zeek username（Refs #169） | 未着手 | | |
+| #132 withdrawn アドバイザリ | 部分 | GHSA / OSV の取り下げを捨てずに `SourceResult.withdrawn` で渡し、`store.apply_withdrawals` が既存行に `data.withdrawn`（アドバイザリ ID → 日時）を記録。取り下げたアドバイザリがその feed のデータ提供元で、他の package feed が裏付けていなければ ecosystem 付きの affected を削除（NVD の CPE は残す）。他のソースが無い行（GHSA だけの行など）は affected を空にし `data.withdrawn_at`。更新理由 `withdrawn` で `intel.vuln_updated` を発行 → matcher が再照合し open の露出を `[auto-closed]` で mitigated に。未知 ID の取り下げは行を作らない。取り下げ解除（再公開）で印を消す。残り: UI の「取り下げ済み」バッジ（frontend）、OSV の取り下げが querybatch で返らない場合の扱い（未確認） | 3c3206a |
+| 未登録 Zeek username（Refs #169） | 完全 | `_SENSITIVE_KEYS` に `username`（Zeek http.log。`base/protocols/http/main.zeek` で確認）・`remote_user`（nginx `$remote_user`）・`user_id`（Caddy アクセスログ。`modules/caddyhttp/server.go` で確認）を追加し raw で伏字。検知器・enricher が raw のこれらを読んでいないことを確認。Data-Handling（4 言語）の表も更新 | (#169) |
 
 ## 要判断
 
@@ -59,6 +59,10 @@
   `tokiwa.sensors.cmdline.mask_argv` を `process.cmdline` / `network.process.cmdline` / `port.listeners[].process.cmdline` に掛ければ旧エージェントも救える。
 
 ## 未検証事項
+
+- #169 追加調査で他に見つけた資格情報系の漏れ候補（未対応・判断材料）: Suricata EVE のペイロード出力（`payload_printable`、http-body 出力）は
+  キー名ではなく本文なので `redact_text` のパターン頼み（`Authorization: Basic` や `password=` は伏字、独自形式は残る）。Zeek の ftp.log
+  （`user`/`password`）や Suricata の ftp/smtp イベントはそもそも取り込まない。
 
 - #132: GitHub の `GET /advisories`（`updated>=` で取得）が取り下げ済みアドバイザリを返し、取り下げ時に `updated_at` が更新されるかは
   一次情報で未確認（TODO(verify)。fixture には `withdrawn_at` 付きの例がある）。OSV は既知 ID の詳細を `modified` が新しいときだけ再取得する。

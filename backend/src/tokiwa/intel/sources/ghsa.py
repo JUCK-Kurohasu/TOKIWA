@@ -217,6 +217,8 @@ class GhsaSource(IntelSource):
                     continue
                 if rec is not None:
                     # Withdrawn (audit #132): not stored as new, but closes what an earlier fetch stored.
+                    # TODO(verify): that /advisories lists withdrawn advisories and bumps updated_at on withdrawal
+                    # (assumed from the API's withdrawn_at field; the `updated>=` window relies on it).
                     (result.withdrawn if withdrawn_at(rec) else result.vulns).append(rec)
             url = resp.links.get("next", {}).get("url")
             params = None  # the next link already carries the cursor and filters

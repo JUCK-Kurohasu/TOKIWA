@@ -32,10 +32,10 @@ TOKIWA が **何を受け取り、何を保存し、何を外部へ送り、ど�
 |---|---|---|---|
 | **Gate**（`gate.http`） | 送信元 / 宛先の IP・ポート、メソッド、Host、パス、クエリ、リクエストヘッダ（先頭 64 個）とその順序、User-Agent、Referer、Content-Type、**テキスト系ボディの先頭 `gate.capture_body_bytes`（既定 4,096）バイト**、ボディのサイズ、ステータス、応答のサイズと Content-Type、処理時間 | `llm.redaction.sensitive_headers` のヘッダ値（`Authorization`・`Cookie` など）と、下の「伏字になるもの」 | 応答の本文、応答ヘッダ（Content-Type 以外）、バイナリのボディ（サイズだけ記録）、65 個目以降のヘッダ |
 | **Gate のデコイ配信**（`gate.deception`） | 上と同じ HTTP の内容をもう 1 件（デコイのログインフォームに入力された値も含む） | 同上 | 同上（このリクエストは守りたいアプリへ転送されない） |
-| **nginx / Caddy**（`nginx.access` / `caddy.access`） | 送信元 IP・ポート、メソッド、Host、パス、クエリ、ログに含まれるヘッダ、ステータス、サイズ、処理時間、元のログ行（`raw`。伏字の後、4 KB まで） | ヘッダ値（同上）、`password`・`token`・`cookie` などのキーの値、下の「伏字になるもの」 | リクエストボディ（アクセスログには含まれない） |
-| **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 接続（IP・ポート・バイト数・状態）、HTTP（パス・クエリ・UA・Referer・ステータス）、notice、元の行（`raw`、4 KB まで） | `password` などのキーの値、下の「伏字になるもの」 | 上の 3 種類以外のログ。なお `http.log` の **`username` 列は伏字の対象外** で、`raw` にそのまま残る |
+| **nginx / Caddy**（`nginx.access` / `caddy.access`） | 送信元 IP・ポート、メソッド、Host、パス、クエリ、ログに含まれるヘッダ、ステータス、サイズ、処理時間、元のログ行（`raw`。伏字の後、4 KB まで） | ヘッダ値（同上）、`password`・`token`・`cookie` などのキーの値、認証ユーザー名（nginx `remote_user`・Caddy `user_id`）、下の「伏字になるもの」 | リクエストボディ（アクセスログには含まれない） |
+| **Zeek**（`zeek.conn` / `zeek.http` / `zeek.notice`） | 接続（IP・ポート・バイト数・状態）、HTTP（パス・クエリ・UA・Referer・ステータス）、notice、元の行（`raw`、4 KB まで） | `password`・`username` などのキーの値、下の「伏字になるもの」 | 上の 3 種類以外のログ |
 | **Suricata**（`suricata.eve`） | `alert` / `http` / `flow` / `dns` のレコード（IP・ポート、HTTP のパス・クエリ・ヘッダ、DNS の問い合わせ名と応答）、元の EVE レコード（`raw`、4 KB まで） | ヘッダ値、キー名による伏字、下の「伏字になるもの」 | `tls`・`fileinfo`・`stats` などの他の種類。EVE にペイロードを出力する設定の場合、その内容は `raw` に 4 KB の範囲で入りうる |
-| **ホストセンサー**（`host.ports` / `host.connections`） | ホスト名・ホストの IP（最大 32 個）・OS、待ち受けソケット、新しい TCP 接続（双方の IP・ポート）、そのプロセスの名前・実行ファイル・コマンドライン（512 文字まで）・OS のユーザー名 | コマンドライン中の `password=...` 形式の値など | — （引数として渡したパスワードは伏字にならないことがある） |
+| **ホストセンサー**（`host.ports` / `host.connections`） | ホスト名・ホストの IP（最大 32 個）・OS、待ち受けソケット、新しい TCP 接続（双方の IP・ポート）、そのプロセスの名前・実行ファイル・コマンドライン（512 文字まで）・OS のユーザー名 | コマンドライン中の秘密（`password=...` 形式、`--password X`・`--api-key X` など名前で分かる引数、`mysql -pX`・`redis-cli -a X`・`curl -u user:X` など代表的なツールのオプション、`*_KEY=X` などの環境変数代入） | `agent.send_cmdline=false` ならコマンドライン自体を送らない（既定は伏字のうえ送る。位置引数で渡したパスワードなどは伏字にならないことがある） |
 | **取り込み API**（直接送信） | 送られたイベントのすべて | **なし**（サーバーではマスクしない） | — |
 | **デセプションのトリップ記録** | 触れた資産、送信元 IP、イベント ID、パス、メソッド、UA、罠の値（TOKIWA が生成した偽の値）と、それが現れたフィールド名 | — | — （資産を削除してもトリップ記録は残る） |
 
