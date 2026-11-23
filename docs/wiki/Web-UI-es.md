@@ -42,6 +42,7 @@ Ofrece una visión global de las últimas 24 horas. Las señales procedentes de 
 
 Lista de los resultados de detección individuales. Puede filtrarse por estado, severidad, categoría, IP de origen y puntuación de IA.
 En la vista de detalle se pueden consultar los eventos en que se basa (evidencias) y el resultado del triaje del LLM, y volver a ejecutar el triaje manualmente.
+En el detalle de la alerta, **Token / sensor that delivered the evidence** muestra los tokens y sensores que enviaron los eventos de evidencia (los 200 más recientes), igual que en Response más abajo.
 
 Al cambiar el estado a **False positive (falso positivo)** se abre un diálogo para decidir qué ocurre con las repeticiones (el cambio masivo de la lista hace lo mismo).
 
@@ -155,6 +156,12 @@ con la información de vulnerabilidades y para priorizar los incidentes (si corr
 
 Lista de las acciones de respuesta propuestas por el LLM, las reglas y los usuarios. Pestañas: **Awaiting approval** (Pendientes de aprobación) / **Active** (Activas) / **History** (Historial) / **Suppressions** (Supresiones: objetivos marcados como "no volver a proponer" al rechazar o revertir; aquí se levantan).
 Aprobar, rechazar y revertir requiere el rol `analyst` o superior. Más detalles en [Respuesta (flujo de aprobación)](Response-es).
+
+El diálogo de aprobación muestra **qué token de API y qué sensor enviaron las evidencias** de la alerta que origina la acción (para una acción vinculada solo
+a un incidente, hasta 5 de sus alertas), a partir de las etiquetas `ingest.token` / `ingest.token_id` de los eventos. También se muestra el sensor_id sustituido
+por la vinculación del token (`ingest.claimed_sensor_id`). Si las evidencias contienen **telemetría de Gate / engaño procedente de un token sin el ámbito gate**
+(`ingest.trust=low`), aparece un aviso de posible falsificación: con un token robado se pueden falsificar la IP de origen y los señuelos pisados, así que confirme el origen
+en los registros de Gate u otros sensores antes de aprobar. Los eventos sin etiquetas de procedencia (datos anteriores a las etiquetas o generados dentro de TOKIWA) se muestran como "No provenance record".
 
 ### Deception (Engaño)
 

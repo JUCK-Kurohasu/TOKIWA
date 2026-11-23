@@ -21,6 +21,7 @@ import {
   SectionTitle,
 } from "@/components/common/OpsKit";
 import { alertStatusLabel, fmt, useCanOperate } from "@/components/common/opsLabels";
+import { ProvenancePanel } from "@/components/common/Provenance";
 import { ProposeActionDialog } from "@/components/common/ResponseActions";
 import { SafeText } from "@/components/common/SafeText";
 import { Time } from "@/components/common/Time";
@@ -61,6 +62,7 @@ const strings = {
     entities: "エンティティ",
     mitre: "MITRE ATT&CK",
     evidence: "証拠イベント",
+    provenance: "証拠を送ったトークン / センサー",
     details: "検知詳細（検知器の出力）",
     statusLabel: "状態を変更",
     propose: "対処を提案",
@@ -92,6 +94,7 @@ const strings = {
     entities: "Entities",
     mitre: "MITRE ATT&CK",
     evidence: "Evidence events",
+    provenance: "Token / sensor that delivered the evidence",
     details: "Detection details (detector output)",
     statusLabel: "Change status",
     propose: "Propose action",
@@ -402,7 +405,13 @@ export function AlertDetailPage() {
           )}
         </div>
 
-        <div className="min-w-0 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
+          <Card>
+            <CardHeader title={L.provenance} />
+            <CardBody>
+              <ProvenancePanel events={a.evidence ?? []} total={a.evidence_event_ids?.length} />
+            </CardBody>
+          </Card>
           <TriagePanel
             triage={a.triage}
             inProgress={a.status === "triaging"}

@@ -10,8 +10,8 @@
 |---|---|---|---|
 | lost update（Issue 未登録。web-detect レーンが再現） | 完全 | `triage/service.py` の `_triage_alert`: 状態の書き込みを条件付き UPDATE に。(1) `new → triaging` は `WHERE status='new'`（ORM の `row.status = ...` は無条件 UPDATE になるので廃止）。自動トリアージで 0 行（読んだ後に人間が変えた）なら LLM を呼ばずに終える。(2) 判定の保存は 1 文で `triage` は常に書き、`status` は `CASE WHEN status IN ('new','triaging') THEN 'triaged' ELSE status END`。保存後に行を読み直してから `alert.updated` を publish（以前は古い状態を流しえた）。(3) 実行中に誤検知へ変わったアラートからは対処を提案しない（実行開始時に既に誤検知だった強制再トリアージは従来どおり）。テスト `tests/triage/test_triage_status_race.py`（コンテキスト読込中の FP・LLM 呼び出し中の FP・acknowledged・通常の new→triaging→triaged・FP の強制再トリアージ・取り込み直後の PATCH の E2E）。修正前のコードで E2E は 3/3 失敗、修正後は成功を確認 | fee2f0c |
 | #166 / #173 UI | UI は完全（Issue としては部分。下記） | `frontend/src/pages/alerts/`: (1) `FalsePositiveDialog.tsx` — 状態を誤検知にすると開く。再発の抑制を「サーバー既定（初期選択、`suppress` を送らない）/ 抑制しない（`suppress:false`）/ 時間指定（`suppress_hours`、1〜8760）/ 恒久（`suppress_permanent`）」、「送信元を問わない」（`suppress_any_source`、攻撃も黙る旨の警告付き）、理由（`reason`）。アラート詳細と一覧の一括変更の両方で使う（一括は以前、黙って既定の抑制を作っていた）。(2) 誤検知から戻すとき（詳細・一括）に「抑制も解除される」確認。(3) 誤検知のアラート詳細に、そのアラートから作られた抑制（`GET /alert-suppressions?source_alert_id=…&active=false`）と解除ボタン。(4) 新ページ `/alert-suppressions`（サイドバー「監視 → 抑制・許可リスト」、アラート一覧の右上にもリンク）: 種類タブ（すべて / 誤検知 / 許可リスト）・期限切れ・解除済みの表示切替・解除（analyst、確認付き）・**許可リスト作成は admin だけにボタン表示**（CIDR と期間が必須、ルール ID・パス任意、扱い downgrade / suppress、ルールを絞らないときは警告）。サーバー側の上限（`allowlist_max_hours`・/8・/32）は UI から読めないのでヒントで示し、422 の文言をそのまま表示。純粋関数は `suppression.ts`、テスト `suppression.test.tsx`（9 件）。wiki Web-UI ×4 に「アラート」の誤検知ダイアログと新節「抑制・許可リスト」 | 2b381d2 |
-| #132 UI | UI は完全（Issue は sensors の残り 1 点で部分。下記） | `components/common/IntelBadges.tsx` に `withdrawalOf` / `vulnWithdrawal` / `WithdrawnBadge`: `data.withdrawn_at`（脆弱性全体が取り下げ）→「取り下げ済み」、`data.withdrawn` だけ（一部のアドバイザリ）→「一部取り下げ」。ツールチップに取り下げられたアドバイザリ ID と日時。表示箇所: 脆弱性一覧（`VulnsTab`）、脆弱性詳細の見出し（`VulnDetailDialog`）と、その中の閉じた露出、資産一致の一覧（`MatchesTab`）。露出一覧のために backend `VulnMatchOut` に `vuln_withdrawn_at` / `vuln_withdrawn` を追加（`intel_advice.py`、JSON パスで 2 つの印だけを取得し `data` 全体は読まない）。型 `VulnRecord.data?`・`VulnMatchWithAsset.vuln_withdrawn*?`。テスト `tests/intel/test_intel_withdrawn_api.py`（全体取り下げ・一部取り下げ・PATCH の応答）、`IntelBadges.test.tsx`。api-contract、wiki Web-UI ×4 | （このコミット） |
-| #40 UI | 未着手 | | |
+| #132 UI | UI は完全（Issue は sensors の残り 1 点で部分。下記） | `components/common/IntelBadges.tsx` に `withdrawalOf` / `vulnWithdrawal` / `WithdrawnBadge`: `data.withdrawn_at`（脆弱性全体が取り下げ）→「取り下げ済み」、`data.withdrawn` だけ（一部のアドバイザリ）→「一部取り下げ」。ツールチップに取り下げられたアドバイザリ ID と日時。表示箇所: 脆弱性一覧（`VulnsTab`）、脆弱性詳細の見出し（`VulnDetailDialog`）と、その中の閉じた露出、資産一致の一覧（`MatchesTab`）。露出一覧のために backend `VulnMatchOut` に `vuln_withdrawn_at` / `vuln_withdrawn` を追加（`intel_advice.py`、JSON パスで 2 つの印だけを取得し `data` 全体は読まない）。型 `VulnRecord.data?`・`VulnMatchWithAsset.vuln_withdrawn*?`。テスト `tests/intel/test_intel_withdrawn_api.py`（全体取り下げ・一部取り下げ・PATCH の応答）、`IntelBadges.test.tsx`。api-contract、wiki Web-UI ×4 | 2e35b59 |
+| #40 UI | 推奨 (3) の UI 部分は完全（Issue は部分。下記） | `components/common/provenanceSummary.ts`（純粋関数 `summarizeProvenance`: イベントの `ingest.token_id` / `ingest.token` でトークン別に集計、センサー・データセット・`ingest.claimed_sensor_id`・`ingest.trust=low` の件数。ラベルの無いイベントは「出所の記録なし」として最後に別枠で数え、安全扱いしない。インシデントで重複する証拠は 1 回だけ数える）と `Provenance.tsx`（`ProvenancePanel` / `ActionProvenance`）。**承認ダイアログ**（`ResponseActions.tsx` の `ApproveDialog`）: 対処の `alert_id` のアラート詳細（`GET /alerts/{id}` の証拠、最新 200 件）から集計。インシデントだけに紐付く対処はインシデント詳細のアラートのうち先頭 5 件（`MAX_INCIDENT_ALERTS`）の証拠をまとめる。手動提案で紐付けが無ければ出さない。**アラート詳細**: 右列に「証拠を送ったトークン / センサー」（追加の取得なし）。`ingest.trust=low` が 1 件でもあれば danger の警告（偽造の可能性・承認前に Gate ログや他センサーで確認）とトークン行に「低信頼 N 件」。テスト `Provenance.test.tsx`（4 件）。wiki Web-UI ×4（アラート・対処） | （このコミット） |
 
 ## 要判断
 
@@ -29,6 +29,14 @@
 - （#132 の Close 判断）sensors レーンが残した「OSV の取り下げが querybatch で返らない場合の扱い（未確認）」は未解決のまま。UI 分は満たしたので、
   統合担当が sensors の NOTES と合わせて Closes にするか判断する。TOKIWA が生成したアドバイザリ（アドバイザリタブ）にはバッジを出していない
   （アドバイザリは脆弱性レコードを持たない。脆弱性 ID から開く詳細ではバッジが出る）。
+
+- （#40 の Close 判断）**#40 は Refs のまま**。このレーンで足したのは推奨 (3) の前半「承認 UI に『このアラートを作ったトークン/センサー』を表示」と、
+  (2) の後半の一部「『証拠の出所: token X』を承認画面に明示」。残り: (2)「低信頼ソースのみで構成されたインシデントから block を提案しない」
+  （`triage/service.py` の `_propose_actions` / `respond.service`。今回の所有は triage の状態更新部分だけなので未実装）、(4) トークンごとの受信レート・件数の異常の自己監視、
+  送信元 CIDR でのトークン縛り（tokens-roles の NOTES の残りと同じ）。(1)・(3) 後半（allowed_sensor_ids / allowed_datasets・protected_cidrs）は tokens-roles レーンで実装済み。
+  トークン作成フォームの `allowed_sensor_ids` / `allowed_datasets` 入力欄（tokens-roles からの依頼）も今回は作っていない。
+- （#40）インシデントだけに紐付く対処は、アラートを最大 5 件までしか見ない（1 件 1 リクエスト）。それ以上のアラートに低信頼の証拠があっても警告は出ない
+  （表示に「最大 5 件のアラート」と明記）。集計用の API（証拠の出所をサーバー側でまとめる）を作れば全件を見られる。
 
 ## 既定動作の変更
 
@@ -50,6 +58,8 @@
   切っていた autouse フィクスチャ）は、この修正で不要になった。外すかどうかは detect 側の判断（このレーンでは触っていない）。
 
 ## 未検証事項
+
+- （UI 全般）ブラウザでの実画面の確認はしていない（typecheck・lint・vitest の静的描画テスト・build のみ）。
 
 - （lost update）PostgreSQL での挙動は未確認（SQLite WAL のみ）。READ COMMITTED では条件付き UPDATE の WHERE が最新の確定行で
   再評価されるので、同じ結果になるはず（推論）。

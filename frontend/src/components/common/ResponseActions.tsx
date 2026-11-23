@@ -55,6 +55,7 @@ import {
   useCanOperate,
   useNow,
 } from "./opsLabels";
+import { ActionProvenance } from "./Provenance";
 
 export const actionTypeIcon: Record<ActionType, LucideIcon> = {
   block_ip: Ban,
@@ -570,6 +571,7 @@ function ApproveDialog({
             {L.notReversible}
           </Notice>
         )}
+        {!done && <ActionProvenance action={action} />}
         {m.error && <ErrorState error={m.error} />}
         {done &&
           (done.status === "failed" ? (
