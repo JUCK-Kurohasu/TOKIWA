@@ -3,12 +3,12 @@
  * panel with re-triage (fast / deep) and status changes.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, FileSearch, Loader2, ShieldPlus } from "lucide-react";
+import { BellOff, Bot, FileSearch, Loader2, ShieldPlus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError, api } from "@/api/client";
-import type { Alert, AlertDetail, AlertStatus } from "@/api/types";
-import { ALERT_STATUSES, type AlertUpdate, type RetriageTier } from "@/api/types-ops";
+import type { Alert, AlertDetail, AlertStatus, Page } from "@/api/types";
+import { ALERT_STATUSES, type AlertSuppression, type AlertUpdate, type RetriageTier } from "@/api/types-ops";
 import { AiScore, JsonView, Mono, SeverityBadge } from "@/components/common";
 import { EvidenceList } from "@/components/common/EventDetail";
 import {
@@ -39,6 +39,9 @@ import {
 } from "@/components/ui";
 import { dateTimeTitle, pct, timeAgo } from "@/lib/format";
 import { useLabel, useLocal } from "@/lib/i18n";
+import { FalsePositiveDialog } from "./FalsePositiveDialog";
+import { SuppressionTable } from "./SuppressionTable";
+import { liftsSuppression } from "./suppression";
 
 const strings = {
   ja: {
@@ -65,6 +68,12 @@ const strings = {
     aiBannerBody:
       "AI スコア {score}。振る舞い特徴量（思考待ちのリズム、エラーに即応したペイロード変異など）や AI カナリアへの追従に基づく判定です。",
     viewerHint: "状態の変更には analyst 以上の権限が必要です",
+    leaveFpConfirm:
+      "誤検知から戻すと、このアラートから作られた再発の抑制も解除されます（以後、同じ検知は新しいアラートになります）。続けますか？",
+    suppressions: "このアラートからの再発抑制",
+    noSuppression:
+      "抑制はありません（誤検知にしたときに「抑制しない」を選んだか、detection.fp_suppress_hours が 0）。",
+    allSuppressions: "抑制・許可リスト一覧",
   },
   en: {
     back: "Alerts",
@@ -90,6 +99,12 @@ const strings = {
     aiBannerBody:
       "AI score {score}. Based on behavioural features (think-time rhythm, payload mutation reacting to errors, …) or AI-canary compliance.",
     viewerHint: "Changing status requires the analyst role",
+    leaveFpConfirm:
+      "Leaving false positive also lifts the recurrence suppression made from this alert (the same finding raises new alerts again). Continue?",
+    suppressions: "Recurrence suppression from this alert",
+    noSuppression:
+      "No suppression (“Don't suppress” was chosen when marking it, or detection.fp_suppress_hours is 0).",
+    allSuppressions: "All suppressions & allowlists",
   },
 };
 
@@ -101,6 +116,7 @@ export function AlertDetailPage() {
   const qc = useQueryClient();
   const key = ["alerts", "detail", id];
   const [proposeOpen, setProposeOpen] = useState(false);
+  const [fpOpen, setFpOpen] = useState(false);
 
   const q = useQuery({
     queryKey: key,
@@ -117,7 +133,22 @@ export function AlertDetailPage() {
   };
   const patch = useMutation({
     mutationFn: (body: AlertUpdate) => api.patch<Alert>(`/alerts/${encodeURIComponent(id)}`, body),
-    onSuccess: merge,
+    onSuccess: (updated: Alert) => {
+      merge(updated);
+      setFpOpen(false);
+      void qc.invalidateQueries({ queryKey: ["alert-suppressions"] });
+    },
+  });
+  const isFp = q.data?.status === "false_positive";
+  const supp = useQuery({
+    queryKey: ["alert-suppressions", "alert", id],
+    queryFn: () =>
+      api.get<Page<AlertSuppression>>("/alert-suppressions", {
+        source_alert_id: id,
+        active: "false",
+        limit: 20,
+      }),
+    enabled: !!id && isFp,
   });
   const retriage = useMutation({
     mutationFn: (tier?: RetriageTier) =>
@@ -157,6 +188,14 @@ export function AlertDetailPage() {
   }
 
   const aiLikely = (a.ai_score ?? 0) >= 0.7 || a.category === "ai_agent";
+  const changeStatus = (next: AlertStatus) => {
+    if (next === "false_positive") {
+      setFpOpen(true); // choose how recurrences are suppressed (audit #166)
+      return;
+    }
+    if (liftsSuppression(a.status, next) && !window.confirm(L.leaveFpConfirm)) return;
+    patch.mutate({ status: next });
+  };
   const entities = Object.entries(a.entities ?? {});
 
   return (
@@ -191,7 +230,7 @@ export function AlertDetailPage() {
                   value={a.status}
                   disabled={!canOperate || patch.isPending}
                   title={canOperate ? undefined : L.viewerHint}
-                  onChange={(e) => patch.mutate({ status: e.target.value as AlertStatus })}
+                  onChange={(e) => changeStatus(e.target.value as AlertStatus)}
                 >
                   {ALERT_STATUSES.map((s) => (
                     <option key={s} value={s} disabled={s === "triaging"}>
@@ -210,8 +249,41 @@ export function AlertDetailPage() {
             )}
           </div>
         </div>
-        {patch.error && <ErrorState error={patch.error} />}
+        {patch.error && !fpOpen && <ErrorState error={patch.error} />}
       </div>
+
+      {isFp && (
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-1.5">
+                <BellOff className="h-4 w-4 text-muted" aria-hidden />
+                {L.suppressions}
+              </span>
+            }
+            actions={
+              <Link to="/alert-suppressions" className="text-xs text-accent hover:underline">
+                {L.allSuppressions}
+              </Link>
+            }
+          />
+          {supp.error ? (
+            <CardBody>
+              <ErrorState error={supp.error} />
+            </CardBody>
+          ) : supp.data?.items.length ? (
+            <SuppressionTable items={supp.data.items} showSourceAlert={false} />
+          ) : supp.isLoading ? (
+            <CardBody>
+              <Skeleton className="h-10" />
+            </CardBody>
+          ) : (
+            <CardBody>
+              <p className="text-xs text-muted">{L.noSuppression}</p>
+            </CardBody>
+          )}
+        </Card>
+      )}
 
       {aiLikely && (
         <Notice tone="ai" icon={<Bot className="h-4 w-4 text-ai" aria-hidden />} title={L.aiBanner}>
@@ -343,6 +415,19 @@ export function AlertDetailPage() {
           />
         </div>
       </div>
+
+      {fpOpen && (
+        <FalsePositiveDialog
+          open
+          pending={patch.isPending}
+          error={patch.error}
+          onCancel={() => {
+            patch.reset();
+            setFpOpen(false);
+          }}
+          onConfirm={(body) => patch.mutate(body)}
+        />
+      )}
 
       {proposeOpen && (
         <ProposeActionDialog

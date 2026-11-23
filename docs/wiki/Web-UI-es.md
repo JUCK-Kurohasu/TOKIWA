@@ -43,6 +43,30 @@ Ofrece una visión global de las últimas 24 horas. Las señales procedentes de 
 Lista de los resultados de detección individuales. Puede filtrarse por estado, severidad, categoría, IP de origen y puntuación de IA.
 En la vista de detalle se pueden consultar los eventos en que se basa (evidencias) y el resultado del triaje del LLM, y volver a ejecutar el triaje manualmente.
 
+Al cambiar el estado a **False positive (falso positivo)** se abre un diálogo para decidir qué ocurre con las repeticiones (el cambio masivo de la lista hace lo mismo).
+
+| Opción | Efecto |
+|---|---|
+| Valor del servidor (preseleccionado) | Durante `detection.fp_suppress_hours` (168 h por defecto), la misma detección (misma regla, firmas coincidentes, ruta y origen) se suma a esta alerta en lugar de crear una nueva. No hay triaje, notificación ni vinculación a incidentes |
+| No suprimir | Las repeticiones crean alertas nuevas como siempre |
+| Suprimir durante unas horas / de forma permanente | Cambia la duración (permanente = hasta levantarla) |
+| Suprimir para cualquier origen | La misma clase de detección en esa ruta y parámetro se silencia desde cualquier origen. También se pierde a un atacante que use la misma forma, así que úselo solo para entradas legítimas de muchos orígenes cambiantes |
+
+Las firmas nuevas, otro parámetro o una severidad mayor no se suprimen. El detalle de una alerta marcada como falso positivo muestra
+la supresión creada a partir de ella (caducidad, cuántas ha contenido) y un botón **Lift (levantar)**. Volver a cambiar el estado desde falso positivo también la levanta (tras una confirmación).
+
+### Suppressions (Supresiones y listas de permitidos)
+
+Las supresiones de repeticiones de alertas marcadas como falso positivo y las **listas de permitidos (allowlists)** para análisis de vulnerabilidades
+y pruebas de carga autorizados (filtro por tipo, mostrar caducadas / levantadas). Las detecciones suprimidas no crean alertas nuevas, triaje, notificaciones ni propuestas de respuesta. **Lift** requiere `analyst` o superior.
+
+**Create allowlist (crear lista de permitidos)** es solo para `admin`. Son obligatorios el CIDR de origen y la duración en horas; el ID de regla y la ruta son opcionales.
+
+- La duración tiene como máximo `detection.allowlist_max_hours` (720 h por defecto). No se pueden crear listas permanentes.
+- Se rechazan rangos más amplios que IPv4 /8 o IPv6 /32.
+- El tratamiento es "Record as info" (por defecto: sigue en la lista, sin triaje, notificación ni propuestas) o "Don't record" (solo se cuenta).
+- Una lista sin regla también silencia las alertas de engaño (señuelos pisados) y de agentes de IA. Mantenga el rango y la duración al mínimo.
+
 ### AI sessions (Sesiones de IA)
 
 Unidades de comportamiento (sesiones) agrupadas por **origen + huella del cliente**. A partir de las características del comportamiento

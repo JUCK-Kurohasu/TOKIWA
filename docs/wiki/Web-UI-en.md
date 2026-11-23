@@ -40,6 +40,30 @@ An overview of the past 24 hours. Signals that come from AI agents are shown in 
 A list of individual detections. You can filter by status, severity, category, source IP, and AI score.
 The detail view shows the events the detection was based on (evidence) and the LLM triage result, and you can re-run triage manually.
 
+Setting the status to **False positive** opens a dialog that decides what happens to recurrences (the bulk status change of the list does the same).
+
+| Choice | Effect |
+|---|---|
+| Server default (preselected) | For `detection.fp_suppress_hours` (168 h by default), the same finding (same rule, matched signatures, path and source) is counted on this alert instead of raising a new one. No triage, notification or incident linking |
+| Don't suppress | Recurrences raise new alerts as usual |
+| Suppress for a number of hours / permanently | Changes the duration (permanent = until lifted) |
+| Suppress for every source | The same kind of finding on this route and parameter goes quiet from any source. An attacker using the same shape is missed too, so use it only for legitimate input from many changing sources |
+
+New signatures, another parameter or a higher severity are not suppressed. The detail of an alert marked false positive shows the
+suppression made from it (expiry, how many it held back) and a **Lift** button. Changing the status back from false positive also lifts it (after a confirmation).
+
+### Suppressions
+
+The recurrence suppressions of alerts marked false positive and the **allowlists** for authorised vulnerability scans and load tests
+(filter by kind, toggle expired / lifted). Suppressed findings raise no new alert, triage, notification or response proposal. **Lift** needs `analyst` or above.
+
+**Create allowlist** is for `admin` only. A source CIDR and a duration in hours are required; rule ID and path are optional.
+
+- The duration is capped by `detection.allowlist_max_hours` (720 h by default). Permanent allowlists are not possible.
+- Ranges wider than IPv4 /8 or IPv6 /32 are refused.
+- Handling is "Record as info" (default: still listed, but no triage, notification or proposal) or "Don't record" (count only).
+- An allowlist without a rule also silences deception (decoy trips) and AI-agent alerts. Keep the range and duration minimal.
+
 ### AI sessions
 
 Units of behavior (sessions) grouped by **source + client fingerprint**. From behavioral features, TOKIWA estimates
