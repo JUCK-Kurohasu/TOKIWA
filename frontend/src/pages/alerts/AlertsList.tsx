@@ -3,7 +3,7 @@
  *   ?status&severity&category&source_ip&min_ai_score&q&incident_id&offset
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, FilterX, RefreshCw, Sparkles } from "lucide-react";
+import { Bell, BellOff, FilterX, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api } from "@/api/client";
@@ -40,6 +40,8 @@ import {
 import { dateTimeTitle, timeAgo } from "@/lib/format";
 import { useLabel, useLocal, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { FalsePositiveDialog } from "./FalsePositiveDialog";
+import { liftsSuppression } from "./suppression";
 
 const LIMIT = 50;
 const FILTER_KEYS = [
@@ -83,6 +85,9 @@ const strings = {
     clearSel: "選択解除",
     bulkDone: "{ok} 件を更新しました",
     bulkFailed: "{ok} 件を更新、{failed} 件は失敗しました",
+    bulkLeaveFp:
+      "選択中の誤検知 {n} 件を別の状態にすると、それらから作られた再発の抑制も解除されます。続けますか？",
+    suppressionsLink: "抑制・許可リスト",
     emptyTitle: "アラートはまだありません",
     emptyHint: "センサーからイベントを取り込むと、検知結果がここに表示されます。",
     noMatch: "条件に一致するアラートはありません",
@@ -118,6 +123,9 @@ const strings = {
     clearSel: "Clear selection",
     bulkDone: "Updated {ok} alert(s)",
     bulkFailed: "Updated {ok}, {failed} failed",
+    bulkLeaveFp:
+      "Changing {n} selected false positives to another status also lifts the recurrence suppressions made from them. Continue?",
+    suppressionsLink: "Suppressions",
     emptyTitle: "No alerts yet",
     emptyHint: "Detections appear here once sensors start ingesting events.",
     noMatch: "No alerts match the filters",
@@ -170,6 +178,7 @@ export function AlertsListPage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [bulkStatus, setBulkStatus] = useState<AlertStatus>("acknowledged");
   const [bulkResult, setBulkResult] = useState<{ ok: number; failed: number } | null>(null);
+  const [bulkFp, setBulkFp] = useState(false);
   const visibleSelected = items.filter((a) => selected.has(a.id)).map((a) => a.id);
   const allSelected = items.length > 0 && visibleSelected.length === items.length;
 
@@ -182,10 +191,8 @@ export function AlertsListPage() {
     });
 
   const bulk = useMutation({
-    mutationFn: async ({ ids, status }: { ids: string[]; status: AlertStatus }) => {
-      const res = await Promise.allSettled(
-        ids.map((id) => api.patch<Alert>(`/alerts/${id}`, { status } satisfies AlertUpdate)),
-      );
+    mutationFn: async ({ ids, body }: { ids: string[]; body: AlertUpdate }) => {
+      const res = await Promise.allSettled(ids.map((id) => api.patch<Alert>(`/alerts/${id}`, body)));
       return {
         ok: res.filter((r) => r.status === "fulfilled").length,
         failed: res.filter((r) => r.status === "rejected").length,
@@ -194,9 +201,22 @@ export function AlertsListPage() {
     onSuccess: (r) => {
       setBulkResult(r);
       setSelected(new Set());
+      setBulkFp(false);
       void qc.invalidateQueries({ queryKey: ["alerts"] });
+      void qc.invalidateQueries({ queryKey: ["alert-suppressions"] });
     },
   });
+  const applyBulk = () => {
+    if (bulkStatus === "false_positive") {
+      setBulkFp(true); // suppression choice (audit #166): the server suppresses recurrences by default
+      return;
+    }
+    const leavingFp = items.filter(
+      (a) => selected.has(a.id) && liftsSuppression(a.status, bulkStatus),
+    ).length;
+    if (leavingFp && !window.confirm(fmt(L.bulkLeaveFp, { n: leavingFp }))) return;
+    bulk.mutate({ ids: visibleSelected, body: { status: bulkStatus } });
+  };
 
   return (
     <div>
@@ -209,10 +229,19 @@ export function AlertsListPage() {
         }
         description={L.desc}
         actions={
-          <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
-            <RefreshCw className={cn("h-3.5 w-3.5", q.isFetching && "animate-spin")} aria-hidden />
-            {t("common.refresh")}
-          </Button>
+          <>
+            <Link
+              to="/alert-suppressions"
+              className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent"
+            >
+              <BellOff className="h-3.5 w-3.5" aria-hidden />
+              {L.suppressionsLink}
+            </Link>
+            <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}>
+              <RefreshCw className={cn("h-3.5 w-3.5", q.isFetching && "animate-spin")} aria-hidden />
+              {t("common.refresh")}
+            </Button>
+          </>
         }
       />
 
@@ -349,11 +378,7 @@ export function AlertsListPage() {
               </option>
             ))}
           </Select>
-          <Button
-            size="sm"
-            onClick={() => bulk.mutate({ ids: visibleSelected, status: bulkStatus })}
-            disabled={bulk.isPending}
-          >
+          <Button size="sm" onClick={applyBulk} disabled={bulk.isPending}>
             {L.apply}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
@@ -371,7 +396,17 @@ export function AlertsListPage() {
           </span>
         </Notice>
       )}
-      {bulk.error && <ErrorState error={bulk.error} />}
+      {bulk.error && !bulkFp && <ErrorState error={bulk.error} />}
+      {bulkFp && (
+        <FalsePositiveDialog
+          open
+          count={visibleSelected.length}
+          pending={bulk.isPending}
+          error={bulk.error}
+          onCancel={() => setBulkFp(false)}
+          onConfirm={(body) => bulk.mutate({ ids: visibleSelected, body })}
+        />
+      )}
 
       <Card>
         {q.isLoading ? (

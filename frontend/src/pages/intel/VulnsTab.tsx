@@ -5,7 +5,13 @@ import { type FormEvent, useEffect, useState } from "react";
 import { api } from "@/api/client";
 import type { Page, VulnRecord } from "@/api/types";
 import { FilterChip } from "@/components/common/FilterChip";
-import { CvssScore, EpssBar, KevBadge } from "@/components/common/IntelBadges";
+import {
+  CvssScore,
+  EpssBar,
+  KevBadge,
+  vulnWithdrawal,
+  WithdrawnBadge,
+} from "@/components/common/IntelBadges";
 import { OffsetPager } from "@/components/common/OffsetPager";
 import { QueryView } from "@/components/common/QueryView";
 import { useUrlParams } from "@/components/common/urlState";
@@ -188,6 +194,7 @@ export function VulnsTab({ onOpen }: { onOpen: (id: string) => void }) {
                             {v.id}
                           </button>
                           {v.kev && <KevBadge ransomware={v.kev_ransomware} />}
+                          <WithdrawnBadge withdrawal={vulnWithdrawal(v.data)} />
                         </div>
                       </TD>
                       <TD>

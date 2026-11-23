@@ -42,6 +42,31 @@ Ofrece una visión global de las últimas 24 horas. Las señales procedentes de 
 
 Lista de los resultados de detección individuales. Puede filtrarse por estado, severidad, categoría, IP de origen y puntuación de IA.
 En la vista de detalle se pueden consultar los eventos en que se basa (evidencias) y el resultado del triaje del LLM, y volver a ejecutar el triaje manualmente.
+En el detalle de la alerta, **Token / sensor that delivered the evidence** muestra los tokens y sensores que enviaron los eventos de evidencia (los 200 más recientes), igual que en Response más abajo.
+
+Al cambiar el estado a **False positive (falso positivo)** se abre un diálogo para decidir qué ocurre con las repeticiones (el cambio masivo de la lista hace lo mismo).
+
+| Opción | Efecto |
+|---|---|
+| Valor del servidor (preseleccionado) | Durante `detection.fp_suppress_hours` (168 h por defecto), la misma detección (misma regla, firmas coincidentes, ruta y origen) se suma a esta alerta en lugar de crear una nueva. No hay triaje, notificación ni vinculación a incidentes |
+| No suprimir | Las repeticiones crean alertas nuevas como siempre |
+| Suprimir durante unas horas / de forma permanente | Cambia la duración (permanente = hasta levantarla) |
+| Suprimir para cualquier origen | La misma clase de detección en esa ruta y parámetro se silencia desde cualquier origen. También se pierde a un atacante que use la misma forma, así que úselo solo para entradas legítimas de muchos orígenes cambiantes |
+
+Las firmas nuevas, otro parámetro o una severidad mayor no se suprimen. El detalle de una alerta marcada como falso positivo muestra
+la supresión creada a partir de ella (caducidad, cuántas ha contenido) y un botón **Lift (levantar)**. Volver a cambiar el estado desde falso positivo también la levanta (tras una confirmación).
+
+### Suppressions (Supresiones y listas de permitidos)
+
+Las supresiones de repeticiones de alertas marcadas como falso positivo y las **listas de permitidos (allowlists)** para análisis de vulnerabilidades
+y pruebas de carga autorizados (filtro por tipo, mostrar caducadas / levantadas). Las detecciones suprimidas no crean alertas nuevas, triaje, notificaciones ni propuestas de respuesta. **Lift** requiere `analyst` o superior.
+
+**Create allowlist (crear lista de permitidos)** es solo para `admin`. Son obligatorios el CIDR de origen y la duración en horas; el ID de regla y la ruta son opcionales.
+
+- La duración tiene como máximo `detection.allowlist_max_hours` (720 h por defecto). No se pueden crear listas permanentes.
+- Se rechazan rangos más amplios que IPv4 /8 o IPv6 /32.
+- El tratamiento es "Record as info" (por defecto: sigue en la lista, sin triaje, notificación ni propuestas) o "Don't record" (solo se cuenta).
+- Una lista sin regla también silencia las alertas de engaño (señuelos pisados) y de agentes de IA. Mantenga el rango y la duración al mínimo.
 
 ### AI sessions (Sesiones de IA)
 
@@ -105,6 +130,12 @@ Información de vulnerabilidades y resultados de su cotejo con los activos. Pest
 **Asset matches** (Coincidencias con activos), **Advisories** (Avisos; recomendaciones priorizadas por el LLM), **News** (Noticias; RSS), **Web research**
 (Investigación web; investigación de 0day con el LLM) y **Sources** (Fuentes; estado de las fuentes). Más detalles en [Inteligencia de vulnerabilidades](Threat-Intel-es).
 
+Los avisos que GHSA / OSV retiraron (por ser erróneos, duplicados, etc.) se marcan con la insignia **Withdrawn (retirado)** en la lista y el detalle
+de vulnerabilidades y en las coincidencias con activos (se retiró la vulnerabilidad completa y las exposiciones basadas en ella se cerraron automáticamente).
+Si solo se retiraron algunos avisos y quedan datos de otras fuentes como NVD, la insignia indica **Partly withdrawn (retirado en parte)**. Al pasar el ratón
+se ven los ID de los avisos retirados y sus fechas. La insignia indica el estado de la vulnerabilidad; no demuestra por qué se cerró una exposición concreta
+(el motivo del cierre automático conserva su texto habitual).
+
 ### Assets (Activos)
 
 Aquí se registran los hosts que se deben proteger y el software que se ejecuta en ellos (nombre del producto, versión, CPE). Los activos registrados se usan para el cotejo
@@ -125,6 +156,12 @@ con la información de vulnerabilidades y para priorizar los incidentes (si corr
 
 Lista de las acciones de respuesta propuestas por el LLM, las reglas y los usuarios. Pestañas: **Awaiting approval** (Pendientes de aprobación) / **Active** (Activas) / **History** (Historial) / **Suppressions** (Supresiones: objetivos marcados como "no volver a proponer" al rechazar o revertir; aquí se levantan).
 Aprobar, rechazar y revertir requiere el rol `analyst` o superior. Más detalles en [Respuesta (flujo de aprobación)](Response-es).
+
+El diálogo de aprobación muestra **qué token de API y qué sensor enviaron las evidencias** de la alerta que origina la acción (para una acción vinculada solo
+a un incidente, hasta 5 de sus alertas), a partir de las etiquetas `ingest.token` / `ingest.token_id` de los eventos. También se muestra el sensor_id sustituido
+por la vinculación del token (`ingest.claimed_sensor_id`). Si las evidencias contienen **telemetría de Gate / engaño procedente de un token sin el ámbito gate**
+(`ingest.trust=low`), aparece un aviso de posible falsificación: con un token robado se pueden falsificar la IP de origen y los señuelos pisados, así que confirme el origen
+en los registros de Gate u otros sensores antes de aprobar. Los eventos sin etiquetas de procedencia (datos anteriores a las etiquetas o generados dentro de TOKIWA) se muestran como "No provenance record".
 
 ### Deception (Engaño)
 

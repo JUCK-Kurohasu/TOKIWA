@@ -39,6 +39,31 @@ An overview of the past 24 hours. Signals that come from AI agents are shown in 
 
 A list of individual detections. You can filter by status, severity, category, source IP, and AI score.
 The detail view shows the events the detection was based on (evidence) and the LLM triage result, and you can re-run triage manually.
+The alert detail's **Token / sensor that delivered the evidence** lists the tokens and sensors that sent the evidence events (newest 200), as in Response below.
+
+Setting the status to **False positive** opens a dialog that decides what happens to recurrences (the bulk status change of the list does the same).
+
+| Choice | Effect |
+|---|---|
+| Server default (preselected) | For `detection.fp_suppress_hours` (168 h by default), the same finding (same rule, matched signatures, path and source) is counted on this alert instead of raising a new one. No triage, notification or incident linking |
+| Don't suppress | Recurrences raise new alerts as usual |
+| Suppress for a number of hours / permanently | Changes the duration (permanent = until lifted) |
+| Suppress for every source | The same kind of finding on this route and parameter goes quiet from any source. An attacker using the same shape is missed too, so use it only for legitimate input from many changing sources |
+
+New signatures, another parameter or a higher severity are not suppressed. The detail of an alert marked false positive shows the
+suppression made from it (expiry, how many it held back) and a **Lift** button. Changing the status back from false positive also lifts it (after a confirmation).
+
+### Suppressions
+
+The recurrence suppressions of alerts marked false positive and the **allowlists** for authorised vulnerability scans and load tests
+(filter by kind, toggle expired / lifted). Suppressed findings raise no new alert, triage, notification or response proposal. **Lift** needs `analyst` or above.
+
+**Create allowlist** is for `admin` only. A source CIDR and a duration in hours are required; rule ID and path are optional.
+
+- The duration is capped by `detection.allowlist_max_hours` (720 h by default). Permanent allowlists are not possible.
+- Ranges wider than IPv4 /8 or IPv6 /32 are refused.
+- Handling is "Record as info" (default: still listed, but no triage, notification or proposal) or "Don't record" (count only).
+- An allowlist without a rule also silences deception (decoy trips) and AI-agent alerts. Keep the range and duration minimal.
 
 ### AI sessions
 
@@ -101,6 +126,11 @@ Vulnerability information and the results of matching it against your assets. Ta
 **Asset matches**, **Advisories** (prioritized advice from the LLM), **News** (RSS), **Web research**
 (0-day research by the LLM), **Sources**. For details, see [Vulnerability intelligence](Threat-Intel-en).
 
+Advisories that GHSA / OSV withdrew (retracted as invalid, duplicate, …) are marked **Withdrawn** in the vulnerability list and detail
+and in the asset matches (the whole vulnerability was withdrawn; exposures based on it were auto-closed). When only some advisories were
+withdrawn and data from other sources such as NVD remains, the badge reads **Partly withdrawn**. Hover the badge for the withdrawn advisory
+IDs and dates. The badge states the vulnerability's state; it does not prove why a given exposure was closed (the auto-close reason keeps its usual wording).
+
 ### Assets
 
 Register the hosts you need to protect and the software running on them (product name, version, CPE). Registered assets are used for matching
@@ -121,6 +151,12 @@ against vulnerability information and for prioritizing incidents (whether a KEV 
 
 A list of response actions proposed by the LLM, rules, and users. Tabs: **Awaiting approval** / **Active** / **History** / **Suppressions** (targets marked "do not re-propose" on reject or revert; lift them here).
 Users with `analyst` or higher can approve, reject, and revert. For details, see [Response (approval workflow)](Response-en).
+
+The approval dialog shows **which API token and sensor delivered the evidence** of the alert behind the action (for an action linked only to an
+incident, up to 5 of its alerts), from the events' `ingest.token` / `ingest.token_id` labels. A sensor_id replaced by the token's binding
+(`ingest.claimed_sensor_id`) is shown too. When the evidence contains **Gate / deception telemetry from a token without the gate scope**
+(`ingest.trust=low`), a warning about possible forgery appears: a stolen token can forge the source IP and decoy trips, so confirm the source in
+the Gate logs or other sensors before approving. Events without provenance labels (data from before the labels, or generated inside TOKIWA) are shown as "No provenance record".
 
 ### Deception
 
