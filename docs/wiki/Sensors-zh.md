@@ -86,6 +86,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   `X-Rewrite-URL`，**不会转发给上游**。Gate 会改为在 `X-Real-IP` 和 `Forwarded` 中填入自己判定的来源 IP。
   如果上游读取 Cloudflare 等前置代理添加的请求头，请将其列入 `forward_client_headers`（例如 `["cf-connecting-ip"]`）。
   Gate 也不会补充客户端没有发送的 `User-Agent` 等请求头。
+- 诱饵路径匹配时，大小写、末尾的 `/` 或 `.`、`;` 之后的部分、`%5c`（`\`）以及双重编码的差异都视为同一路径
+  （`/.ENV`、`/.env;x` 也会命中 `/.env` 诱饵）。包含这类变形的路径会带上标签 `gate:path_anomaly`。
 - `Content-Encoding: gzip` / `deflate` 的请求体会先解压再记录（标签 `gate:req_encoded`；发给上游的仍是压缩后的字节）。
   br、zstd 无法解压，只记录标签 `gate:req_encoding_unknown`。
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，

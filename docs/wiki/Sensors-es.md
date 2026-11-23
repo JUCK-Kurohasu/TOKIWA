@@ -87,6 +87,8 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
   `X-Rewrite-URL` **no se pasan al upstream**. En su lugar, Gate pone en `X-Real-IP` y `Forwarded` la IP de cliente que ha determinado.
   Si el upstream lee un encabezado que añade un proxy delante (por ejemplo, Cloudflare), inclúyalo en `forward_client_headers` (p. ej. `["cf-connecting-ip"]`).
   Gate tampoco añade un `User-Agent` ni otros encabezados que el cliente no haya enviado.
+- Al comparar con los señuelos, las diferencias de mayúsculas, una `/` o un `.` final, lo que sigue a `;`, `%5c` (`\`) y la doble codificación cuentan como la misma ruta
+  (`/.ENV` y `/.env;x` también activan un señuelo `/.env`). Las rutas con estas variaciones llevan la etiqueta `gate:path_anomaly`.
 - Los cuerpos de solicitud con `Content-Encoding: gzip` / `deflate` se registran descomprimidos (etiqueta `gate:req_encoded`; el upstream sigue recibiendo los bytes comprimidos).
   br y zstd no se pueden descomprimir; solo queda la etiqueta `gate:req_encoding_unknown`.
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,

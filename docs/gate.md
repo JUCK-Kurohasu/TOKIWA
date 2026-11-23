@@ -85,7 +85,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   `gate:req_encoded`（要求ボディを展開した。label `gate.request_encoding`, `gate.request_body_decoded_bytes`）、
   `gate:req_encoding_unknown`（br・zstd・3 段以上など展開できない符号化。本文は記録しない）、`gate:req_decode_failed`（gzip/deflate と
   宣言したが壊れている）、`gate:client_ip_header`（§6 で除去したヘッダがあった。label `gate.stripped_headers`）、
-  `gate:route_override`（`X-Original-URL` 等があった）
+  `gate:route_override`（`X-Original-URL` 等があった）、`gate:path_anomaly`（§5。label `gate.path_anomaly`）
 - labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
@@ -123,6 +123,13 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   IPv4-mapped IPv6 は IPv4 に正規化。不正エントリはスキップして WARN。重複時は rate_limited=厳しい方、tarpit=長い方。
 - デコイパス: 完全一致、または `*` 終端で接頭辞一致（最長一致）。照合前に `//` と `.`/`..` を正規化するので
   `/static/../.env` でも回避できない。`*` / `/*` のような全体デコイは拒否（サイト全体を乗っ取るため）。
+  さらに照合キー（`gate.policy.match_key`）では、**どこかの上流が同じファイルとみなす変形** も同じデコイに当てる（監査 #54）:
+  2 回目のパーセントデコード（`%252e`）、`\`（`%5c`）を `/` に、各セグメントの NUL・`;` 以降を除去（`/.env;x`、`/x/..;/.env`、
+  `config.php%3b.css`）、ドットセグメント解決の後に末尾のドット・空白と NTFS の `::$DATA` を除去、**大文字小文字を区別しない**、
+  末尾 `/` の有無を区別しない（`/admin/*` は `/admin` にも一致）。上流へ送る要求ターゲットは従来どおり生のまま。
+  照合キーがルート（`/`）になる完全一致ルート（`/;x` など）も拒否する。`;`・NUL・`\`・二重エンコード・不正な UTF-8・末尾ドット・
+  `::$` を含むパスはタグ `gate:path_anomaly`（label `gate.path_anomaly` に理由）。overlong UTF-8（`%c0%ae`）は `.` として扱わない
+  （`invalid_utf8` の印だけ）。サーバー側の検証・保存（`normalize_path`、docs/deception.md）は大文字小文字を保つ。
 - デコイヘッダ: hop-by-hop・Content-Length/Type/Encoding・Date・CR/LF を含むものは除外。
 
 ## 6. プロキシの挙動

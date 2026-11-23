@@ -86,6 +86,8 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
   `X-Rewrite-URL` は **上流へ渡しません**。代わりに Gate が `X-Real-IP` と `Forwarded` に自分が判定した送信元 IP を付けます。
   Cloudflare などの前段が付けるヘッダを上流が読む場合は、`forward_client_headers` に列挙してください（例: `["cf-connecting-ip"]`）。
   クライアントが送っていない `User-Agent` などを Gate が補うこともありません。
+- デコイの照合は大文字小文字・末尾の `/` や `.`・`;` 以降・`%5c`（`\`）・二重エンコードの違いを同じパスとみなします
+  （`/.ENV` や `/.env;x` も `/.env` のデコイに当たります）。こうした変形を含むパスにはタグ `gate:path_anomaly` が付きます。
 - `Content-Encoding: gzip` / `deflate` の要求ボディは展開してから記録します（タグ `gate:req_encoded`。上流には圧縮したまま送ります）。
   br・zstd は展開できず、タグ `gate:req_encoding_unknown` だけが残ります。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、

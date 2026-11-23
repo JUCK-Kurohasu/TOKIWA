@@ -38,7 +38,7 @@ from starlette.routing import Mount, Route
 from tokiwa.config import GateSettings, RedactionSettings, get_settings
 from tokiwa.gate.capture import BodyCapture, EventBuilder, Exchange, mime_type
 from tokiwa.gate.netmatch import parse_ip
-from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager
+from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager, path_anomalies
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
     HTTPX_FRAMING,
@@ -294,6 +294,12 @@ class Gate:
         ip = parse_ip(ex.client_ip)
         if policy.version is not None:
             ex.labels["gate.policy"] = policy.version
+        anomalies = path_anomalies(ex.path)
+        if (
+            anomalies
+        ):  # ;params, NUL, backslash, double encoding ...: only a lenient upstream resolves these (#54)
+            ex.tag("gate:path_anomaly")
+            ex.labels["gate.path_anomaly"] = ",".join(anomalies)
 
         blocked = policy.blocked.lookup(ip)
         if blocked is not None:

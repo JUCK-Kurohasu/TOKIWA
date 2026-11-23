@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import unquote
 
 import httpx
 from pydantic import ValidationError
@@ -61,6 +63,61 @@ def normalize_path(path: str) -> str:
     return out
 
 
+_NTFS_STREAM = re.compile(r"::\$[a-z_]*$")
+
+
+def _segment_head(seg: str) -> str:
+    """What a lenient server keeps of one segment: before a NUL (C string APIs) and before ``;`` (Tomcat/Jetty/
+    Spring path parameters, so ``..;`` is ``..`` there too)."""
+    return seg.split("\x00", 1)[0].split(";", 1)[0]
+
+
+def match_key(path: str) -> str:
+    """Decoy-matching key: :func:`normalize_path` plus the variants other servers treat as the same file (#54).
+
+    ``path`` is ``scope['path']`` (percent-decoded once by the ASGI server). The upstream receives the raw target,
+    so whatever *some* upstream would resolve to a decoy must match it here too, else the variant reaches the
+    real application -- and the 200-decoy vs 404-variant difference tells an agent which paths are traps:
+
+    - a second percent-decoding (``%252e`` -> ``.``), ``\\`` as ``/`` (``%5c``, IIS / Windows);
+    - per segment, everything from a NUL or ``;`` on is dropped (``/.env;x``, ``/x/..;/.env``, ``.php%3b.css``);
+    - dot segments resolved (RFC 3986), then trailing dots / spaces and NTFS ``::$DATA`` streams dropped
+      (``/.env.``, ``/.env%20``; after resolution so ``..`` is not turned into an empty segment);
+    - lower-cased (case-insensitive file systems) and without a trailing ``/``.
+
+    The request is still forwarded unchanged; only the decision "is this a decoy?" uses the key.
+    """
+    s = unquote(path) if "%" in path else path
+    s = s.replace("\\", "/")
+    s = normalize_path("/".join(_segment_head(seg) for seg in s.split("/")))
+    segments = []
+    for seg in s.lower().split("/"):
+        seg = _NTFS_STREAM.sub("", seg).rstrip(". ")
+        if seg:
+            segments.append(seg)
+    return "/" + "/".join(segments)
+
+
+def path_anomalies(path: str) -> list[str]:
+    """Reasons ``path`` (``scope['path']``) only makes sense to a lenient server (event tag ``gate:path_anomaly``)."""
+    found = []
+    if "\x00" in path:
+        found.append("nul")
+    if ";" in path:
+        found.append("semicolon")
+    if "\\" in path:
+        found.append("backslash")
+    if "%" in path and unquote(path) != path:
+        found.append("double_encoding")
+    if "�" in path:
+        found.append("invalid_utf8")  # e.g. overlong %c0%ae (not decoded as "." here)
+    if any(seg != seg.rstrip(". ") and seg not in (".", "..") for seg in path.split("/")):
+        found.append("trailing_dot_or_space")
+    if "::$" in path:
+        found.append("ntfs_stream")
+    return found
+
+
 @dataclass(frozen=True, slots=True)
 class DecoyMatcher:
     exact: dict[str, DecoyRoute] = field(default_factory=dict)
@@ -75,28 +132,33 @@ class DecoyMatcher:
             raw = route.path.strip()
             if raw.endswith("*"):
                 prefix = raw[:-1]
-                norm = normalize_path(prefix)
-                if prefix.endswith("/") and norm != "/":
-                    norm = norm.rstrip("/") + "/"
+                key = match_key(prefix)
+                if prefix.endswith("/") and key != "/":
+                    key += "/"
                 # Guard: a catch-all decoy ("*", "/*") would replace the protected site for every visitor.
-                if norm in ("", "/"):
+                if key in ("", "/"):
                     rejected.append(route.path)
                     continue
-                prefixes.setdefault(norm, route)
+                prefixes.setdefault(key, route)
             else:
-                exact.setdefault(normalize_path(raw), route)
+                key = match_key(raw)
+                if key == "/":  # e.g. "/;x" or "/%2e": would answer the home page with a decoy
+                    rejected.append(route.path)
+                    continue
+                exact.setdefault(key, route)
         ordered = tuple(sorted(prefixes.items(), key=lambda kv: len(kv[0]), reverse=True))
         return cls(exact=exact, prefixes=ordered), rejected
 
     def match(self, path: str) -> DecoyRoute | None:
         if not self.exact and not self.prefixes:
             return None
-        norm = normalize_path(path)
-        hit = self.exact.get(norm)
+        key = match_key(path)
+        hit = self.exact.get(key)
         if hit is not None:
             return hit
+        slashed = key + "/"  # "/admin" and "/admin/" are both under an "/admin/*" decoy
         for prefix, route in self.prefixes:
-            if norm.startswith(prefix):
+            if slashed.startswith(prefix):
                 return route
         return None
 

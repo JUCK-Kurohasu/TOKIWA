@@ -87,6 +87,8 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
   `X-Rewrite-URL` are **not passed to the upstream**. Instead, the Gate sets `X-Real-IP` and `Forwarded` to the client address it determined.
   If your upstream reads a header that a front proxy such as Cloudflare sets, list it in `forward_client_headers` (e.g. `["cf-connecting-ip"]`).
   The Gate also never adds a `User-Agent` or similar header that the client did not send.
+- Decoy matching treats differences in case, a trailing `/` or `.`, anything after `;`, `%5c` (`\`) and double encoding as the same path
+  (`/.ENV` and `/.env;x` also hit a `/.env` decoy). Paths containing such variations get the tag `gate:path_anomaly`.
 - Request bodies with `Content-Encoding: gzip` / `deflate` are recorded decompressed (tag `gate:req_encoded`; the upstream still gets the compressed bytes).
   br and zstd cannot be decompressed; only the tag `gate:req_encoding_unknown` is recorded.
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,
