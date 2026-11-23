@@ -62,11 +62,18 @@ def is_gate_only(event: Event) -> bool:
     return event.kind == EventKind.DECEPTION or event.dataset.startswith(GATE_ONLY_DATASET_PREFIXES)
 
 
+# The agent's own health report (audit #131, sensors/logtail.py) accompanies whatever a token is bound to; refusing
+# it would refuse the whole batch and stall the agent's shipper behind it.
+ALWAYS_ALLOWED_DATASETS = frozenset({"agent.health"})
+
+
 def check_binding(events: list[Event], token: ApiToken) -> None:
     """Refuse the batch (403) when a bound token sends a dataset outside ``allowed_datasets``."""
     if not token.allowed_datasets:
         return
     for e in events:
+        if e.dataset in ALWAYS_ALLOWED_DATASETS:
+            continue
         if not dataset_allowed(e.dataset, token.allowed_datasets):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import socket
 import time
@@ -15,9 +16,10 @@ from tokiwa.sensors.caddy import CaddyJsonParser
 from tokiwa.sensors.host import HostSensor
 from tokiwa.sensors.logtail import FileTailer, LogSource, StartAt
 from tokiwa.sensors.nginx import NginxJsonParser
-from tokiwa.sensors.normalize import ParseContext
+from tokiwa.sensors.normalize import ParseContext, ParseStats
 from tokiwa.sensors.shipper import Shipper
 from tokiwa.sensors.suricata import SuricataEveParser
+from tokiwa.sensors.tz import resolve_timezone
 from tokiwa.sensors.zeek import SUPPORTED as ZEEK_LOGS
 from tokiwa.sensors.zeek import ZeekParser, log_type_from_name
 
@@ -25,26 +27,34 @@ log = logging.getLogger(__name__)
 
 
 def build_sources(cfg: AgentSettings, ctx: ParseContext, start_at: StartAt) -> list[LogSource]:
-    """One :class:`LogSource` per configured file. Missing files are fine: they are picked up once created."""
+    """One :class:`LogSource` per configured file. Missing files are fine: they are picked up once created.
+
+    Each source gets its own copy of ``ctx`` (fresh :class:`ParseStats`, ``agent.log_timezone``)."""
     sources: list[LogSource] = []
+    tz = resolve_timezone(cfg.log_timezone)
+
+    def own() -> ParseContext:
+        return dataclasses.replace(ctx, tz=tz if tz is not None else ctx.tz, stats=ParseStats())
 
     def add(path: Path, parser: NginxJsonParser | CaddyJsonParser | SuricataEveParser | ZeekParser) -> None:
-        sources.append(LogSource(FileTailer(path, start_at=start_at), parser))
+        sources.append(
+            LogSource(FileTailer(path, start_at=start_at), parser, report_seconds=cfg.health_report_seconds)
+        )
 
     for p in cfg.nginx_json_logs:
-        add(Path(p), NginxJsonParser(ctx))
+        add(Path(p), NginxJsonParser(own()))
     for p in cfg.caddy_json_logs:
-        add(Path(p), CaddyJsonParser(ctx))
+        add(Path(p), CaddyJsonParser(own()))
     for p in cfg.suricata_eve_logs:
-        add(Path(p), SuricataEveParser(ctx))
+        add(Path(p), SuricataEveParser(own()))
     for d in cfg.zeek_log_dirs:
         d = Path(d)
         single = log_type_from_name(d.name) if d.suffix else None
         if single is not None:  # a single Zeek log file was given instead of a directory
-            add(d, ZeekParser(ctx, single))
+            add(d, ZeekParser(own(), single))
             continue
         for name in ZEEK_LOGS:
-            add(d / f"{name}.log", ZeekParser(ctx, name))
+            add(d / f"{name}.log", ZeekParser(own(), name))
     return sources
 
 
@@ -103,6 +113,9 @@ class Agent:
                 events.extend(await src.poll())
             except Exception:
                 log.exception("log source %s failed", src.name)
+            health = src.health_event()  # audit #131: lines / timestamps that could not be read
+            if health is not None:
+                events.append(health)
         return events
 
     async def run(self, stop: asyncio.Event | None = None) -> None:

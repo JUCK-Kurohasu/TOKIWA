@@ -14,14 +14,20 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO, Literal
 
-from tokiwa.schemas.events import Event
+from tokiwa.schemas.events import Event, EventKind
+from tokiwa.sensors.normalize import ParseContext, ParseStats
+from tokiwa.util import utcnow
 
 log = logging.getLogger(__name__)
 
 StartAt = Literal["end", "beginning"]
+HEALTH_DATASET = "agent.health"
+HEALTH_REPORT_SECONDS = 300.0
 
 
 class FileTailer:
@@ -161,13 +167,30 @@ class LineParser:
 
 
 class LogSource:
-    """A tailed file plus the parser for its format."""
+    """A tailed file plus the parser for its format.
 
-    def __init__(self, tailer: FileTailer, parser: LineParser) -> None:
+    Audit #131: what the parser could not read is counted (``errors`` = parser exceptions, ``parser.ctx.stats``
+    = unparseable lines / timestamps) and :meth:`health_event` turns new counts into a warning and an
+    ``agent.health`` event — at once for the first problem, then at most every ``report_seconds``.
+    """
+
+    def __init__(
+        self,
+        tailer: FileTailer,
+        parser: LineParser,
+        *,
+        report_seconds: float = HEALTH_REPORT_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.tailer = tailer
         self.parser = parser
         self.lines = 0
         self.errors = 0
+        self.report_seconds = report_seconds
+        self._clock = clock
+        self._next_report = 0.0
+        self._reported = ParseStats()
+        self._reported_errors = 0
 
     @property
     def name(self) -> str:
@@ -190,6 +213,65 @@ class LogSource:
 
     async def poll(self) -> list[Event]:
         return await asyncio.to_thread(self.poll_sync)
+
+    @property
+    def ctx(self) -> ParseContext | None:
+        """The adapters keep their :class:`ParseContext` (with the per-source stats) in ``parser.ctx``."""
+        ctx = getattr(self.parser, "ctx", None)
+        return ctx if isinstance(ctx, ParseContext) else None
+
+    @property
+    def stats(self) -> ParseStats:
+        ctx = self.ctx
+        return ctx.stats if ctx is not None else ParseStats()
+
+    def health_event(self) -> Event | None:
+        """An ``agent.health`` event when new problems were counted since the last report (else None)."""
+        current, errors = self.stats.snapshot(), self.errors
+        delta, new_errors = current.minus(self._reported), errors - self._reported_errors
+        if not delta.any() and new_errors <= 0:
+            return None
+        now = self._clock()
+        if now < self._next_report:
+            return None  # keep counting; reported together at the next slot
+        self._next_report = now + self.report_seconds
+        self._reported, self._reported_errors = current, errors
+        hints: list[str] = []
+        if delta.unparsed:
+            hints.append(f"{delta.unparsed} line(s) not in the expected format")
+        if new_errors > 0:
+            hints.append(f"{new_errors} line(s) made the parser fail")
+        if delta.bad_time:
+            hints.append(f"{delta.bad_time} timestamp(s) not understood (collection time used)")
+        if delta.naive_time:
+            hints.append(
+                f"{delta.naive_time} timestamp(s) without UTC offset read as UTC (set agent.log_timezone)"
+            )
+        if delta.recovered:
+            hints.append(f"{delta.recovered} nginx escape=default line(s) decoded (set escape=json)")
+        message = f"{self.name}: " + "; ".join(hints)
+        ctx = self.ctx
+        if delta.unparsed or delta.bad_time or new_errors > 0:
+            log.warning("log source %s", message)
+        else:
+            log.info("log source %s", message)
+        return Event(
+            timestamp=utcnow(),
+            kind=EventKind.CUSTOM,
+            dataset=HEALTH_DATASET,
+            sensor_id=ctx.sensor_id if ctx else None,
+            host=ctx.host if ctx else None,
+            message=message[:1000],
+            labels={
+                "health.source": self.name[:512],
+                "health.parser": self.parser.name,
+                "health.unparsed": str(delta.unparsed + max(new_errors, 0)),
+                "health.bad_time": str(delta.bad_time),
+                "health.naive_time": str(delta.naive_time),
+                "health.recovered": str(delta.recovered),
+                "health.lines": str(self.lines),
+            },
+        )
 
     def close(self) -> None:
         self.tailer.close()

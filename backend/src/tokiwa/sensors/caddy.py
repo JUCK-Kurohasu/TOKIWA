@@ -24,11 +24,11 @@ from tokiwa.sensors.normalize import (
     ParseContext,
     as_dict,
     clean_headers,
+    event_time,
     http_version,
     load_json_object,
     none_if_empty,
     normalize_ip,
-    parse_ts,
     red,
     split_hostport,
     split_uri,
@@ -36,7 +36,6 @@ from tokiwa.sensors.normalize import (
     to_int,
     truncate_raw,
 )
-from tokiwa.util import utcnow
 
 DATASET = "caddy.access"
 
@@ -84,7 +83,7 @@ def parse_caddy_record(rec: dict[str, Any], ctx: ParseContext) -> Event | None:
     if resp_headers_raw:
         raw["resp_headers"] = resp_headers
     return Event(
-        timestamp=parse_ts(rec.get("ts")) or utcnow(),
+        timestamp=event_time(rec.get("ts"), ctx),
         kind=EventKind.HTTP,
         dataset=DATASET,
         sensor_id=ctx.sensor_id,
@@ -106,6 +105,7 @@ class CaddyJsonParser(LineParser):
     def parse(self, line: str) -> list[Event]:
         rec = load_json_object(line)
         if rec is None:
+            self.ctx.stats.unparsed += 1
             return []
         ev = parse_caddy_record(rec, self.ctx)
         return [ev] if ev is not None else []

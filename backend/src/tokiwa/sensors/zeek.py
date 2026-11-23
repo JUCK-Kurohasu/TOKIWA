@@ -18,11 +18,11 @@ from tokiwa.sensors.logtail import LineParser
 from tokiwa.sensors.normalize import (
     ParseContext,
     clean_headers,
+    event_time,
     http_version,
     load_json_object,
     none_if_empty,
     normalize_ip,
-    parse_ts,
     red,
     split_uri,
     to_bool,
@@ -30,7 +30,6 @@ from tokiwa.sensors.normalize import (
     to_int,
     truncate_raw,
 )
-from tokiwa.util import utcnow
 
 SUPPORTED = ("conn", "http", "notice")
 _HEX_ESCAPE = re.compile(r"\\x([0-9a-fA-F]{2})")
@@ -73,7 +72,7 @@ def zeek_record_to_event(rec: dict[str, Any], log_type: str | None, ctx: ParseCo
     dst = Endpoint(ip=normalize_ip(rec.get("id.resp_h")), port=to_int(rec.get("id.resp_p")))
     labels = {"zeek.uid": str(rec["uid"])} if none_if_empty(rec.get("uid")) else {}
     base: dict[str, Any] = {
-        "timestamp": parse_ts(rec.get("ts")) or utcnow(),
+        "timestamp": event_time(rec.get("ts"), ctx),
         "dataset": f"zeek.{log_type}",
         "sensor_id": ctx.sensor_id,
         "host": ctx.host,
@@ -220,6 +219,7 @@ class ZeekParser(LineParser):
             return []
         rec = load_json_object(line) if line.lstrip().startswith("{") else self._tsv_record(line)
         if rec is None:
+            self.ctx.stats.unparsed += 1  # invalid JSON, or TSV without a #fields header
             return []
         ev = zeek_record_to_event(rec, self.log_type, self.ctx)
         return [ev] if ev is not None else []
