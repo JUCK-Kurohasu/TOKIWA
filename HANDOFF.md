@@ -13,8 +13,8 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
 
 - **何をしたか**: 「検知の入力を攻撃者が消せる」テーマの中核（#140 ヘッダ 64 個で UA 等が消える、#141 圧縮ボディが未展開）を含む 21 件を 3 レーン
   （gate-capture / web-detect / sensors）で修正。同じ PR（JUCK-Kurohasu/TOKIWA#179）。詳細は `docs/handoff/2026-11-22-audit-<レーン>.md`。
-- **完全（11）**: #138 #149 #146 #148 #99（A）、#51 #52 #53 #89 #76（B）、#131（H）。
-- **部分（10）**: #140（異常なヘッダ数の検知シグナル）、#141（展開不能の検知シグナル・運用文書）、#147（X-Original-URL の検知ルール）、#54（overlong UTF-8・上流別の正規化）、
+- **完全（8）**: #138 #149 #146 #99（A）、#52 #53 #76（B）、#131（H）。
+- **部分（13）**: #148（deceive 応答の `Vary` / `CDN-Cache-Control`）、#51（`max_inspect_chars`（8192 文字）以降は依然未検査）、#89（セミコロン無しの実体参照は理由付きで未対応 — #30 と同様に要判断）、#140（異常なヘッダ数の検知シグナル）、#141（展開不能の検知シグナル・運用文書）、#147（X-Original-URL の検知ルール）、#54（overlong UTF-8・上流別の正規化）、
   #143（redact の `tkw_` 形式・TOKIWA 自身の cmdline）、#166 / #173（**UI 未作成**。API は `GET/POST /api/v1/alert-suppressions`）、#70（`agent.send_cmdline` の既定は true のまま — 要判断）、
   #121（net 側の扱い）、#123（net_ids の attacker/victim 分離・資産台帳）、#132（UI の「取り下げ済み」表示）。
 - **Issue 未登録の修正**: Zeek `username`・nginx `remote_user`・Caddy `user_id` を raw で伏字（data-handling 調査で判明）。Gate の共有 httpx クライアントが上流の Cookie を保持していた。
