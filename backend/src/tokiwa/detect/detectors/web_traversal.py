@@ -16,6 +16,9 @@ from tokiwa.detect.web_common import (
     BODY,
     COOKIE,
     FILENAME,
+    HEADER_CUSTOM,
+    JSON_KEYS_PARAM,
+    OVERFLOW_PARAM,
     PATH,
     QUERY,
     Hit,
@@ -33,8 +36,12 @@ from tokiwa.schemas.events import Event
 
 _H, _M = Severity.HIGH, Severity.MEDIUM
 
-_TRAVERSAL_LOCATIONS = frozenset({PATH, QUERY, BODY, COOKIE, FILENAME})
+# Application-specific headers (X-File-Path, X-Template ...) are file-name carriers too (audit #53). The
+# well-known reflected headers stay out: a Referer is a browser-normalised URL, and a documentation page about
+# /etc/hosts would read as traversal.os_file.
+_TRAVERSAL_LOCATIONS = frozenset({PATH, QUERY, BODY, COOKIE, FILENAME, HEADER_CUSTOM})
 _NO_BODY = frozenset({PATH, QUERY, COOKIE, FILENAME})  # NUL bytes are normal in uploaded binaries
+_PARAMS_AND_PATH = _TRAVERSAL_LOCATIONS - {HEADER_CUSTOM}
 
 _DOT = r"(?:%(?:25){0,2}2e|%c0%ae|%e0%80%ae|%c0%2e|%u002e|%uff0e)"
 _SLASH = r"(?:%(?:25){0,2}(?:2f|5c)|%c0%af|%c1%9c|%c0%5c|%e0%80%af|%u2215|%u2216|%uff0f|%uefc8|%uf025)"
@@ -113,6 +120,7 @@ class PathTraversalDetector(WebSignatureDetector):
             _M,
             confidence=0.45,
             view="lower",
+            locations=_PARAMS_AND_PATH,  # relative "return to" paths in custom headers are common
             description="single ../ sequence",
         ),
     )
@@ -182,8 +190,8 @@ _SIG_RFI_PARAM = _pseudo(
 
 def remote_include_hits(view: HttpView) -> list[Hit]:
     for t in view.targets:
-        if t.location not in (QUERY, BODY) or not t.param:
-            continue
+        if t.location not in (QUERY, BODY) or not t.param or t.param in (OVERFLOW_PARAM, JSON_KEYS_PARAM):
+            continue  # folded overflow / key lists are not one parameter value
         value = t.value
         if "://" not in value and not value.startswith("\\\\"):
             continue

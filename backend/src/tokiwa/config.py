@@ -154,6 +154,11 @@ class WebDetectionSettings(BaseModel):
     max_multipart_parts: int = Field(default=32, ge=1, le=1024)
     # Rounds of URL/HTML/JS unescaping per value; decoding stops earlier as soon as the value is stable.
     max_decode_rounds: int = Field(default=3, ge=1, le=16)
+    # Application-specific headers (X-Tenant-Id ...) are inspected by the SQLi/XSS/traversal/command-injection
+    # detectors (audit #53). false = only the well-known reflected headers (UA, Referer, X-Forwarded-*), as before.
+    inspect_custom_headers: bool = True
+    # More header names those detectors skip (framing / opaque values); a trailing "*" matches a prefix.
+    extra_framing_headers: list[str] = Field(default_factory=list)
     # web.error_burst: 4xx storm from one source (directory brute force)
     error_burst_window_seconds: float = 60.0
     error_burst_min_errors: int = 30

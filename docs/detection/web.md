@@ -31,7 +31,8 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 | `body` | フォーム / JSON の文字列リーフ（`param` は `a.b[0]`）/ JSON のキー（全キーを 1 つにまとめた `param=(json keys)`）/ multipart パート。構造化できなければボディ全体 |
 | `body_raw` | ボディ全体（構造化できた場合のみ追加。XXE・デシリアライズ・RSC 用） |
 | `header` | 反射・記録されやすいヘッダ（User-Agent, Referer, Origin, X-Forwarded-For 系, Forwarded, X-Api-Version ...） |
-| `header_other` | その他のヘッダ（Log4Shell / OGNL / Shellshock 用）。Authorization 等は検査しない |
+| `header_custom` | アプリ固有のヘッダ（X-Tenant-Id, X-User-Id, X-Request-Id ... = `header` にも `header_other` にも当たらないもの）。SQLi / XSS / トラバーサル / コマンド注入 / LFI も検査する（#53。`detection.web.inspect_custom_headers=false` で従来どおり対象外） |
+| `header_other` | フレーミング系のヘッダ（Accept*, Sec-Fetch-* / Sec-CH-*, If-*, Cache-Control, Content-Type, traceparent / tracestate / baggage, X-Requested-With ...。一覧は `web_common.FRAMING_HEADERS`、追加は `detection.web.extra_framing_headers`）。Log4Shell / OGNL / Shellshock / SSTI / デシリアライズ / クラウドメタデータだけが見る。Authorization 等は検査しない |
 | `cookie` | Cookie のペアごと（名前も検査対象） |
 | `filename` | multipart のファイル名 |
 
@@ -122,6 +123,8 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 | `max_json_leaves` / `max_json_depth` | 128 / 16 | JSON の文字列リーフを個別に検査する数 / 深さ。超えた分はまとめて検査 |
 | `max_multipart_parts` | 32 | multipart のパートを個別に検査する数。超えた分はまとめて検査 |
 | `max_decode_rounds` | 3 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる） |
+| `inspect_custom_headers` | true | アプリ固有ヘッダ（`header_custom`）を注入系の検知器でも検査する（#53）。false で従来の挙動（既知の反射ヘッダだけ） |
+| `extra_framing_headers` | `[]` | 注入系の検知器で検査しないヘッダ名の追加（小文字。末尾 `*` で前方一致、例 `x-internal-*`）。値が不透明・自動生成のヘッダで誤検知するときに使う。Log4Shell 等は引き続き検査する |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |
 | `login_path_regex` | login, signin, auth, session, token, wp-login.php, xmlrpc.php, j_security_check ... | ログイン系パス（大小無視）。不正/2000 文字超の正規表現は既定値にフォールバック |
 | `credential_window_seconds` / `_fail_statuses` / `_min_failures` / `_min_unique_users` | 300 / [401, 403] / 10 / 4 | credential_stuffing |

@@ -13,8 +13,7 @@ from tokiwa.detect.base import register_detector
 from tokiwa.detect.web_common import (
     BODY,
     COOKIE,
-    HEADER,
-    HEADER_OTHER,
+    HEADER_LOCATIONS,
     PATH,
     QUERY,
     WebSignatureDetector,
@@ -25,7 +24,7 @@ from tokiwa.schemas.common import Severity
 _H, _M = Severity.HIGH, Severity.MEDIUM
 
 _VALUES = frozenset({QUERY, BODY, COOKIE})
-_METADATA_LOCATIONS = frozenset({QUERY, BODY, COOKIE, PATH, HEADER, HEADER_OTHER})
+_METADATA_LOCATIONS = frozenset({QUERY, BODY, COOKIE, PATH}) | HEADER_LOCATIONS
 
 _INTERNAL_HOST = (
     r"(?:localhost|127(?:\.\d{1,3}){1,3}|0\.0\.0\.0|0x7f[0-9a-f]{0,6}|0177(?:\.0{1,4}){0,3}\.0{0,3}1|2130706433"

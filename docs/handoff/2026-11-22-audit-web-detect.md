@@ -9,8 +9,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | #51 | 完全 | `detect/web_common.py`: 構造の上限（JSON リーフ・深さ・multipart パート・パラメータ・Cookie・ヘッダ）を超えた分を捨てず、NUL 区切りで 1 つの `(overflow)` ターゲットにまとめて検査。JSON キーを `(json keys)` ターゲットとして検査（キーの絞り込みはしない: `rO0AB…` や内部 IP のように英数字だけのペイロードもあるため）。JSON の走査を反復化（深いネストでもスタックを使わない）。上限到達を `HttpView.truncated` に記録し、`web.*` 署名アラートの `details.inspection_truncated` とタグ `inspection-truncated` へ。上限を `detection.web.max_params / max_headers / max_json_leaves / max_json_depth / max_multipart_parts / max_decode_rounds` で設定可能に（既定は従来値）。新検知器 `web.inspection_evasion`（low, `detect/detectors/web_evasion.py`）: 上限の手前が詰め物（同一文字 90% 以上・空/同値のダミー要素 90% 以上）のときだけ発報（上限到達だけでは鳴らさない）。テスト `tests/detect/test_web_limits.py`。docs/detection/web.md §1.2.1・§4、wiki Configuration ×4 | 29e21a0 |
-| #52 | 完全 | `web_common.content_type_params()`: Content-Type を `;` 区切りの `name=value` として解析（名前は完全一致・大小無視、値は大小保持、引用符・バックスラッシュエスケープ対応）。前方一致の `_BOUNDARY` 正規表現を廃止。`boundary` が複数（値が違う）なら全候補で分割して検査し、`web.inspection_evasion` に `multipart_boundary_ambiguous`。どの候補でも分割できなければ `None` を返しボディ全体を `body` として検査（以前は空リストで `body_raw` にしか入らなかった）。テスト `tests/detect/test_web_multipart.py`。docs/detection/web.md §1.2.2 | (このコミット) |
-| #53 | 未着手 | | |
+| #52 | 完全 | `web_common.content_type_params()`: Content-Type を `;` 区切りの `name=value` として解析（名前は完全一致・大小無視、値は大小保持、引用符・バックスラッシュエスケープ対応）。前方一致の `_BOUNDARY` 正規表現を廃止。`boundary` が複数（値が違う）なら全候補で分割して検査し、`web.inspection_evasion` に `multipart_boundary_ambiguous`。どの候補でも分割できなければ `None` を返しボディ全体を `body` として検査（以前は空リストで `body_raw` にしか入らなかった）。テスト `tests/detect/test_web_multipart.py`。docs/detection/web.md §1.2.2 | a1460cb |
+| #53 | 完全 | 許可リスト方式を反転: 既知の反射ヘッダ（`header`）とフレーミング系（`header_other` = Accept*・Sec-CH-*/Sec-Fetch-*・If-*・Cache-Control・Content-Type・traceparent/tracestate/baggage・X-Requested-With ほか `FRAMING_HEADERS`）以外のヘッダを新 location `header_custom` とし、`INJECTION_LOCATIONS` に追加（SQLi・XSS・コマンド注入・LFI・SSTI）。トラバーサルは `header_custom` だけ追加（Referer はブラウザ正規化済み URL で、`/etc/hosts` の解説ページ等が os_file に当たるため対象外）、単発の `../`（dotdot_single, medium）はヘッダでは見ない（`X-Return-To: ../orders` 等）。デシリアライズ・SSRF メタデータは全ヘッダ（`HEADER_LOCATIONS`）。件数は `max_headers`、長さは `max_inspect_chars`（#51 のあふれ・打ち切り記録が効く）。設定 `detection.web.inspect_custom_headers`（既定 true）・`extra_framing_headers`（末尾 `*` で前方一致）。RFI の include パラメータ判定で `(overflow)` / `(json keys)` を 1 つの値として扱わないよう修正。良性 fixture に実在形のカスタムヘッダ 36 個（Stripe-Signature, X-Hub-Signature-256, sec-ch-ua, baggage, JSON 値ヘッダ等）。テスト `tests/detect/test_web_headers.py`。docs/detection/web.md §1.2・§4、wiki Configuration ×4 | (このコミット) |
 | #89 | 未着手 | | |
 | #76 | 未着手 | | |
 | #166 + #173 | 未着手 | | |
@@ -29,7 +29,14 @@
 - **#51**: `web.inspection_evasion` を low にした。low は新規インシデントを作りうる（`NEW_INCIDENT_MIN_SEVERITY = low`）が、
   LLM トリアージ（既定 medium 以上）・通知（既定 high 以上）には乗らない。詰め物の判定は 16 個以上 / 1024 文字以上でだけ行う。
 
+- **#53**: カスタムヘッダの検査を既定で有効にした（セキュリティ製品として安全側。`inspect_custom_headers=false` で旧動作）。
+  誤検知の実測は良性 fixture（36 ヘッダ）と L16 コーパスのみ。社内固有のヘッダ（署名・暗号化済みトークン・検索 DSL を載せるもの）で
+  鳴る場合は `extra_framing_headers` に足す運用。フレーミング系の一覧（`web_common.FRAMING_HEADERS`）は調整余地がある。
+
 ## 既定動作の変更
+
+- **#53**: アプリ固有のヘッダ（`header` / `header_other` 以外）が SQLi・XSS・トラバーサル・コマンド注入・LFI の検査対象になった。
+  アラートの `details.location` に新しい値 `header_custom` が出る。L16 コーパスではアラート数は不変（42）。
 
 - **#51**: JSON ボディのキーが検査対象になった（`param=(json keys)`）。構造の上限を超えた要素も検査されるので、以前は
   黙って素通りしていた大きな JSON / multipart / Cookie / ヘッダ群でも `web.*` が鳴りうる。良性コーパス（L16, 6,855 イベント）と

@@ -57,14 +57,23 @@ QUERY = "query"
 BODY = "body"  # body parameters (form / JSON leaves / multipart parts) or the whole unstructured body
 BODY_RAW = "body_raw"  # the whole body, only present when it was also split into parameters
 HEADER = "header"  # headers commonly reflected/logged by apps (UA, Referer, X-Forwarded-For, ...)
-HEADER_OTHER = "header_other"  # every other header (Log4Shell / OGNL style payloads hide here)
+# Application-specific headers (X-Tenant-Id, X-User-Id, X-Request-Id ...): apps feed them into queries, logs and
+# templates, so the injection detectors read them (audit #53). Before, they were header_other and only
+# Log4Shell / SSTI / SSRF-metadata / deserialization looked at them.
+HEADER_CUSTOM = "header_custom"
+HEADER_OTHER = (
+    "header_other"  # framing headers (Accept*, Sec-*, If-*, Content-Type ...): Log4Shell / OGNL only
+)
 COOKIE = "cookie"
 FILENAME = "filename"  # multipart upload file names
 
-INJECTION_LOCATIONS = frozenset({PATH, QUERY, BODY, HEADER, COOKIE, FILENAME})
+INJECTION_LOCATIONS = frozenset({PATH, QUERY, BODY, HEADER, HEADER_CUSTOM, COOKIE, FILENAME})
 PARAM_LOCATIONS = frozenset({QUERY, BODY, COOKIE})
 WHOLE_BODY_LOCATIONS = frozenset({BODY, BODY_RAW})
-ALL_LOCATIONS = frozenset({PATH, QUERY, BODY, BODY_RAW, HEADER, HEADER_OTHER, COOKIE, FILENAME})
+HEADER_LOCATIONS = frozenset({HEADER, HEADER_CUSTOM, HEADER_OTHER})
+ALL_LOCATIONS = frozenset(
+    {PATH, QUERY, BODY, BODY_RAW, HEADER, HEADER_CUSTOM, HEADER_OTHER, COOKIE, FILENAME}
+)
 
 INJECTABLE_HEADERS = frozenset(
     {
@@ -85,6 +94,72 @@ INJECTABLE_HEADERS = frozenset(
 )
 # Never inspected as payload carriers: credentials (redacted anyway) and pure framing headers.
 _SKIP_HEADERS = frozenset({"authorization", "proxy-authorization", "content-length", "connection"})
+# Headers written by browsers, proxies, HTTP libraries and tracing SDKs - negotiation, caching, client hints,
+# fetch metadata, trace context. Applications do not treat their values as data, and several carry quotes, ``;``
+# and ``,`` by design (``sec-ch-ua: "Chromium";v="130"``, ``if-none-match: W/"x"``), so the injection detectors
+# skip them (header_other). Content-Type stays here too, but Log4Shell / OGNL (Struts CVE-2017-5638) /
+# Shellshock still read every header_other value. Extend with ``detection.web.extra_framing_headers``.
+FRAMING_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-charset",
+        "accept-encoding",
+        "accept-language",
+        "accept-datetime",
+        "access-control-request-headers",
+        "access-control-request-method",
+        "alt-used",
+        "baggage",
+        "cache-control",
+        "content-encoding",
+        "content-language",
+        "content-type",
+        "device-memory",
+        "dnt",
+        "downlink",
+        "dpr",
+        "early-data",
+        "ect",
+        "expect",
+        "if-match",
+        "if-modified-since",
+        "if-none-match",
+        "if-range",
+        "if-unmodified-since",
+        "keep-alive",
+        "max-forwards",
+        "pragma",
+        "priority",
+        "purpose",
+        "range",
+        "rtt",
+        "save-data",
+        "te",
+        "traceparent",
+        "tracestate",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "upgrade-insecure-requests",
+        "viewport-width",
+        "width",
+        "x-amzn-trace-id",
+        "x-cloud-trace-context",
+        "x-forwarded-port",
+        "x-forwarded-proto",
+        "x-requested-with",
+        "b3",
+    }
+)
+FRAMING_HEADER_PREFIXES = ("sec-ch-", "sec-fetch-", "sec-websocket-", "sec-purpose", "sec-gpc", "x-b3-")
+
+
+def is_framing_header(name: str, extra: tuple[str, ...] = ()) -> bool:
+    """``name`` (lower-case) is a framing header; ``extra`` entries ending in ``*`` match as prefixes."""
+    if name in FRAMING_HEADERS or name.startswith(FRAMING_HEADER_PREFIXES):
+        return True
+    return any(name.startswith(e[:-1]) if e.endswith("*") else name == e for e in extra)
+
 
 # Defaults of the structural limits; the effective values come from ``detection.web`` (WebDetectionSettings).
 MAX_DECODE_ROUNDS = 3
@@ -350,6 +425,8 @@ class _Build:
     max_json_leaves: int = MAX_JSON_LEAVES
     max_json_depth: int = MAX_JSON_DEPTH
     max_multipart_parts: int = MAX_MULTIPART_PARTS
+    custom_headers: bool = True
+    extra_framing: tuple[str, ...] = ()
     notes: set[str] | None = None
     flags: set[str] = field(default_factory=set)  # evasion indicators (padding, ambiguous framing)
 
@@ -365,8 +442,17 @@ class _Build:
             max_json_leaves=cfg.max_json_leaves,
             max_json_depth=cfg.max_json_depth,
             max_multipart_parts=cfg.max_multipart_parts,
+            custom_headers=cfg.inspect_custom_headers,
+            extra_framing=tuple(h.strip().lower() for h in cfg.extra_framing_headers if h.strip()),
             notes=set(),
         )
+
+    def header_location(self, name: str) -> str:
+        if name in INJECTABLE_HEADERS:
+            return HEADER
+        if not self.custom_headers or is_framing_header(name, self.extra_framing):
+            return HEADER_OTHER
+        return HEADER_CUSTOM
 
     def note(self, reason: str) -> None:
         if self.notes is not None:
@@ -740,10 +826,8 @@ def build_view(
             continue
         if name == "cookie":
             targets.extend(_cookie_targets(value, b))
-        elif name in INJECTABLE_HEADERS:
-            targets.append(b.target(HEADER, value, param=name))
         else:
-            targets.append(b.target(HEADER_OTHER, value, param=name))
+            targets.append(b.target(b.header_location(name), value, param=name))
     if len(header_items) > b.max_headers:
         # Headers past the limit are inspected together ("name: value" items) instead of being dropped.
         b.note(TRUNC_HEADERS)
@@ -755,7 +839,8 @@ def build_view(
             if str(k).lower() not in _SKIP_HEADERS
         ]
         if rest:
-            targets.append(b.target(HEADER_OTHER, OVERFLOW_SEP.join(rest), param=OVERFLOW_PARAM))
+            where = HEADER_CUSTOM if b.custom_headers else HEADER_OTHER
+            targets.append(b.target(where, OVERFLOW_SEP.join(rest), param=OVERFLOW_PARAM))
 
     lower_path = to_lower(decode(path_raw[:max_chars], rounds=b.rounds))
     host = http.host or (event.destination.hostname if event.destination else None) or ""
