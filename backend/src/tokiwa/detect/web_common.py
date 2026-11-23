@@ -118,6 +118,7 @@ INSPECTION_TRUNCATED_TAG = "inspection-truncated"
 
 # Evasion indicators recorded in ``HttpView.evasion`` (web.inspection_evasion turns them into a low alert).
 EVADE_PADDING = "padding"  # "padding:<location|json_leaves|multipart_parts|params:...|sensor_body>"
+EVADE_BOUNDARY = "multipart_boundary_ambiguous"  # several different boundary= parameters (audit #52)
 PADDING_MIN_CHARS = 1024
 PADDING_MIN_ITEMS = 16
 
@@ -460,22 +461,93 @@ def _json_targets(data: Any, b: _Build) -> list[Target]:
     return out
 
 
-_BOUNDARY = rx(r'(?:B|b)oundary="?([^";,\s]{1,200})', "multipart.boundary")
 _PART_NAME = rx(r'\bname="([^"\r\n]{0,200})"', "multipart.name")
 _PART_FILENAME = rx(r'\bfilename="([^"\r\n]{0,500})"', "multipart.filename")
 _FORMISH = rx(r"^[\w.\[\]%-]{1,100}=[^\r\n<>{}]{0,8192}$", "body.formish")
+_MAX_CT_CHARS = 1024
+_MAX_CT_PARAMS = 32
+_MAX_BOUNDARY_CHARS = 200  # RFC 2046 allows 1-70; tolerate longer, as lenient parsers do
+_MAX_BOUNDARY_CANDIDATES = 4
+
+
+def content_type_params(content_type: str) -> list[tuple[str, str]]:
+    """Parameters of a Content-Type value, in order and with duplicates (audit #52).
+
+    ``multipart/form-data; xboundary=ZZ; Boundary="B;B"`` -> ``[("xboundary", "ZZ"), ("boundary", "B;B")]``.
+    ``;``-separated ``name=value`` pairs (RFC 2045 §5.1 / RFC 9110 §5.6.6): names are matched exactly and
+    case-insensitively, values keep their case (a multipart boundary is case-sensitive), a quoted value may
+    contain ``;`` and backslash escapes. The old prefix regex took ``xboundary=`` for ``boundary=`` and missed
+    ``BOUNDARY=``. RFC 2231 continuations (``boundary*0=``) are not reassembled: they do not match ``boundary``.
+    """
+    s = content_type[:_MAX_CT_CHARS]
+    out: list[tuple[str, str]] = []
+    i = s.find(";")
+    if i < 0:
+        return out
+    i += 1
+    n = len(s)
+    while i < n and len(out) < _MAX_CT_PARAMS:
+        while i < n and s[i] in " \t;":
+            i += 1
+        j = i
+        while j < n and s[j] not in "=;":
+            j += 1
+        name = s[i:j].strip().lower()
+        if j >= n or s[j] == ";":  # parameter without a value
+            i = j + 1
+            continue
+        j += 1
+        while j < n and s[j] in " \t":
+            j += 1
+        if j < n and s[j] == '"':
+            j += 1
+            buf: list[str] = []
+            while j < n and s[j] != '"':
+                if s[j] == "\\" and j + 1 < n:
+                    j += 1
+                buf.append(s[j])
+                j += 1
+            value = "".join(buf)
+            k = s.find(";", j)
+        else:
+            k = s.find(";", j)
+            value = (s[j:] if k < 0 else s[j:k]).strip()
+        i = n if k < 0 else k + 1
+        if name:
+            out.append((name, value))
+    return out
+
+
+def _multipart_boundaries(body: str, content_type: str, b: _Build) -> list[str]:
+    """Boundary candidates: every distinct ``boundary`` parameter, else the delimiter on the body's first line.
+
+    Servers disagree on which of several ``boundary`` parameters wins (TODO(verify): first vs last per framework),
+    so every candidate is tried and the ambiguity itself is an evasion indicator - no legitimate client sends
+    two different boundaries.
+    """
+    cands = list(
+        dict.fromkeys(
+            v[:_MAX_BOUNDARY_CHARS] for k, v in content_type_params(content_type) if k == "boundary" and v
+        )
+    )
+    if len(cands) > 1:
+        b.flag(EVADE_BOUNDARY)
+    if not cands and body.startswith("--") and "\n" in body:
+        first = body[2 : body.find("\n")].strip()
+        if first:
+            cands.append(first[:_MAX_BOUNDARY_CHARS])
+    return cands[:_MAX_BOUNDARY_CANDIDATES]
 
 
 def _parse_multipart(body: str, content_type: str, b: _Build) -> list[Target] | None:
-    m = _BOUNDARY.search(content_type)
-    if m:
-        boundary = m.group(1)
-    elif body.startswith("--"):
-        boundary = body[2 : body.find("\n")].strip() if "\n" in body else ""
-    else:
-        return None
-    if not boundary:
-        return None
+    """Parts as targets; ``None`` (inspect the whole body) when no candidate boundary splits anything."""
+    out: list[Target] = []
+    for boundary in _multipart_boundaries(body, content_type, b):
+        out.extend(_split_multipart(body, boundary, b))
+    return out or None
+
+
+def _split_multipart(body: str, boundary: str, b: _Build) -> list[Target]:
     out: list[Target] = []
     contents: list[str] = []
     delim = "--" + boundary

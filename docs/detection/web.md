@@ -56,6 +56,15 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 - `max_inspect_chars` 以降の文字列は今も検査しない（CPU の上限）。そこに置かれたペイロードは、手前が詰め物なら
   `web.inspection_evasion` だけが鳴る。
 
+#### 1.2.2 multipart の boundary（#52）
+
+Content-Type のパラメータを `;` 区切りの `name=value` として解析する（名前は完全一致・大小無視、値は大小保持、
+引用符付きの値は `;` やバックスラッシュエスケープを含められる）。以前の前方一致の正規表現は `; xboundary=ZZ; boundary=BB` で
+`ZZ` を採用して分割に失敗し、全パートが `web.*` から見えなかった。`boundary` が複数あって値が違う場合はサーバーによって
+どちらが採用されるかが違う（`TODO(verify)`: フレームワークごとの先勝ち / 後勝ちは未確認）ので **すべての候補で分割して検査** し、
+`web.inspection_evasion` に `multipart_boundary_ambiguous` を出す（正規のクライアントは 2 つの boundary を送らない）。
+どの候補でもパートに分割できなければボディ全体を `body` として検査する。RFC 2231 の分割パラメータ（`boundary*0=`）は組み立てない。
+
 ### 1.3 アラート形式
 
 - 1 イベント × 1 検知器につき最大 1 アラート。最も重大度の高いヒットがタイトル・重大度を決め、異なる署名が
@@ -87,7 +96,7 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 | `web.sensitive_file_probe` | 機微ファイル探索 | T1595.003, T1083, T1552.001 | medium | `file.secrets`（.env, .aws/credentials, id_rsa, wp-config.php.bak, .htpasswd, .kube/config ...）, `file.vcs`（.git/config, .svn）, `file.debug_endpoint`(high: actuator/env, heapdump, phpunit eval-stdin, _ignition) , `file.webshell`(high), `file.backup`（backup.zip, *.sql, `~`）, `file.admin_console`, `file.info_disclosure`(low: server-status, phpinfo, .DS_Store) |
 | `web.scanner_ua` | 攻撃ツール・スキャナ | T1595, T1595.002 | medium | UA: sqlmap/commix/havij/xsstrike/hydra(high), nikto, nuclei, ffuf, gobuster, dirbuster, dirsearch, feroxbuster, wfuzz, wpscan, masscan, zgrab, Nmap NSE, Acunetix, Netsparker, w3af, Nessus, OpenVAS, ZAP ...、CensysInspect(low)。UA の表は AI 判定と共通の `aidetect/ua_catalog.py`（ここで鳴るツールと AI 判定で `scanner` になるツールは同じ集合。#124） / マーカーヘッダ（Acunetix-Aspect, X-Scan-Memo 等）/ マーカーパス（Nmap の `/nice ports,/Trinity.txt.bak` 等）/ OAST ドメイン(high: Burp Collaborator, oastify, interactsh, dnslog.cn, ceye.io。全 location) |
 | `web.rare_method` | 稀な HTTP メソッド | T1595 | low | TRACE/TRACK/DEBUG/CONNECT(medium), WebDAV 動詞(low), 非標準トークン(low), 不正なトークン(medium), `X-HTTP-Method-Override` 等での偽装 |
-| `web.inspection_evasion` | 検査上限を盾にした回避（#51） | T1190 | low | `padding:<場所>`（上限の手前の詰め物。§1.2.1）。fingerprint は `rule|ip|path_key` |
+| `web.inspection_evasion` | 検査上限を盾にした回避（#51, #52） | T1190 | low | `padding:<場所>`（上限の手前の詰め物。§1.2.1）、`multipart_boundary_ambiguous`（§1.2.2）。fingerprint は `rule|ip|path_key` |
 
 `sensitive_file_probe` は応答も見る: **2xx かつ非 HTML** なら露出の疑い（secrets/vcs/debug/webshell → critical,
 backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で Content-Type 不明なら最大 high、

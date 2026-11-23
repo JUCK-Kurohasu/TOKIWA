@@ -8,8 +8,8 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| #51 | 完全 | `detect/web_common.py`: 構造の上限（JSON リーフ・深さ・multipart パート・パラメータ・Cookie・ヘッダ）を超えた分を捨てず、NUL 区切りで 1 つの `(overflow)` ターゲットにまとめて検査。JSON キーを `(json keys)` ターゲットとして検査（キーの絞り込みはしない: `rO0AB…` や内部 IP のように英数字だけのペイロードもあるため）。JSON の走査を反復化（深いネストでもスタックを使わない）。上限到達を `HttpView.truncated` に記録し、`web.*` 署名アラートの `details.inspection_truncated` とタグ `inspection-truncated` へ。上限を `detection.web.max_params / max_headers / max_json_leaves / max_json_depth / max_multipart_parts / max_decode_rounds` で設定可能に（既定は従来値）。新検知器 `web.inspection_evasion`（low, `detect/detectors/web_evasion.py`）: 上限の手前が詰め物（同一文字 90% 以上・空/同値のダミー要素 90% 以上）のときだけ発報（上限到達だけでは鳴らさない）。テスト `tests/detect/test_web_limits.py`。docs/detection/web.md §1.2.1・§4、wiki Configuration ×4 | (このコミット) |
-| #52 | 未着手 | | |
+| #51 | 完全 | `detect/web_common.py`: 構造の上限（JSON リーフ・深さ・multipart パート・パラメータ・Cookie・ヘッダ）を超えた分を捨てず、NUL 区切りで 1 つの `(overflow)` ターゲットにまとめて検査。JSON キーを `(json keys)` ターゲットとして検査（キーの絞り込みはしない: `rO0AB…` や内部 IP のように英数字だけのペイロードもあるため）。JSON の走査を反復化（深いネストでもスタックを使わない）。上限到達を `HttpView.truncated` に記録し、`web.*` 署名アラートの `details.inspection_truncated` とタグ `inspection-truncated` へ。上限を `detection.web.max_params / max_headers / max_json_leaves / max_json_depth / max_multipart_parts / max_decode_rounds` で設定可能に（既定は従来値）。新検知器 `web.inspection_evasion`（low, `detect/detectors/web_evasion.py`）: 上限の手前が詰め物（同一文字 90% 以上・空/同値のダミー要素 90% 以上）のときだけ発報（上限到達だけでは鳴らさない）。テスト `tests/detect/test_web_limits.py`。docs/detection/web.md §1.2.1・§4、wiki Configuration ×4 | 29e21a0 |
+| #52 | 完全 | `web_common.content_type_params()`: Content-Type を `;` 区切りの `name=value` として解析（名前は完全一致・大小無視、値は大小保持、引用符・バックスラッシュエスケープ対応）。前方一致の `_BOUNDARY` 正規表現を廃止。`boundary` が複数（値が違う）なら全候補で分割して検査し、`web.inspection_evasion` に `multipart_boundary_ambiguous`。どの候補でも分割できなければ `None` を返しボディ全体を `body` として検査（以前は空リストで `body_raw` にしか入らなかった）。テスト `tests/detect/test_web_multipart.py`。docs/detection/web.md §1.2.2 | (このコミット) |
 | #53 | 未着手 | | |
 | #89 | 未着手 | | |
 | #76 | 未着手 | | |
@@ -42,6 +42,10 @@
 ## 他レーンへの依頼
 
 ## 未検証事項
+
+- **#52**: `boundary` パラメータが重複したときにどちらを採るか（Starlette / python-multipart、Werkzeug、PHP、Node の busboy 等）は
+  一次情報で確認していない（`TODO(verify)`）。TOKIWA は全候補で分割するので、どちらが採られても検査は漏れない。
+  RFC 2231 の分割パラメータ（`boundary*0=`）を組み立てるパーサーがあれば、そこは見えない。
 
 - **#51**: `sensor_body`（センサーが先頭だけ捕捉）は `request_body_size`（バイト）と捕捉文字列の UTF-8 長の比較による概算。
   Gate のマスキングで長さが変わると誤判定しうる（タグ・details だけで、アラートにはしない）。
