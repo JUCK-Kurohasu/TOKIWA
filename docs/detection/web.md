@@ -18,9 +18,23 @@ AI エージェントも最終的にはこれらのペイロードを使うた�
 | `norm` | `lower` + SQL コメント除去 + 空白を 1 個に圧縮 | SQLi / XSS / SSTI |
 | `value` | `name=value` の value 部分のみ（`lower` 相当） | SSRF / RFI（値が URL かどうか） |
 
-デコードは最大 3 ラウンドで安定するまで繰り返す: `%XX`（多重エンコード、`%%32%65` のような入れ子）、`%uXXXX`、
+デコードは最大 8 ラウンド（`detection.web.max_decode_rounds`。以前は 3 で、4 重 URL エンコードが素通りした #89）で安定するまで
+繰り返す: `%XX`（多重エンコード、`%%32%65` のような入れ子）、`%uXXXX`、
 overlong UTF-8（`%c0%ae` `%c0%af` `%c1%9c` `%e0%80%ae`）、`+`→空白（フォーム文脈の 1 ラウンド目のみ）、
 HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQL の `/*!50000 ... */` は中身を残す。全角文字は NFKC で ASCII に寄せる。
+UTF-8 として不正な単独バイト（`%A0` 等）は U+FFFD ではなく Latin-1 の文字にする（`%A0` → U+00A0 → NFKC で空白。MySQL は 0xA0 を空白扱い）。
+
+追加のターゲット（#89）:
+
+- **base64**: `query` / `body` / `cookie` / `header_custom` の値が base64 / base64url（16 文字以上）で、デコード結果が UTF-8 かつ 95% 以上
+  表示可能な文字なら、デコード結果も `param=<名前>(base64)` として検査する（1 要求 8 個まで）。トークン・ハッシュ・ID・バイナリは
+  デコードするとテキストにならないので対象外。
+- **パラメータ汚染（HPP）**: 同名パラメータが 2 回以上あれば、値を `,` で連結した `param=<名前>(joined)` も検査する（ASP.NET の挙動。
+  他のフレームワークの先勝ち / 後勝ちは個別の値で検査済み。`TODO(verify)`）。1 location あたり 4 個まで。
+- **UTF-16 のボディ**: センサーが UTF-8 として復号したため 1 文字おきに NUL が入ったボディ（multipart 以外）は、交互パターンを確かめてから
+  NUL を除いて検査する（Jackson 等は UTF-16 の JSON を自動判定して受け付ける）。ゼロ埋めのバイナリは対象外。非 ASCII 文字はセンサー側で失われている。
+- セミコロンなしの数値文字参照（`&#x3c`）は従来から展開している。監査の行列で取りこぼしに見えたのは、直後の文字が 16 進数字
+  （`&#x3dalert` → U+03DA + `lert`）の場合で、HTML の仕様どおり貪欲に読むとブラウザでもペイロードが壊れる形だった（ブラウザでの確認は `TODO(verify)`）。
 
 ### 1.2 検査対象（location）
 
@@ -28,14 +42,43 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 |---|---|
 | `path` | パス（クエリなし。`path` に `?` が含まれ `query` が空なら分割する） |
 | `query` | クエリのパラメータごと（`name=value`、`param` に名前） |
-| `body` | フォーム / JSON の文字列リーフ（`param` は `a.b[0]`）/ multipart パート。構造化できなければボディ全体 |
+| `body` | フォーム / JSON の文字列リーフ（`param` は `a.b[0]`）/ JSON のキー（全キーを 1 つにまとめた `param=(json keys)`）/ multipart パート。構造化できなければボディ全体 |
 | `body_raw` | ボディ全体（構造化できた場合のみ追加。XXE・デシリアライズ・RSC 用） |
 | `header` | 反射・記録されやすいヘッダ（User-Agent, Referer, Origin, X-Forwarded-For 系, Forwarded, X-Api-Version ...） |
-| `header_other` | その他のヘッダ（Log4Shell / OGNL / Shellshock 用）。Authorization 等は検査しない |
+| `header_custom` | アプリ固有のヘッダ（X-Tenant-Id, X-User-Id, X-Request-Id ... = `header` にも `header_other` にも当たらないもの）。SQLi / XSS / トラバーサル / コマンド注入 / LFI も検査する（#53。`detection.web.inspect_custom_headers=false` で従来どおり対象外） |
+| `header_other` | フレーミング系のヘッダ（Accept*, Sec-Fetch-* / Sec-CH-*, If-*, Cache-Control, Content-Type, traceparent / tracestate / baggage, X-Requested-With ...。一覧は `web_common.FRAMING_HEADERS`、追加は `detection.web.extra_framing_headers`）。Log4Shell / OGNL / Shellshock / SSTI / デシリアライズ / クラウドメタデータだけが見る。Authorization 等は検査しない |
 | `cookie` | Cookie のペアごと（名前も検査対象） |
 | `filename` | multipart のファイル名 |
 
 各フィールドは `detection.web.max_inspect_chars`（既定 8192）で切り詰めてからデコードする（CPU/ReDoS ガード）。
+
+#### 1.2.1 検査の上限と打ち切り（#51）
+
+構造の上限（`detection.web.max_params` / `max_headers` / `max_json_leaves` / `max_json_depth` / `max_multipart_parts`）を
+超えた分は **捨てずに** 1 つの「あふれ」ターゲット（`param=(overflow)`）にまとめて検査する。以前は JSON の 129 番目以降の
+リーフ・17 段目以降・キー名・multipart の 33 番目以降のパート・65 個目以降の Cookie / ヘッダが黙って捨てられ、
+ダミー要素を前に置くだけで全 `web.*` を回避できた。まとめるときの区切りは NUL（空白にもシェルの区切りにも
+ならないので、隣り合う項目が 1 つの文として読まれない）。
+
+- 上限に達したことは、その要求から出た `web.*` 署名アラートの `details.inspection_truncated`（理由の一覧）と
+  タグ `inspection-truncated` に残る。理由: `json_leaves` / `json_depth` / `multipart_parts` / `params:<location>` /
+  `cookies` / `headers`（あふれを検査済み）、`chars:<location>` / `body_chars`（`max_inspect_chars` 以降は**未検査**）、
+  `sensor_body`（センサーがボディの先頭しか捕捉していない。`request_body_size` との比較による概算で、マスキングで多少ずれる）。
+- 上限に達しただけでは別のアラートにしない（アップロードや一括 API は普通に上限を超える）。上限の手前が
+  **詰め物** に見えるときだけ `web.inspection_evasion`（low）を出す: 上限で切られたフィールドの 90% 以上が同じ 1 文字
+  （NUL と U+FFFD はバイナリの痕跡なので除く）、あふれた JSON リーフ・multipart パート・パラメータ・Cookie・ヘッダの
+  9 割以上が空か同じ値（16 個以上のとき）。`details.indicators` に `padding:<場所>` が入る。
+- `max_inspect_chars` 以降の文字列は今も検査しない（CPU の上限）。そこに置かれたペイロードは、手前が詰め物なら
+  `web.inspection_evasion` だけが鳴る。
+
+#### 1.2.2 multipart の boundary（#52）
+
+Content-Type のパラメータを `;` 区切りの `name=value` として解析する（名前は完全一致・大小無視、値は大小保持、
+引用符付きの値は `;` やバックスラッシュエスケープを含められる）。以前の前方一致の正規表現は `; xboundary=ZZ; boundary=BB` で
+`ZZ` を採用して分割に失敗し、全パートが `web.*` から見えなかった。`boundary` が複数あって値が違う場合はサーバーによって
+どちらが採用されるかが違う（`TODO(verify)`: フレームワークごとの先勝ち / 後勝ちは未確認）ので **すべての候補で分割して検査** し、
+`web.inspection_evasion` に `multipart_boundary_ambiguous` を出す（正規のクライアントは 2 つの boundary を送らない）。
+どの候補でもパートに分割できなければボディ全体を `body` として検査する。RFC 2231 の分割パラメータ（`boundary*0=`）は組み立てない。
 
 ### 1.3 アラート形式
 
@@ -68,6 +111,7 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 | `web.sensitive_file_probe` | 機微ファイル探索 | T1595.003, T1083, T1552.001 | medium | `file.secrets`（.env, .aws/credentials, id_rsa, wp-config.php.bak, .htpasswd, .kube/config ...）, `file.vcs`（.git/config, .svn）, `file.debug_endpoint`(high: actuator/env, heapdump, phpunit eval-stdin, _ignition) , `file.webshell`(high), `file.backup`（backup.zip, *.sql, `~`）, `file.admin_console`, `file.info_disclosure`(low: server-status, phpinfo, .DS_Store) |
 | `web.scanner_ua` | 攻撃ツール・スキャナ | T1595, T1595.002 | medium | UA: sqlmap/commix/havij/xsstrike/hydra(high), nikto, nuclei, ffuf, gobuster, dirbuster, dirsearch, feroxbuster, wfuzz, wpscan, masscan, zgrab, Nmap NSE, Acunetix, Netsparker, w3af, Nessus, OpenVAS, ZAP ...、CensysInspect(low)。UA の表は AI 判定と共通の `aidetect/ua_catalog.py`（ここで鳴るツールと AI 判定で `scanner` になるツールは同じ集合。#124） / マーカーヘッダ（Acunetix-Aspect, X-Scan-Memo 等）/ マーカーパス（Nmap の `/nice ports,/Trinity.txt.bak` 等）/ OAST ドメイン(high: Burp Collaborator, oastify, interactsh, dnslog.cn, ceye.io。全 location) |
 | `web.rare_method` | 稀な HTTP メソッド | T1595 | low | TRACE/TRACK/DEBUG/CONNECT(medium), WebDAV 動詞(low), 非標準トークン(low), 不正なトークン(medium), `X-HTTP-Method-Override` 等での偽装 |
+| `web.inspection_evasion` | 検査上限を盾にした回避（#51, #52） | T1190 | low | `padding:<場所>`（上限の手前の詰め物。§1.2.1）、`multipart_boundary_ambiguous`（§1.2.2）。fingerprint は `rule|ip|path_key` |
 
 `sensitive_file_probe` は応答も見る: **2xx かつ非 HTML** なら露出の疑い（secrets/vcs/debug/webshell → critical,
 backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で Content-Type 不明なら最大 high、
@@ -88,7 +132,13 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 
 | キー | 既定 | 説明 |
 |---|---|---|
-| `max_inspect_chars` | 8192 | フィールドごとの検査上限 |
+| `max_inspect_chars` | 8192 | フィールドごとの検査上限（これ以降の文字列は検査しない） |
+| `max_params` / `max_headers` | 64 / 64 | パラメータ・Cookie / ヘッダを個別に検査する数。超えた分はまとめて検査（§1.2.1） |
+| `max_json_leaves` / `max_json_depth` | 128 / 16 | JSON の文字列リーフを個別に検査する数 / 深さ。超えた分はまとめて検査 |
+| `max_multipart_parts` | 32 | multipart のパートを個別に検査する数。超えた分はまとめて検査 |
+| `max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる。#89 で 3 → 8） |
+| `inspect_custom_headers` | true | アプリ固有ヘッダ（`header_custom`）を注入系の検知器でも検査する（#53）。false で従来の挙動（既知の反射ヘッダだけ） |
+| `extra_framing_headers` | `[]` | 注入系の検知器で検査しないヘッダ名の追加（小文字。末尾 `*` で前方一致、例 `x-internal-*`）。値が不透明・自動生成のヘッダで誤検知するときに使う。Log4Shell 等は引き続き検査する |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |
 | `login_path_regex` | login, signin, auth, session, token, wp-login.php, xmlrpc.php, j_security_check ... | ログイン系パス（大小無視）。不正/2000 文字超の正規表現は既定値にフォールバック |
 | `credential_window_seconds` / `_fail_statuses` / `_min_failures` / `_min_unique_users` | 300 / [401, 403] / 10 / 4 | credential_stuffing |
@@ -98,6 +148,28 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 個別の検知器の有効/無効は `detection.disabled_detectors` または detectors API（sigma タスク）で切り替える。
 
 ## 5. 誤検知抑制と性能
+
+- 同梱 Sigma の web ルール（`rules/sigma/web`）は同じイベントで同じ種類の `web.*` が発報したらそちらに合流し、`web.*` が
+  有効なのに沈黙したときは low に下がる（重複発報とネイティブの抑制のすり抜けを防ぐ。#76、docs/detection/sigma.md §5.1）。
+
+### 5.1 誤検知のフィードバックと許可リスト（#166 / #173）
+
+全検知器のアラートに効く（`web.*` に限らない）。テーブル `alert_suppressions`、ロジックは `detect/suppress.py`、適用は
+`DetectionEngine.persist`（重複排除の前）。
+
+- **誤検知（false_positive）**: アラートを `false_positive` にすると（`PATCH /alerts/{id}`）、そのアラートの指紋で
+  `detection.fp_suppress_hours`（既定 168 時間。0 = 自動では作らない）抑制する。指紋 = ルール ID + 正規化した一致内容
+  （`web.*`: 一致した署名 ID の集合・location・パラメータ名、Sigma: 真になった selection の集合）+ パスの route key（`path_key`）
+  + 送信元 IP（/32・/128）。後続の draft がこれと同じルール・route・送信元で、署名 / selection が **部分集合** かつ重大度が元のアラート
+  以下なら、新しいアラートを作らず元のアラートの `count`・`last_seen`・証拠に加算する（bus に流さないのでトリアージ・通知・
+  インシデント再紐付けは起きない）。新しい署名・別パラメータ・重大度の上昇は新しい証拠として通常どおり発報する。
+  `suppress: false` で作らない、`suppress_hours` / `suppress_permanent` で期間、`suppress_any_source: true` で送信元を問わない
+  （広げると同じ route・パラメータへの攻撃も抑えるので注意）。状態を `false_positive` 以外に戻すと抑制は解除される。
+- **許可リスト（allowlist）**: 許可済みの脆弱性診断・負荷試験のために、送信元 CIDR（必須。IPv4 は /8、IPv6 は /32 より狭いこと）と
+  期間（必須。`detection.allowlist_max_hours` 既定 720 時間まで）を宣言する（`POST /alert-suppressions`、admin のみ）。任意でルール ID・
+  パスを絞れる。`downgrade`（既定）はアラートを info・状態 acknowledged・タグ `allowlisted` で記録し bus に流さない（トリアージ・
+  通知・インシデント・対処提案に乗らない）。`suppress` は記録せず件数だけ数える。ルールを絞らない許可リストはデセプションや
+  AI 判定のアラートも静かにする（期間付きで、一覧・解除は API / 監査ログで追える）。
 
 - 正常トラフィック fixture（`backend/tests/detect/fixtures/web_benign.json`: "select" を含む検索、アポストロフィ、
   `fields=name|id`、リッチテキスト JSON、JSON-LD の `@type`、XHTML DOCTYPE、正規の Next.js Server Action、

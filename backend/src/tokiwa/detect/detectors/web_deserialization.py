@@ -22,8 +22,7 @@ from tokiwa.detect.web_common import (
     BODY,
     BODY_RAW,
     COOKIE,
-    HEADER,
-    HEADER_OTHER,
+    HEADER_LOCATIONS,
     PATH,
     QUERY,
     WebSignatureDetector,
@@ -47,7 +46,7 @@ class DeserializationDetector(WebSignatureDetector):
     family = "deserialization"
     mitre = ("T1190", "T1059")
     default_severity = _H
-    locations = frozenset({PATH, QUERY, BODY, BODY_RAW, COOKIE, HEADER, HEADER_OTHER})
+    locations = frozenset({PATH, QUERY, BODY, BODY_RAW, COOKIE}) | HEADER_LOCATIONS
     signatures = (
         sig(
             "deser.java_b64",

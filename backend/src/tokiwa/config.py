@@ -145,6 +145,20 @@ class WebDetectionSettings(BaseModel):
 
     # Per-field cap before decoding (ReDoS / CPU guard). Gate captures 4 KiB of body by default.
     max_inspect_chars: int = 8192
+    # Structural limits of the request view (audit #51). Items past a limit are not dropped: they are inspected
+    # together as one "(overflow)" target and the alert records ``inspection_truncated`` (docs/detection/web.md).
+    max_params: int = Field(default=64, ge=2, le=4096)  # query / form parameters and cookies
+    max_headers: int = Field(default=64, ge=1, le=4096)
+    max_json_leaves: int = Field(default=128, ge=1, le=4096)  # string values inspected one by one
+    max_json_depth: int = Field(default=16, ge=1, le=256)
+    max_multipart_parts: int = Field(default=32, ge=1, le=1024)
+    # Rounds of URL/HTML/JS unescaping per value; decoding stops earlier as soon as the value is stable.
+    max_decode_rounds: int = Field(default=8, ge=1, le=16)
+    # Application-specific headers (X-Tenant-Id ...) are inspected by the SQLi/XSS/traversal/command-injection
+    # detectors (audit #53). false = only the well-known reflected headers (UA, Referer, X-Forwarded-*), as before.
+    inspect_custom_headers: bool = True
+    # More header names those detectors skip (framing / opaque values); a trailing "*" matches a prefix.
+    extra_framing_headers: list[str] = Field(default_factory=list)
     # web.error_burst: 4xx storm from one source (directory brute force)
     error_burst_window_seconds: float = 60.0
     error_burst_min_errors: int = 30
@@ -210,6 +224,12 @@ class DetectionSettings(BaseModel):
     # Live actor sessions kept in memory (the audit measured ~44 MB peak for 4096 one-request sessions). When full,
     # one-request low-score sessions are evicted first and sessions with AI / canary / decoy evidence last (#88).
     max_live_sessions: int = Field(default=4096, ge=16)
+    # Marking an alert false_positive suppresses the same finding (rule, matched signatures, route, source IP) for
+    # this many hours: hits are counted on the marked alert instead of raising, triaging and notifying again
+    # (audit #166). 0 = only when the analyst asks for it. docs/detection/web.md §5.1
+    fp_suppress_hours: float = Field(default=168.0, ge=0, le=24 * 365)
+    # Longest allowlist (authorised scan / load test window) an analyst may declare (audit #173).
+    allowlist_max_hours: float = Field(default=720.0, gt=0, le=24 * 365)
     web: WebDetectionSettings = Field(default_factory=WebDetectionSettings)
 
 

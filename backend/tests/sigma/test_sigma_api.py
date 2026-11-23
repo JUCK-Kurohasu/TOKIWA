@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from tokiwa.api.routes.detectors import OVERRIDES_KEY, restore_detector_overrides
 from tokiwa.auth.security import create_access_token, hash_password
+from tokiwa.config import Settings
 from tokiwa.db.models.core import AuditRow, SettingRow, UserRow
 from tokiwa.db.models.detection import AlertRow, RuleRow
 from tokiwa.db.session import session_scope
@@ -55,6 +56,15 @@ async def hits(rule_key: str) -> int:
             (await s.execute(select(AlertRow).where(AlertRow.rule_id == f"sigma:{rule_key}"))).scalars().all()
         )
         return sum(r.count for r in rows)
+
+
+def native_scanner_off(settings: Settings) -> None:
+    """The bundled scanner rule is merged into web.scanner_ua when both fire (#76, detect/sigma/overlap.py).
+
+    These tests count the rule's own alerts, so the native detector is switched off in the settings (not via the
+    detectors API, whose stored overrides the tests also check): the rule then fires at its own level.
+    """
+    settings.detection.disabled_detectors.append("web.scanner_ua")
 
 
 async def audit_actions() -> list[str]:
@@ -245,7 +255,9 @@ async def test_builtin_rule_status_toggle_and_content_is_read_only(
     admin_headers: dict[str, str],
     ingest_headers: dict[str, str],
     make_http_event: MakeEvent,
+    settings: Settings,
 ) -> None:
+    native_scanner_off(settings)
     items = (
         await client.get("/api/v1/rules", params={"source": "builtin", "limit": 500}, headers=admin_headers)
     ).json()["items"]
@@ -294,7 +306,9 @@ async def test_detectors_toggle_persists_across_restart(
     admin_headers: dict[str, str],
     ingest_headers: dict[str, str],
     make_http_event: MakeEvent,
+    settings: Settings,
 ) -> None:
+    native_scanner_off(settings)
     dets = (await client.get("/api/v1/detectors", headers=admin_headers)).json()
     sigma = next(d for d in dets if d["id"] == "sigma")
     assert sigma["enabled"] is True and sigma["name"] == "Sigma rules"

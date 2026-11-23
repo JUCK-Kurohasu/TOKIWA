@@ -111,6 +111,23 @@ TOKIWA は Sigma ルールを **TOKIWA の `Event` に対してインメモリ�
 | `details` | `sigma_id`, `rule_ref`（rules 行 id → `GET /rules/{rule_ref}`）, `rule_origin`, `rule_path`, `level`, `matched`（真になった selection 名）, `falsepositives`, `logsource` |
 | `fingerprint` | 既定（`rule_id|source_ip`）で重複排除 |
 
+### 5.1 同梱 web ルールとネイティブ `web.*` 検知器の重複（#76）
+
+`rules/sigma/web` の 14 本はネイティブの `web.*` 検知器と同じ対象を単純な部分一致と固定の level で見るため、以前は 1 リクエストで
+2 件（別 fingerprint）のアラートになり、しかも Sigma 側はネイティブの誤検知抑制（単発の `../` は medium 等）を経ずに high を付けていた
+（既定の通知閾値 high を超える）。現在はイベントごとに、検知器がすべて走った後で次のように合流させる（`detect/sigma/overlap.py`）:
+
+| ネイティブ検知器 | Sigma の扱い |
+|---|---|
+| 同じイベントで発報した | Sigma 側は出さない。ネイティブのアラートに `details.corroborated_by: ["sigma:<id>"]` とタグ `sigma-corroborated` |
+| 有効だが発報しなかった | Sigma 側を **low** に下げて出す（`details.native_detector` / `native_verdict: "silent"` / `sigma_level_severity`、タグ `native-silent`）。ネイティブが良性と判断したか見逃したかのどちらか。既定ではトリアージ（medium 以上）・通知（high 以上）に乗らない |
+| 無効（`disabled_detectors` / 検知器 API） | ルールの level のまま（唯一の検知手段なので） |
+
+対応表は Sigma の `id` で持つ（`NATIVE_OVERLAP`）。利用者・LLM が追加したルール（rules テーブル）は合流も降格もしない。
+3 案（同梱ルールの既定無効化・level の一律引き下げ・合流）のうち合流を選んだ理由: 無効化だとネイティブが取りこぼした変種
+（監査の行列で Sigma だけが拾っていた形）の安全網がなくなり、一律引き下げだとネイティブ無効時のフォールバックとしての重大度が失われるため。
+良性コーパス（監査 L16, 6,855 イベント）ではアラート 42 → 31、mock LLM 呼び出し 82 → 64（提案数は不変）。
+
 ## 6. 初期ルールセット（rules/sigma/, 25 本）
 
 | ファイル | 内容 | level |

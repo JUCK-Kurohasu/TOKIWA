@@ -37,6 +37,7 @@ EXPECTED_IDS = {
     "web.error_burst",
     "web.credential_stuffing",
     "web.request_flood",
+    "web.inspection_evasion",
 }
 
 
@@ -81,7 +82,9 @@ def test_all_web_detectors_registered(detectors: dict[str, Detector]) -> None:
 def test_every_signature_detector_has_positive_cases() -> None:
     covered = {c["detector"] for c in ATTACKS}
     stateful = {"web.error_burst", "web.credential_stuffing", "web.request_flood"}
-    assert covered == EXPECTED_IDS - stateful
+    # needs >8 KiB / >128-leaf bodies: covered by tests/detect/test_web_limits.py
+    long_inputs = {"web.inspection_evasion"}
+    assert covered == EXPECTED_IDS - stateful - long_inputs
 
 
 @pytest.mark.parametrize(

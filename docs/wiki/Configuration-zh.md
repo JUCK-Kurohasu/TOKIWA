@@ -92,7 +92,12 @@ deception:
 | `ai_agent_threshold` | 0.7 | 判定为 AI 智能体的 AI 评分阈值 |
 | `max_future_skew_seconds` | 120 | 允许传感器时钟超前的秒数。时间戳比这更靠后的事件改用接收时间，并加上标签 `clock_skew` 和标注 `ingest.original_timestamp`（原始时间）；审计日志 `ingest.clock_skew` 每个令牌每 10 分钟最多记录一次。过去的时间戳（延迟或重发的事件）保持不变 |
 | `max_live_sessions` | 4096 | 内存中保留的会话数上限。满了以后先淘汰只有 1 个请求的低分会话，带有 AI 判定、金丝雀或诱饵证据的会话最后淘汰。淘汰过多时输出 WARNING 日志（大量只发 1 个请求的客户端可能重置会话特征）；正常负载下也出现时请调大 |
+| `fp_suppress_hours` | 168 | 将告警标记为“误报”后，在此时间内抑制同一问题（相同规则、匹配内容、路径和来源 IP）的再次出现：再次出现只累加到原告警的计数，不产生新告警、LLM 分诊或通知。出现新的签名或严重级别升高时照常告警。设为 0 则不自动抑制。抑制的列表和解除通过 API `GET/POST /api/v1/alert-suppressions` |
+| `allowlist_max_hours` | 720 | 声明已授权的漏洞扫描或负载测试来源 CIDR 的许可列表（由管理员通过 API 创建，必须指定期限）的最长期限。许可列表内的告警只以 info 记录，不进入分诊、通知、事件或处置建议 |
 | `web.*` | — | Web 类速率检测的阈值（连续错误、登录失败、洪泛等） |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 签名检测的检查上限。超出数量上限的参数、请求头、JSON 值和 multipart 部分不会被丢弃，而是合并在一起检查；超出字符数上限的部分不检查。达到上限时记录在告警的 `details.inspection_truncated` 和标签 `inspection-truncated` 中；如果上限之前的内容像填充（同一字符重复、空的虚拟元素），会产生 `web.inspection_evasion`（low） |
+| `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | 应用自定义的请求头（X-Tenant-Id 等）也作为 SQLi、XSS、路径遍历、命令注入的检查对象。Accept、Sec-*、If-*、追踪类等框架性请求头不检查；在 `extra_framing_headers` 中添加名称（末尾 `*` 表示前缀匹配）可以排除更多。设为 false 恢复以前的行为（只检查 User-Agent、Referer、X-Forwarded-* 等） |
+| `web.max_decode_rounds` | 8 | 对一个值重复进行 URL / HTML / JS 解码的最大次数（应对多重编码；值不再变化时即停止） |
 
 ### 分诊（研判）与关联（`triage.*`）
 

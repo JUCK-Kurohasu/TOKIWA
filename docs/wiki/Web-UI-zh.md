@@ -111,7 +111,9 @@ TOKIWA Agent 发送过来的主机信息。标签页：**Ports**（端口：监�
 ### Rules（检测规则）
 
 - **Detectors**（检测器）：启用 / 禁用内置检测器（Web 攻击特征签名、AI 行为、欺骗防御、端口等）
-- **Sigma rules**（Sigma 规则）：管理 Sigma 格式的规则（内置 25 条 + 追加的规则）
+- **Sigma rules**（Sigma 规则）：管理 Sigma 格式的规则（内置 25 条 + 追加的规则）。内置的 14 条 Web 攻击规则，如果同一请求中
+  同类的内置 Web 检测器也告警，就合并到该检测器（只产生 1 条告警，记录在 `details.corroborated_by` 中）；如果检测器已启用却没有
+  告警，则以 low 记录。只有在禁用该检测器时，规则才以自身的严重级别告警
 - **LLM proposals**（LLM 提议）：LLM 根据漏洞信息提议的规则。**不会自动启用**，需经审查后再采用
 
 ## Respond（处置）

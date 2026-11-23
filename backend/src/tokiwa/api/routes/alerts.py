@@ -12,7 +12,9 @@ from tokiwa.api.deps import AnalystUser, CurrentUser, DbSession
 from tokiwa.api.visibility import project_events
 from tokiwa.audit import record_audit
 from tokiwa.bus import bus
+from tokiwa.config import get_settings
 from tokiwa.db.models.detection import AlertRow
+from tokiwa.detect import suppress as alert_suppress
 from tokiwa.llm.base import LLMTier
 from tokiwa.pipeline.store import get_events
 from tokiwa.schemas.alerts import Alert, AlertCategory, AlertDetail, AlertStatus, AlertUpdate
@@ -125,7 +127,24 @@ async def update_alert(alert_id: str, body: AlertUpdate, session: DbSession, use
     after: dict[str, Any] = {}
     if body.status is not None and body.status != row.status:
         before["status"], after["status"] = row.status, body.status.value
+        if row.status == AlertStatus.FALSE_POSITIVE:
+            # No longer a false positive: stop suppressing its recurrences (audit #166).
+            await alert_suppress.lift_for_alert(session, row.id, actor=user.username)
         row.status = body.status
+        if body.status == AlertStatus.FALSE_POSITIVE and body.suppress is not False:
+            # Count recurrences of the same finding on this alert instead of raising, triaging and notifying again.
+            supp = await alert_suppress.create_from_alert(
+                session,
+                row,
+                actor=user.username,
+                settings=get_settings(),
+                hours=body.suppress_hours,
+                permanent=body.suppress_permanent,
+                any_source=body.suppress_any_source,
+                reason=body.reason,
+            )
+            if supp is not None:
+                after["suppression_id"] = supp.id
     if body.tags is not None:
         tags = list(dict.fromkeys(t.strip() for t in body.tags if t.strip()))
         if tags != list(row.tags or []):
