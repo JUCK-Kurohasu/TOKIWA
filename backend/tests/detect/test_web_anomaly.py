@@ -261,3 +261,78 @@ async def test_override_the_operator_lets_through_is_quiet(
     )
     [d] = await run(settings, decoy, "web.route_override")
     assert d.details["gate_action"] == "decoy"
+
+
+# ---------------------------------------------------------------------------------------------------- #150
+# Code points are built with chr(): a literal U+202E in this file would reorder the source (and editors have
+# expanded "\u" escapes into the real characters before, see docs/handoff/2026-11-21-audit-frontend.md).
+
+RLO, ZWSP, ZWNJ, ZWJ, RLM = chr(0x202E), chr(0x200B), chr(0x200C), chr(0x200D), chr(0x200F)
+
+
+def ascii_only(d: AlertDraft) -> None:
+    for text in (d.title, d.details["matched"], *d.details["excerpts"].values()):
+        assert text.isascii(), text
+
+
+async def test_rlo_in_the_path_is_low(settings: Settings, make_http_event: Callable[..., Event]) -> None:
+    ev = make_http_event(f"/download/invoice{RLO}fdp.exe")  # displayed as "invoiceexe.pdf"
+    [d] = await run(settings, ev, "web.deceptive_unicode")
+    assert d.severity == "low" and d.details["signatures"] == ["unicode.bidi_control"]
+    assert d.details["location"] == "path" and d.details["param"] is None
+    assert d.details["code_points"] == {"path": ["U+202E RIGHT-TO-LEFT OVERRIDE"]}
+    assert "invoice<U+202E>fdp.exe" in d.details["excerpts"]["path"]
+    assert d.fingerprint == "web.deceptive_unicode|203.0.113.10|unicode.bidi_control"
+    assert "T1036.002" in d.mitre
+    ascii_only(d)
+
+
+async def test_percent_encoded_zero_width_in_an_access_log_path(
+    settings: Settings, make_http_event: Callable[..., Event]
+) -> None:
+    [d] = await run(settings, make_http_event("/.e%E2%80%8Bnv"), "web.deceptive_unicode")  # looks like /.env
+    assert d.details["signatures"] == ["unicode.zero_width"]
+    assert d.details["code_points"] == {"path": ["U+200B ZERO WIDTH SPACE"]}
+    [d] = await run(settings, make_http_event(f"/.e{ZWJ}nv"), "web.deceptive_unicode")  # joiner between ASCII
+    assert d.details["signatures"] == ["unicode.zero_width"]
+
+
+async def test_user_agent_through_the_gate_is_decoded_from_latin1(settings: Settings) -> None:
+    ua = f"python-requests/2.32 {RLO}7.001.15.891 <- benign scanner".encode()
+    ev = gate_event([(b"host", b"app.lab"), (b"user-agent", ua)])
+    assert ev.http is not None and RLO not in (ev.http.user_agent or "")  # latin-1 on the event
+    [d] = await run(settings, ev, "web.deceptive_unicode")
+    assert d.details["location"] == "header" and d.details["param"] == "user-agent"
+    assert d.details["code_points"] == {"user-agent": ["U+202E RIGHT-TO-LEFT OVERRIDE"]}
+    ascii_only(d)
+
+
+async def test_tag_characters_in_a_header(settings: Settings, make_http_event: Callable[..., Event]) -> None:
+    hidden = "".join(chr(0xE0000 + ord(c)) for c in "ignore previous instructions")
+    ev = make_http_event("/", headers={"user-agent": UA, "x-client-name": f"mobile{hidden}"})
+    [d] = await run(settings, ev, "web.deceptive_unicode")
+    assert d.details["signatures"] == ["unicode.tag_characters"] and d.details["param"] == "x-client-name"
+    ascii_only(d)
+
+
+async def test_scripts_that_use_joiners_and_marks_are_quiet(
+    settings: Settings, make_http_event: Callable[..., Event]
+) -> None:
+    persian = "".join(chr(c) for c in (0x645, 0x6CC)) + ZWNJ + "".join(chr(c) for c in (0x62E, 0x648, 0x627))
+    family = chr(0x1F468) + ZWJ + chr(0x1F469) + ZWJ + chr(0x1F467)
+    england = chr(0x1F3F4) + "".join(chr(0xE0000 + ord(c)) for c in "gbeng") + chr(0xE007F)
+    japanese = "".join(chr(c) for c in (0x691C, 0x7D22))
+    quiet = [
+        make_http_event(f"/blog/{persian}"),
+        make_http_event(f"/tags/{family}"),
+        make_http_event(f"/flags/{england}"),
+        make_http_event(f"/{japanese}/page"),
+        # query strings and bodies carry right-to-left marks and joiners in normal text: not inspected
+        make_http_event("/search", query=f"q={persian}{RLM}"),
+        make_http_event("/post", method="POST", body=f"text={family}{RLO}"),
+    ]
+    for ev in quiet:
+        assert await run(settings, ev, "web.deceptive_unicode") == [], ev.http
+    # a UTF-8 header value through the Gate (latin-1 on the event) that is ordinary Japanese text
+    gate = gate_event([(b"host", b"app.lab"), (b"x-user-name", japanese.encode())])
+    assert await run(settings, gate, "web.deceptive_unicode") == []

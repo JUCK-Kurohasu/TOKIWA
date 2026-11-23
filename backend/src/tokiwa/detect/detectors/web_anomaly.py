@@ -9,6 +9,8 @@ by ``tokiwa.gate.capture``), plus the parts of the request itself that only make
   (br / zstd / deeper stacks, or a corrupt gzip / deflate stream): no body detector saw what the application got.
 * ``web.route_override`` (audit #147) - ``X-Original-URL`` / ``X-Rewrite-URL`` / ``X-Override-URL``: an upstream
   that honours them serves another path than the request line names (decoys and path-based detection bypassed).
+* ``web.deceptive_unicode`` (audit #150) - bidi controls (U+202E ...), zero-width or tag characters in the path,
+  User-Agent or header values: text that reads differently to a human than to a machine (Trojan Source).
 
 Each alert carries ``details.signatures`` (indicator ids), ``location`` and ``param`` like the ``web.*``
 signature alerts, so marking one false positive suppresses that indicator only (``detect.suppress.match_of``).
@@ -18,16 +20,19 @@ proposes response actions only from high, so none of these alone puts the source
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
 
 from tokiwa.detect.base import Detector, register_detector
 from tokiwa.detect.context import DetectionContext
 from tokiwa.detect.web_common import (
+    PATH,
     ROUTE_OVERRIDE_HEADERS,
     HttpView,
     clean_label,
     get_view,
     override_path,
+    rx,
     web_settings,
 )
 from tokiwa.schemas.alerts import AlertCategory, AlertDraft
@@ -321,4 +326,154 @@ class RouteOverrideDetector(Detector):
                 "request_path": clean_label(view.path_clean, 200),
                 "gate_action": clean_label((event.labels or {}).get(LABEL_ACTION, ""), 40) or None,
             },
+        )
+
+
+# ---------------------------------------------------------------------------------------------------------
+# web.deceptive_unicode (audit #150)
+# ---------------------------------------------------------------------------------------------------------
+
+# Every code point below is written as an escape: a literal U+202E in this file would reorder the source itself.
+# Embeddings / overrides / isolates reorder what follows them; no path, User-Agent or header needs them.
+BIDI_CONTROLS = frozenset([*range(0x202A, 0x202F), *range(0x2066, 0x206A)])
+# Invisible in any context (ZERO WIDTH SPACE, WORD JOINER, BOM / ZERO WIDTH NO-BREAK SPACE).
+ZERO_WIDTH = frozenset({0x200B, 0x2060, 0xFEFF})
+# Part of normal text in some scripts: ZWNJ / ZWJ (Persian, Indic scripts, emoji sequences), LRM / RLM / ALM in
+# right-to-left text, MONGOLIAN VOWEL SEPARATOR, Hangul fillers. Flagged only next to an ASCII character or at the
+# start / end of the value ("/.e<ZWJ>nv"), never between two letters of such a script.
+CONTEXTUAL = frozenset({0x200C, 0x200D, 0x200E, 0x200F, 0x061C, 0x180E, 0x115F, 0x1160, 0x3164, 0xFFA0})
+TAG_FIRST, TAG_LAST = 0xE0000, 0xE007F  # tag characters ("ASCII smuggling"); legitimate only in flag emoji
+BLACK_FLAG = 0x1F3F4  # subdivision flags are U+1F3F4 + tag characters + U+E007F
+# Kept in line with the UI's BIDI_RE (frontend/src/components/common/invisible.ts) for the reordering set.
+_CANDIDATES = rx(
+    r"[\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\u3164\ufeff\uffa0"
+    r"\U000e0000-\U000e007f]",
+    "deceptive_unicode.candidates",
+)
+MAX_UNICODE_LOCATIONS = 8
+
+
+def as_received(value: str) -> str:
+    """Header values as the client wrote them. The Gate decodes header bytes as latin-1 (HTTP's default), so a
+    UTF-8 U+202E arrives as three latin-1 characters; undo that when the value is valid UTF-8."""
+    if value.isascii():
+        return value
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value  # real code points (another sensor, JSON ingest) or not UTF-8
+
+
+def _kind(text: str, i: int, cp: int) -> str | None:
+    """Indicator for the candidate at ``text[i]``, or None when it is ordinary text in its context."""
+    if cp in BIDI_CONTROLS:
+        return "unicode.bidi_control"
+    if cp in ZERO_WIDTH:
+        return "unicode.zero_width"
+    if TAG_FIRST <= cp <= TAG_LAST:
+        j = i
+        while j > 0 and TAG_FIRST <= ord(text[j - 1]) <= TAG_LAST:
+            j -= 1
+        return None if j > 0 and ord(text[j - 1]) == BLACK_FLAG else "unicode.tag_characters"
+    left = text[i - 1] if i > 0 else ""
+    right = text[i + 1] if i + 1 < len(text) else ""
+    if not left or not right or left.isascii() or right.isascii():
+        return "unicode.bidi_control" if cp in (0x200E, 0x200F, 0x061C) else "unicode.zero_width"
+    return None
+
+
+def deceptive_code_points(text: str) -> tuple[list[str], list[int]]:
+    """(indicator ids, code points) of the deceptive characters in ``text``, each listed once."""
+    kinds: list[str] = []
+    cps: list[int] = []
+    for m in _CANDIDATES.finditer(text):
+        cp = ord(m.group())
+        kind = _kind(text, m.start(), cp)
+        if kind is None:
+            continue
+        if kind not in kinds:
+            kinds.append(kind)
+        if cp not in cps:
+            cps.append(cp)
+    return kinds, cps
+
+
+def code_point_label(cp: int) -> str:
+    name = unicodedata.name(chr(cp), "")
+    return f"U+{cp:04X}" + (f" {name}" if name else "")
+
+
+def escape_deceptive(text: str, limit: int = 160) -> str:
+    """Printable excerpt around the first candidate, each candidate shown as ``<U+XXXX>``."""
+    first = _CANDIDATES.search(text)
+    start = max(0, first.start() - 40) if first else 0
+    excerpt = text[start : start + limit]
+    shown = _CANDIDATES.sub(lambda m: f"<U+{ord(m.group()):04X}>", excerpt)
+    return ("..." if start else "") + clean_label(shown, limit + 60)
+
+
+@register_detector
+class DeceptiveUnicodeDetector(Detector):
+    id = "web.deceptive_unicode"
+    name = "Invisible or bidi control characters"
+    description = (
+        "Bidirectional controls (U+202A-U+202E, U+2066-U+2069), zero-width characters (U+200B, U+2060, U+FEFF; "
+        "ZWNJ / ZWJ / LRM / RLM next to ASCII) or tag characters in the request path, User-Agent or a header "
+        "value. Such text is displayed differently from what it is: '/invoice<U+202E>fdp.exe' reads as "
+        "'invoiceexe.pdf', '/.e<U+200B>nv' as '/.env'. Clients have no reason to send them there; it is an "
+        "attempt to mislead whoever reads the logs (or an LLM reading them). The UI shows them as <U+XXXX>."
+    )
+    category = AlertCategory.ANOMALY
+    kinds = frozenset({EventKind.HTTP})
+    mitre = ("T1036.002",)
+    default_severity = _L
+
+    async def process(self, event: Event, ctx: DetectionContext) -> list[AlertDraft]:
+        view = get_view(event, ctx)
+        if view is None:
+            return []
+        # (location, param, text). Query strings and bodies are left out: right-to-left and emoji text legitimately
+        # carries marks and joiners there.
+        fields: list[tuple[str, str | None, str]] = []
+        path = next((t for t in view.targets if t.location == PATH), None)
+        if path is not None:
+            fields.append(("path", None, path.decoded))
+        ua = view.headers.get("user-agent")
+        if ua:
+            fields.append(("header", "user-agent", as_received(ua)))
+        fields += [
+            ("header", name, as_received(value))
+            for name, value in view.headers.items()
+            if name != "user-agent" and value and not value.isascii()
+        ]
+        found: list[tuple[Severity, str, str]] = []
+        per_location: dict[str, list[str]] = {}
+        excerpts: dict[str, str] = {}
+        top: tuple[str, str | None] | None = None
+        for location, param, text in fields:
+            if text.isascii():
+                continue
+            kinds, cps = deceptive_code_points(text)
+            if not kinds:
+                continue
+            where = param or location
+            labels = [code_point_label(cp) for cp in cps[:8]]
+            per_location[where] = labels
+            excerpts[where] = escape_deceptive(text)
+            for kind in kinds:
+                found.append((_L, kind, f"{', '.join(f'U+{cp:04X}' for cp in cps[:4])} in {where}"))
+            top = top or (location, param)
+            if len(per_location) >= MAX_UNICODE_LOCATIONS:
+                break
+        if not found or top is None:
+            return []
+        return _draft(
+            self,
+            event,
+            view,
+            found,
+            location=top[0],
+            param=top[1],
+            confidence=0.6,
+            extra={"code_points": per_location, "excerpts": excerpts},
         )

@@ -15,7 +15,8 @@
 |---|---|---|---|
 | #140 | 部分（推奨 (1)(3)(4) は gate-capture レーンで完了。(2) の「異常なヘッダ数をシグナルに」は実装したが、**41〜64 行は low**（推奨の例は「>40 で medium」）。理由は要判断 1） | 新検知器 `web.header_anomaly`（`category=anomaly`, T1190）。指標: `header_anomaly.count`（ヘッダ行数 > `detection.web.header_count_low`（既定 40）で low、> `header_count_medium`（既定 64）で medium）、`header_anomaly.capture_dropped`（medium: Gate が 64 名に収めきれず記録しなかった行がある = label `gate.headers_dropped`）、`header_anomaly.rejected`（medium: `gate:too_many_headers` = 431。同名 101 行のように件数ラベルが付かない場合もこれで拾う）、`header_anomaly.duplicate_framing`（medium: Host / Content-Length / Transfer-Encoding の重複）、`header_anomaly.duplicate`（low: その他の非リストヘッダの重複 = `gate.duplicate_headers`）。ヘッダ行数は `gate.header_count`（Gate が捕捉を打ち切ったときだけ付く実数）、無ければ `max(len(headers), len(header_order))`。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らさない。`details` に `signatures`・`location`・`param` を入れて誤検知マーク（#166）が指標単位で効くように。fingerprint `rule|ip|最も重い指標`。テスト: 70 個のパディング → medium・件数 78・未記録 14、48 行 → low、Client Hints + CDN ヘッダ + 分割 Cookie（20 行・clipped）→ 無音、しきい値の設定、431、Host 重複 → medium・UA 重複 → low、DECEPTION 種別のコピーでは重複発報しない。docs/detection/web.md §2.1・§4、wiki Configuration ×4 | 7e35122 |
 | #141 | 完全（推奨 (1) と (2) の「印を付ける」・(3) 運用文書は gate-capture レーンで完了。(2) の「web_recon で low〜medium シグナル化」をこのレーンで実装） | 新検知器 `web.uninspectable_body`（`category=anomaly`, T1190）。`gate:req_encoding_unknown`（br・zstd・compress・3 段以上。Gate は本文を記録しない）→ `body.encoding_unknown`: **上流が受け付けた（status 200〜399）なら medium**、それ以外（415・400・Gate の 403 等）は low。`gate:req_decode_failed`（gzip / deflate と宣言して展開できない。Gate は生の先頭をテキストとして記録するので他の `web.*` が検査する）→ `body.decode_failed`: low。`details.content_encoding` は `Content-Encoding` ヘッダの値（`clean_label`、60 文字）。テスト: br + 200 → medium・本文なし、br + 415 → low、壊れた gzip に平文の SQLi → low + `web.sqli`（param=password）も鳴る、正しい gzip と非圧縮は無音。docs/detection/web.md §2.1 | ccad1ff |
-| #147 | 完全（推奨 (1) と (2) の除去・タグ・デコイ照合は gate-capture レーンで完了。(2) の「値を sensitive path 検知にかける」と (3) の検知ルールをこのレーンで実装） | 新検知器 `web.route_override`（`category=exploit_attempt`, T1190）。`X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL` の値のパス（`web_common.override_path()`: 絶対 URL はパス部分、`?`・`#` 以降を除く、先頭 `/` 補完、デコード・NFKC・小文字化・`clean_path` = `HttpView.path_clean` と同じ正規化）が要求行のパスと違えば `route_override.different_path`（**medium**）、値が空なら `route_override.empty`（low）。**要求行と同じパスは鳴らさない**（`X-Forwarded-Prefix` + パスで同じ場合も）: 前段のプロキシが受けた URL をそのまま付ける形（IIS ARR、nginx の `proxy_set_header X-Original-URL $request_uri` 等）で、web-detect レーンの良性 fixture「app custom headers」もこの形（初版は同一パスを low にしていてこの fixture で落ちた）。Gate がそのヘッダを渡した（`gate:route_override` あり・`gate.action=proxy`・`gate.stripped_headers` に名前が無い = 運用者が `gate.forward_client_headers` で許可）ときは鳴らさない。タグが無い（Gate 更新前の古い Gate はこのヘッダを上流へ渡す）ときはクライアント由来として扱う。`web.sensitive_file_probe` は値のパスも同じ署名で検査（`location=header_custom`・`param`=ヘッダ名・タグ `route_override`。応答は要求行のものなので 2xx による昇格はしない）。テスト: `/static/app.js` + `X-Original-URL: /.env` → route_override medium と sensitive_file_probe medium（200 text/plain でも critical にならない）、絶対 URL、空値、タグなし、運用者許可で無音、デコイ応答では鳴る、同一パス・プレフィックス付き同一パスは無音。攻撃 fixture 3 件。docs/detection/web.md §2・§2.1 | （このコミット） |
+| #147 | 完全（推奨 (1) と (2) の除去・タグ・デコイ照合は gate-capture レーンで完了。(2) の「値を sensitive path 検知にかける」と (3) の検知ルールをこのレーンで実装） | 新検知器 `web.route_override`（`category=exploit_attempt`, T1190）。`X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL` の値のパス（`web_common.override_path()`: 絶対 URL はパス部分、`?`・`#` 以降を除く、先頭 `/` 補完、デコード・NFKC・小文字化・`clean_path` = `HttpView.path_clean` と同じ正規化）が要求行のパスと違えば `route_override.different_path`（**medium**）、値が空なら `route_override.empty`（low）。**要求行と同じパスは鳴らさない**（`X-Forwarded-Prefix` + パスで同じ場合も）: 前段のプロキシが受けた URL をそのまま付ける形（IIS ARR、nginx の `proxy_set_header X-Original-URL $request_uri` 等）で、web-detect レーンの良性 fixture「app custom headers」もこの形（初版は同一パスを low にしていてこの fixture で落ちた）。Gate がそのヘッダを渡した（`gate:route_override` あり・`gate.action=proxy`・`gate.stripped_headers` に名前が無い = 運用者が `gate.forward_client_headers` で許可）ときは鳴らさない。タグが無い（Gate 更新前の古い Gate はこのヘッダを上流へ渡す）ときはクライアント由来として扱う。`web.sensitive_file_probe` は値のパスも同じ署名で検査（`location=header_custom`・`param`=ヘッダ名・タグ `route_override`。応答は要求行のものなので 2xx による昇格はしない）。テスト: `/static/app.js` + `X-Original-URL: /.env` → route_override medium と sensitive_file_probe medium（200 text/plain でも critical にならない）、絶対 URL、空値、タグなし、運用者許可で無音、デコイ応答では鳴る、同一パス・プレフィックス付き同一パスは無音。攻撃 fixture 3 件。docs/detection/web.md §2・§2.1 | af7884b |
+| #150 | 完全（推奨のフロント部分は frontend レーンで完了。末尾の「サーバー側にも path/UA の双方向制御文字を低重大度の検知シグナルに」をこのレーンで実装） | 新検知器 `web.deceptive_unicode`（`category=anomaly`, **T1036.002** Masquerading: Right-to-Left Override, low）。指標: `unicode.bidi_control`（U+202A〜U+202E・U+2066〜U+2069 は常に、LRM・RLM・ALM は文脈付き）、`unicode.zero_width`（U+200B・U+2060・U+FEFF は常に、ZWNJ・ZWJ・U+180E・ハングルの埋め字 U+115F/U+1160/U+3164/U+FFA0 は文脈付き）、`unicode.tag_characters`（U+E0000〜U+E007F、旗の絵文字 = U+1F3F4 に続く列は除く）。「文脈付き」= 隣が ASCII か値の端のときだけ（`/.e<ZWJ>nv` は鳴り、ペルシア語の ZWNJ・絵文字の ZWJ 列は鳴らない）。対象: デコード後のパス（アクセスログの `%E2%80%8B` も Gate のデコード済みパスも同じ判定）、User-Agent、全ヘッダ値（Gate は latin-1 で記録するので UTF-8 として読み直す `as_received()`）。**クエリ・ボディは対象外**（RTL 文字列・絵文字の本文に普通に含まれる）。候補文字の正規表現 1 本（`rx()` 登録で ReDoS テスト対象）で先にふるい、ASCII だけの値は即スキップ。`details.code_points`（場所ごとの `U+XXXX 名前`）・`details.excerpts`（`<U+202E>` 形式）。タイトル・`matched`・抜粋は ASCII のみ（テストで確認）。並べ替え文字の集合は UI の `BIDI_RE` と同じ。テスト: パスの RLO、パーセントエンコードの ZWSP、ASCII 間の ZWJ、Gate 経由の UA（latin-1）の RLO、ヘッダのタグ文字（ASCII smuggling）、ペルシア語・絵文字の家族・イングランド旗・日本語のパス、RTL のクエリ、ボディ、Gate 経由の日本語ヘッダは無音。docs/detection/web.md §2.1 | （このコミット） |
 
 ## 要判断
 
@@ -35,6 +36,8 @@
 - #147: medium。値が要求行と違うことだけが根拠で、上流が実際にこのヘッダを解釈したかは分からない（Gate は渡さない）。
   `web.sensitive_file_probe` のヘッダ由来ヒットは署名の重大度のまま（`file.debug_endpoint` / `file.webshell` は high なので、
   ルールベースのトリアージが rate_limit を提案しうる。要求行で同じパスを叩いた場合と同じ扱い）。
+- #150: low のみ。LLM トリアージにも乗らない（インシデントの起点にはなりうる）。欺瞞の意図を示すが攻撃の成否とは無関係なので、
+  遮断の根拠にはしない設計。
 
 ## 既定動作の変更
 
@@ -46,8 +49,15 @@
   **前段に URL を書き換えて `X-Original-URL` に元の URL を入れるプロキシ（IIS ARR 等）があり、Gate がそれを上流へ渡さない構成では、
   書き換えのあるパスごとに medium が出る**（その構成では上流が必要なら `gate.forward_client_headers: ["x-original-url"]`、不要なら
   `web.route_override` を無効化）。
+- （#150）新しい検知器 `web.deceptive_unicode`（low）が既定で有効。
 
 ## 失敗した試み
+
+- （#150）編集ツールが Python ソース中の `\u061c` 等のエスケープを実文字に展開した（frontend レーンの NOTES と同じ現象）。
+  候補文字の正規表現をスクラッチのスクリプト（`chr(92)` でバックスラッシュを組み立て）で ASCII のエスケープに書き直し、テストは
+  `chr(0x202E)` で文字を作る形にした。コミット前に `LC_ALL=C.UTF-8 grep -nP '[^\x00-\x7F]'` で検知器・テストに非 ASCII が無いことを確認。
+  既存の `web_common.py` 569 行目（#89 の `utf16_text`）には BOM の実文字が 1 つある（このレーンの変更ではない）。
+- （#147）初版は要求行と同じパスの `X-Original-URL` を low にしていたが、良性 fixture「app custom headers」（前段プロキシが付ける形）で落ちたので鳴らさないようにした。
 
 ## 担当外の変更
 
@@ -80,3 +90,7 @@
 - （#140）正規のブラウザ + CDN + ロードバランサでのヘッダ行数は見積もり（実トラフィックで未計測）。
 - （#141）br / zstd の要求ボディを送る正規クライアントがどれだけあるか（ブラウザは要求ボディを圧縮しない。SDK・モバイルアプリは
   gzip が中心という一般的な理解に基づく）は未確認。どの上流が br の要求ボディを展開するかも未確認（gate-capture レーンの `TODO(verify)`）。
+- （#147）`X-Original-URL` を元の URL として付ける前段プロキシの具体例（IIS ARR・Azure App Service・nginx の設定例）は一般的な知識に基づき、
+  一次資料で確認していない。
+- （#150）ASCII の隣だけを見る文脈判定は、ペルシア語・インド系文字・絵文字の一般的な使い方に基づく。実際の多言語サイトのパスでの
+  誤検知率は未計測（良性 fixture と L16 コーパスのみ）。
