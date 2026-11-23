@@ -7,11 +7,13 @@ The events are built with the Gate's own :class:`EventBuilder` where the signal 
 from __future__ import annotations
 
 import gzip
+import time
 from collections.abc import Callable
 from typing import Any
 
 from tokiwa.config import RedactionSettings, Settings, WebDetectionSettings
 from tokiwa.detect.context import DetectionContext
+from tokiwa.detect.detectors.web_anomaly import _CANDIDATES
 from tokiwa.detect.engine import DetectionEngine
 from tokiwa.gate.capture import EventBuilder, Exchange
 from tokiwa.schemas.alerts import AlertDraft
@@ -218,6 +220,11 @@ async def test_override_to_another_path_is_medium_and_probes_the_target(
     assert probe.details["location"] == "header_custom" and probe.details["param"] == "x-original-url"
     assert probe.severity == "medium" and probe.details["exposure"] == "none"  # no 2xx escalation
     assert "route_override" in probe.tags
+    # behind a front end that repeats the request line, a direct /.env probe is not credited to the header
+    direct = make_http_event("/.env", headers={"user-agent": UA, "x-original-url": "/.env"})
+    [d] = await run(settings, direct, "web.sensitive_file_probe")
+    assert "route_override" not in d.tags and d.details["location"] == "path"
+    assert len(d.details["matches"]) == 1
 
 
 async def test_override_variants(settings: Settings, make_http_event: Callable[..., Event]) -> None:
@@ -271,8 +278,11 @@ RLO, ZWSP, ZWNJ, ZWJ, RLM = chr(0x202E), chr(0x200B), chr(0x200C), chr(0x200D), 
 
 
 def ascii_only(d: AlertDraft) -> None:
-    for text in (d.title, d.details["matched"], *d.details["excerpts"].values()):
+    """Title / matched are ASCII; excerpts keep ordinary letters of any script but none of the characters."""
+    for text in (d.title, d.details["matched"]):
         assert text.isascii(), text
+    for text in d.details["excerpts"].values():
+        assert _CANDIDATES.search(text) is None, text
 
 
 async def test_rlo_in_the_path_is_low(settings: Settings, make_http_event: Callable[..., Event]) -> None:
@@ -336,3 +346,31 @@ async def test_scripts_that_use_joiners_and_marks_are_quiet(
     # a UTF-8 header value through the Gate (latin-1 on the event) that is ordinary Japanese text
     gate = gate_event([(b"host", b"app.lab"), (b"x-user-name", japanese.encode())])
     assert await run(settings, gate, "web.deceptive_unicode") == []
+
+
+async def test_long_runs_stay_cheap_and_are_reported(
+    settings: Settings, make_http_event: Callable[..., Event]
+) -> None:
+    # The first version walked back over a tag-character run for every character (3 s for 8192 of them).
+    tags = chr(0xE0041) * 8192
+    joiners = (
+        chr(0x645) + ZWNJ
+    ) * 4096  # never flagged one by one (joiner between two Arabic-script letters)
+    ev = make_http_event(
+        f"/{tags}",
+        headers={"user-agent": ZWSP * 8192, "x-a": tags, "x-b": joiners, "x-c": joiners, "x-d": f"a{RLO}b"},
+    )
+    det = DetectionEngine(settings).all_detectors()["web.deceptive_unicode"]
+    ctx = DetectionContext(settings)
+    t0 = time.perf_counter()
+    [d] = await det.process(ev, ctx)
+    assert time.perf_counter() - t0 < 0.25  # adversarial worst case, generous for shared CI machines
+    assert {"unicode.tag_characters", "unicode.zero_width", "unicode.excessive"} <= set(
+        d.details["signatures"]
+    )
+    ascii_only(d)
+    # hundreds of joiners alone, even between letters, are not text either
+    [d] = await run(
+        settings, make_http_event("/", headers={"user-agent": UA, "x-b": joiners}), "web.deceptive_unicode"
+    )
+    assert d.details["signatures"] == ["unicode.excessive"]

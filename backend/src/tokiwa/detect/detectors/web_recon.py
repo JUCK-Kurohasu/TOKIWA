@@ -24,15 +24,14 @@ from tokiwa.detect.web_common import (
     ALL_LOCATIONS,
     HEADER_CUSTOM,
     PATH,
-    ROUTE_OVERRIDE_HEADERS,
     Hit,
     HttpView,
     Plan,
     WebSignatureDetector,
     build_plan,
     clean_label,
+    differing_override_paths,
     get_view,
-    override_path,
     rx,
     scan_targets,
     scan_text,
@@ -161,8 +160,8 @@ class SensitiveFileProbeDetector(WebSignatureDetector):
         """The same file probes asked for through X-Original-URL & co. (audit #147): an upstream that honours the
         header serves that path while the request line names a harmless one."""
         hits: list[Hit] = []
-        for header in ROUTE_OVERRIDE_HEADERS:
-            target = override_path(view.headers.get(header, ""), rounds)
+        # a front end repeating the request line in X-Original-URL is not a second probe
+        for header, target in differing_override_paths(view.headers, view.path_clean, rounds):
             if target:
                 hits += [
                     Hit(h.sig, HEADER_CUSTOM, header, h.fragment)

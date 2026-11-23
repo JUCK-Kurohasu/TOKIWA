@@ -30,8 +30,8 @@ from tokiwa.detect.web_common import (
     ROUTE_OVERRIDE_HEADERS,
     HttpView,
     clean_label,
+    differing_override_paths,
     get_view,
-    override_path,
     rx,
     web_settings,
 )
@@ -286,22 +286,15 @@ class RouteOverrideDetector(Detector):
         view = get_view(event, ctx)
         if view is None:
             return []
-        present = [h for h in ROUTE_OVERRIDE_HEADERS if h in view.headers and not passed_through(event, h)]
-        if not present:
+        if not any(h in view.headers for h in ROUTE_OVERRIDE_HEADERS):
             return []
         rounds = web_settings(ctx.settings).max_decode_rounds
-        # Front ends (IIS ARR, App Service, nginx "X-Original-URL $request_uri") set the header to the URL they
-        # received, which is the request line again, possibly behind a stripped X-Forwarded-Prefix: not a bypass.
-        same = {view.path_clean}
-        prefix = override_path(view.headers.get("x-forwarded-prefix", ""), rounds).rstrip("/")
-        if prefix:
-            same.add(prefix + view.path_clean)
         found: list[tuple[Severity, str, str]] = []
         targets: dict[str, str] = {}
         top_header = ""
-        for header in present:
-            target = override_path(view.headers[header], rounds)
-            if target in same:
+        # a front end repeating the request line (IIS ARR, nginx "X-Original-URL $request_uri") is left out
+        for header, target in differing_override_paths(view.headers, view.path_clean, rounds):
+            if passed_through(event, header):
                 continue
             targets[header] = clean_label(target, 200)
             if not target:
@@ -364,17 +357,15 @@ def as_received(value: str) -> str:
         return value  # real code points (another sensor, JSON ingest) or not UTF-8
 
 
-def _kind(text: str, i: int, cp: int) -> str | None:
-    """Indicator for the candidate at ``text[i]``, or None when it is ordinary text in its context."""
-    if cp in BIDI_CONTROLS:
-        return "unicode.bidi_control"
-    if cp in ZERO_WIDTH:
-        return "unicode.zero_width"
-    if TAG_FIRST <= cp <= TAG_LAST:
-        j = i
-        while j > 0 and TAG_FIRST <= ord(text[j - 1]) <= TAG_LAST:
-            j -= 1
-        return None if j > 0 and ord(text[j - 1]) == BLACK_FLAG else "unicode.tag_characters"
+# Candidates examined per field / per event. Every match costs Python work, and a header full of joiners between
+# non-ASCII letters (never flagged) would otherwise cost ~1 us per character on the detection loop. Hitting a cap
+# is itself reported (``unicode.excessive``): hundreds of format characters in a path or header are not text.
+MAX_FIELD_CANDIDATES = 512
+MAX_EVENT_CANDIDATES = 2048
+EXCESSIVE = "unicode.excessive"
+
+
+def _contextual_kind(text: str, i: int, cp: int) -> str | None:
     left = text[i - 1] if i > 0 else ""
     right = text[i + 1] if i + 1 < len(text) else ""
     if not left or not right or left.isascii() or right.isascii():
@@ -382,20 +373,41 @@ def _kind(text: str, i: int, cp: int) -> str | None:
     return None
 
 
-def deceptive_code_points(text: str) -> tuple[list[str], list[int]]:
-    """(indicator ids, code points) of the deceptive characters in ``text``, each listed once."""
+def deceptive_code_points(text: str, limit: int = MAX_FIELD_CANDIDATES) -> tuple[list[str], list[int], int]:
+    """(indicator ids, code points, candidates examined) for ``text``; ids and code points are listed once.
+
+    One forward pass: a run of tag characters is judged once, by the character in front of it (a flag emoji
+    starts with U+1F3F4), so the cost stays linear in the number of candidates (at most ``limit``).
+    """
     kinds: list[str] = []
     cps: list[int] = []
+    run_end, run_is_flag = -1, False
+    examined = 0
     for m in _CANDIDATES.finditer(text):
-        cp = ord(m.group())
-        kind = _kind(text, m.start(), cp)
+        if examined >= limit:
+            kinds.append(EXCESSIVE)
+            break
+        examined += 1
+        i, cp = m.start(), ord(m.group())
+        kind: str | None
+        if cp in BIDI_CONTROLS:
+            kind = "unicode.bidi_control"
+        elif cp in ZERO_WIDTH:
+            kind = "unicode.zero_width"
+        elif TAG_FIRST <= cp <= TAG_LAST:
+            if i != run_end:  # a new run of tag characters starts here
+                run_is_flag = i > 0 and ord(text[i - 1]) == BLACK_FLAG
+            run_end = i + 1
+            kind = None if run_is_flag else "unicode.tag_characters"
+        else:
+            kind = _contextual_kind(text, i, cp)
         if kind is None:
             continue
         if kind not in kinds:
             kinds.append(kind)
         if cp not in cps:
             cps.append(cp)
-    return kinds, cps
+    return kinds, cps, examined
 
 
 def code_point_label(cp: int) -> str:
@@ -450,20 +462,25 @@ class DeceptiveUnicodeDetector(Detector):
         per_location: dict[str, list[str]] = {}
         excerpts: dict[str, str] = {}
         top: tuple[str, str | None] | None = None
+        budget = MAX_EVENT_CANDIDATES
         for location, param, text in fields:
             if text.isascii():
                 continue
-            kinds, cps = deceptive_code_points(text)
+            if budget <= 0:  # earlier fields used up the event's budget: that alone is abnormal
+                kinds, cps = [EXCESSIVE], []
+            else:
+                kinds, cps, examined = deceptive_code_points(text, min(MAX_FIELD_CANDIDATES, budget))
+                budget -= examined
             if not kinds:
                 continue
             where = param or location
-            labels = [code_point_label(cp) for cp in cps[:8]]
-            per_location[where] = labels
+            per_location[where] = [code_point_label(cp) for cp in cps[:8]]
             excerpts[where] = escape_deceptive(text)
+            shown = ", ".join(f"U+{cp:04X}" for cp in cps[:4]) or "hundreds of format characters"
             for kind in kinds:
-                found.append((_L, kind, f"{', '.join(f'U+{cp:04X}' for cp in cps[:4])} in {where}"))
+                found.append((_L, kind, f"{shown} in {where}"))
             top = top or (location, param)
-            if len(per_location) >= MAX_UNICODE_LOCATIONS:
+            if len(per_location) >= MAX_UNICODE_LOCATIONS or budget <= 0:
                 break
         if not found or top is None:
             return []

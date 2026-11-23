@@ -870,6 +870,25 @@ def override_path(value: str, rounds: int = MAX_DECODE_ROUNDS) -> str:
     return clean_path(to_lower(decode(v if v.startswith("/") else "/" + v, rounds=rounds)))
 
 
+def differing_override_paths(headers: dict[str, str], path_clean: str, rounds: int) -> list[tuple[str, str]]:
+    """(header, path) of the routing-override headers that name another path than the request line ("" = empty).
+
+    Front ends (IIS ARR, nginx ``X-Original-URL $request_uri`` ...) set the header to the URL they received, i.e. the
+    request line again, possibly behind a stripped ``X-Forwarded-Prefix``: those are not an override and left out.
+    """
+    same = {path_clean}
+    prefix = override_path(headers.get("x-forwarded-prefix", ""), rounds).rstrip("/")
+    if prefix:
+        same.add(prefix + path_clean)
+    out: list[tuple[str, str]] = []
+    for header in ROUTE_OVERRIDE_HEADERS:
+        if header in headers:
+            target = override_path(headers[header], rounds)
+            if target not in same:
+                out.append((header, target))
+    return out
+
+
 @dataclass(slots=True)
 class HttpView:
     """Decoded, normalised view of one HTTP event shared by all web detectors."""
