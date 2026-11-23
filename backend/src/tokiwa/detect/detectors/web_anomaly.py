@@ -7,6 +7,8 @@ by ``tokiwa.gate.capture``), plus the parts of the request itself that only make
   of the sensor's capture), or one of the non-list headers (Host, Content-Length ...) sent twice.
 * ``web.uninspectable_body`` (audit #141) - a request body behind a ``Content-Encoding`` the Gate could not undo
   (br / zstd / deeper stacks, or a corrupt gzip / deflate stream): no body detector saw what the application got.
+* ``web.route_override`` (audit #147) - ``X-Original-URL`` / ``X-Rewrite-URL`` / ``X-Override-URL``: an upstream
+  that honours them serves another path than the request line names (decoys and path-based detection bypassed).
 
 Each alert carries ``details.signatures`` (indicator ids), ``location`` and ``param`` like the ``web.*``
 signature alerts, so marking one false positive suppresses that indicator only (``detect.suppress.match_of``).
@@ -20,7 +22,14 @@ from typing import Any
 
 from tokiwa.detect.base import Detector, register_detector
 from tokiwa.detect.context import DetectionContext
-from tokiwa.detect.web_common import HttpView, clean_label, get_view, web_settings
+from tokiwa.detect.web_common import (
+    ROUTE_OVERRIDE_HEADERS,
+    HttpView,
+    clean_label,
+    get_view,
+    override_path,
+    web_settings,
+)
 from tokiwa.schemas.alerts import AlertCategory, AlertDraft
 from tokiwa.schemas.common import Severity
 from tokiwa.schemas.events import Event, EventKind
@@ -36,10 +45,12 @@ LABEL_HEADER_COUNT = "gate.header_count"  # header lines received (set when the 
 LABEL_HEADERS_DROPPED = "gate.headers_dropped"  # lines whose names did not fit the 64 recorded names
 LABEL_DUPLICATE_HEADERS = "gate.duplicate_headers"  # non-list headers that arrived more than once
 TAG_REQ_ENCODING_UNKNOWN = "gate:req_encoding_unknown"  # coding the Gate does not inflate: body not recorded
-TAG_REQ_DECODE_FAILED = (
-    "gate:req_decode_failed"  # declared gzip / deflate, not a valid stream: raw prefix recorded
-)
+# declared gzip / deflate, not a valid stream: the raw prefix is recorded
+TAG_REQ_DECODE_FAILED = "gate:req_decode_failed"
 LABEL_REQUEST_ENCODING = "gate.request_encoding"
+TAG_ROUTE_OVERRIDE = "gate:route_override"  # X-Original-URL & co. present (every Gate path, since #147)
+LABEL_ACTION = "gate.action"  # proxy | decoy | deceive | blocked | ...
+LABEL_STRIPPED_HEADERS = "gate.stripped_headers"  # client headers removed before forwarding (proxy path only)
 
 # Duplicates of these decide where a request goes or where it ends: RFC 9112 requires a 400 for several Host
 # lines and rejecting differing Content-Length values, so a front end and a back end that pick different copies
@@ -231,5 +242,83 @@ class UninspectableBodyDetector(Detector):
                 "request_encoding": clean_label((event.labels or {}).get(LABEL_REQUEST_ENCODING, ""), 40),
                 "request_body_size": event.http.request_body_size,
                 "upstream_accepted": accepted,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------------------------------------
+# web.route_override (audit #147)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def passed_through(event: Event, header: str) -> bool:
+    """True when the Gate forwarded ``header`` because the operator allows it (``gate.forward_client_headers``,
+    a trusted front proxy sets it). Needs positive evidence: a Gate that knows the header (``gate:route_override``)
+    proxied the request and did not list it as stripped. Without the tag (an older Gate that still forwards these
+    headers, or another sensor) the header counts as client-sent."""
+    labels = event.labels or {}
+    if TAG_ROUTE_OVERRIDE not in event.tags or labels.get(LABEL_ACTION) != "proxy":
+        return False
+    return header not in labels.get(LABEL_STRIPPED_HEADERS, "").split(",")
+
+
+@register_detector
+class RouteOverrideDetector(Detector):
+    id = "web.route_override"
+    name = "Routing override header"
+    description = (
+        "X-Original-URL / X-Rewrite-URL / X-Override-URL in a client request: IIS URL Rewrite, legacy Symfony / "
+        "Zend and some Java filters serve the header's path instead of the request line's, which bypasses "
+        "path-based access control, decoys and path-based detection. The Gate strips these headers (and serves "
+        "the decoy when the header names one); check whether the application behind other paths honours them."
+    )
+    category = AlertCategory.EXPLOIT_ATTEMPT
+    kinds = frozenset({EventKind.HTTP})
+    mitre = ("T1190",)
+    default_severity = _M
+
+    async def process(self, event: Event, ctx: DetectionContext) -> list[AlertDraft]:
+        view = get_view(event, ctx)
+        if view is None:
+            return []
+        present = [h for h in ROUTE_OVERRIDE_HEADERS if h in view.headers and not passed_through(event, h)]
+        if not present:
+            return []
+        rounds = web_settings(ctx.settings).max_decode_rounds
+        # Front ends (IIS ARR, App Service, nginx "X-Original-URL $request_uri") set the header to the URL they
+        # received, which is the request line again, possibly behind a stripped X-Forwarded-Prefix: not a bypass.
+        same = {view.path_clean}
+        prefix = override_path(view.headers.get("x-forwarded-prefix", ""), rounds).rstrip("/")
+        if prefix:
+            same.add(prefix + view.path_clean)
+        found: list[tuple[Severity, str, str]] = []
+        targets: dict[str, str] = {}
+        top_header = ""
+        for header in present:
+            target = override_path(view.headers[header], rounds)
+            if target in same:
+                continue
+            targets[header] = clean_label(target, 200)
+            if not target:
+                found.append((_L, "route_override.empty", f"{header} without a path"))
+                top_header = top_header or header
+            else:
+                shown = f"{clean_label(target, 100)} (request line {clean_label(view.path_clean, 60)})"
+                found.append((_M, "route_override.different_path", f"{header}: {shown}"))
+                if not targets.get(top_header):  # the first header naming another path drives the alert
+                    top_header = header
+        if not found:
+            return []
+        return _draft(
+            self,
+            event,
+            view,
+            found,
+            location="header_custom",
+            param=top_header,
+            extra={
+                "override_paths": targets,
+                "request_path": clean_label(view.path_clean, 200),
+                "gate_action": clean_label((event.labels or {}).get(LABEL_ACTION, ""), 40) or None,
             },
         )

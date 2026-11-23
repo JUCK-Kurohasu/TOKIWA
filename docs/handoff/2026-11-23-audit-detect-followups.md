@@ -14,7 +14,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | #140 | 部分（推奨 (1)(3)(4) は gate-capture レーンで完了。(2) の「異常なヘッダ数をシグナルに」は実装したが、**41〜64 行は low**（推奨の例は「>40 で medium」）。理由は要判断 1） | 新検知器 `web.header_anomaly`（`category=anomaly`, T1190）。指標: `header_anomaly.count`（ヘッダ行数 > `detection.web.header_count_low`（既定 40）で low、> `header_count_medium`（既定 64）で medium）、`header_anomaly.capture_dropped`（medium: Gate が 64 名に収めきれず記録しなかった行がある = label `gate.headers_dropped`）、`header_anomaly.rejected`（medium: `gate:too_many_headers` = 431。同名 101 行のように件数ラベルが付かない場合もこれで拾う）、`header_anomaly.duplicate_framing`（medium: Host / Content-Length / Transfer-Encoding の重複）、`header_anomaly.duplicate`（low: その他の非リストヘッダの重複 = `gate.duplicate_headers`）。ヘッダ行数は `gate.header_count`（Gate が捕捉を打ち切ったときだけ付く実数）、無ければ `max(len(headers), len(header_order))`。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らさない。`details` に `signatures`・`location`・`param` を入れて誤検知マーク（#166）が指標単位で効くように。fingerprint `rule|ip|最も重い指標`。テスト: 70 個のパディング → medium・件数 78・未記録 14、48 行 → low、Client Hints + CDN ヘッダ + 分割 Cookie（20 行・clipped）→ 無音、しきい値の設定、431、Host 重複 → medium・UA 重複 → low、DECEPTION 種別のコピーでは重複発報しない。docs/detection/web.md §2.1・§4、wiki Configuration ×4 | 7e35122 |
-| #141 | 完全（推奨 (1) と (2) の「印を付ける」・(3) 運用文書は gate-capture レーンで完了。(2) の「web_recon で low〜medium シグナル化」をこのレーンで実装） | 新検知器 `web.uninspectable_body`（`category=anomaly`, T1190）。`gate:req_encoding_unknown`（br・zstd・compress・3 段以上。Gate は本文を記録しない）→ `body.encoding_unknown`: **上流が受け付けた（status 200〜399）なら medium**、それ以外（415・400・Gate の 403 等）は low。`gate:req_decode_failed`（gzip / deflate と宣言して展開できない。Gate は生の先頭をテキストとして記録するので他の `web.*` が検査する）→ `body.decode_failed`: low。`details.content_encoding` は `Content-Encoding` ヘッダの値（`clean_label`、60 文字）。テスト: br + 200 → medium・本文なし、br + 415 → low、壊れた gzip に平文の SQLi → low + `web.sqli`（param=password）も鳴る、正しい gzip と非圧縮は無音。docs/detection/web.md §2.1 | （このコミット） |
+| #141 | 完全（推奨 (1) と (2) の「印を付ける」・(3) 運用文書は gate-capture レーンで完了。(2) の「web_recon で low〜medium シグナル化」をこのレーンで実装） | 新検知器 `web.uninspectable_body`（`category=anomaly`, T1190）。`gate:req_encoding_unknown`（br・zstd・compress・3 段以上。Gate は本文を記録しない）→ `body.encoding_unknown`: **上流が受け付けた（status 200〜399）なら medium**、それ以外（415・400・Gate の 403 等）は low。`gate:req_decode_failed`（gzip / deflate と宣言して展開できない。Gate は生の先頭をテキストとして記録するので他の `web.*` が検査する）→ `body.decode_failed`: low。`details.content_encoding` は `Content-Encoding` ヘッダの値（`clean_label`、60 文字）。テスト: br + 200 → medium・本文なし、br + 415 → low、壊れた gzip に平文の SQLi → low + `web.sqli`（param=password）も鳴る、正しい gzip と非圧縮は無音。docs/detection/web.md §2.1 | ccad1ff |
+| #147 | 完全（推奨 (1) と (2) の除去・タグ・デコイ照合は gate-capture レーンで完了。(2) の「値を sensitive path 検知にかける」と (3) の検知ルールをこのレーンで実装） | 新検知器 `web.route_override`（`category=exploit_attempt`, T1190）。`X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL` の値のパス（`web_common.override_path()`: 絶対 URL はパス部分、`?`・`#` 以降を除く、先頭 `/` 補完、デコード・NFKC・小文字化・`clean_path` = `HttpView.path_clean` と同じ正規化）が要求行のパスと違えば `route_override.different_path`（**medium**）、値が空なら `route_override.empty`（low）。**要求行と同じパスは鳴らさない**（`X-Forwarded-Prefix` + パスで同じ場合も）: 前段のプロキシが受けた URL をそのまま付ける形（IIS ARR、nginx の `proxy_set_header X-Original-URL $request_uri` 等）で、web-detect レーンの良性 fixture「app custom headers」もこの形（初版は同一パスを low にしていてこの fixture で落ちた）。Gate がそのヘッダを渡した（`gate:route_override` あり・`gate.action=proxy`・`gate.stripped_headers` に名前が無い = 運用者が `gate.forward_client_headers` で許可）ときは鳴らさない。タグが無い（Gate 更新前の古い Gate はこのヘッダを上流へ渡す）ときはクライアント由来として扱う。`web.sensitive_file_probe` は値のパスも同じ署名で検査（`location=header_custom`・`param`=ヘッダ名・タグ `route_override`。応答は要求行のものなので 2xx による昇格はしない）。テスト: `/static/app.js` + `X-Original-URL: /.env` → route_override medium と sensitive_file_probe medium（200 text/plain でも critical にならない）、絶対 URL、空値、タグなし、運用者許可で無音、デコイ応答では鳴る、同一パス・プレフィックス付き同一パスは無音。攻撃 fixture 3 件。docs/detection/web.md §2・§2.1 | （このコミット） |
 
 ## 要判断
 
@@ -31,6 +32,9 @@
   実 LLM が対処を推奨しうるが、提案は人間承認が既定（自動承認は第 2 弾の `response.auto_approve_withheld` 等の条件付き）。
 - #140: ヘッダ数・重複は送信元が実際に送ったもの（他人の IP を装えない）。送信元 IP は Gate の判定値（信頼設定時は XFF の右端）。
 - #141: medium は「上流が受け付けた」場合だけ。圧縮ボディは送信元が自分で送るもので、第三者を装うことはできない。
+- #147: medium。値が要求行と違うことだけが根拠で、上流が実際にこのヘッダを解釈したかは分からない（Gate は渡さない）。
+  `web.sensitive_file_probe` のヘッダ由来ヒットは署名の重大度のまま（`file.debug_endpoint` / `file.webshell` は high なので、
+  ルールベースのトリアージが rate_limit を提案しうる。要求行で同じパスを叩いた場合と同じ扱い）。
 
 ## 既定動作の変更
 
@@ -38,6 +42,10 @@
   Content-Length の重複で medium のアラートが出る（以前は何も出なかった）。`detection.disabled_detectors: ["web.header_anomaly"]` で無効、
   しきい値は `detection.web.header_count_low` / `header_count_medium`（0 でその段を無効）。
 - （#141）新しい検知器 `web.uninspectable_body` が既定で有効。Gate が展開できない符号化の要求ボディで low / medium（上流が 2xx・3xx）。
+- （#147）新しい検知器 `web.route_override` が既定で有効。`web.sensitive_file_probe` がルーティング上書きヘッダの値のパスでも鳴る。
+  **前段に URL を書き換えて `X-Original-URL` に元の URL を入れるプロキシ（IIS ARR 等）があり、Gate がそれを上流へ渡さない構成では、
+  書き換えのあるパスごとに medium が出る**（その構成では上流が必要なら `gate.forward_client_headers: ["x-original-url"]`、不要なら
+  `web.route_override` を無効化）。
 
 ## 失敗した試み
 
@@ -45,7 +53,17 @@
 
 - `backend/src/tokiwa/config.py`: `WebDetectionSettings` に `header_count_low` / `header_count_medium` を追加（所有範囲）。
 - `backend/tests/detect/test_web_signatures.py`: `EXPECTED_IDS` に新しい検知器 ID、`gate_recorded`（Gate の記録を読むので fixture でなく
-  test_web_anomaly.py で検査する）を除外集合に追加。
+  test_web_anomaly.py で検査する）を除外集合に追加。`fixtures/web_attacks.json` に #147 の 3 件。
+- `backend/src/tokiwa/detect/web_common.py`（所有範囲の該当部分）: `ROUTE_OVERRIDE_HEADERS` と `override_path()` を追加（他は不変）。
+- `backend/src/tokiwa/detect/detectors/web_recon.py`（所有）: `SensitiveFileProbeDetector.scan_overrides()`。要求行だけの要求の挙動は不変。
+
+## 見送った依頼（gate-capture レーンの NOTES にあったもの）
+
+- `gate:client_ip_header`（クライアントが `X-Real-IP` / `CF-Connecting-IP` 等を自分で付けた。#138 推奨 (4)）のシグナル化: このレーンの担当
+  （#140 #141 #147 #150 #177）に入っておらず、Cloudflare 等の背後に Gate を置くと全要求に付くので、そのままでは誤検知の嵐になる。
+  前段の信頼設定（`gate.trusted_proxies` 相当）と組で設計すべきなので見送り。#138 は gate-capture レーンで完全扱い。
+- `web_common.INJECTABLE_HEADERS` に `cf-connecting-ip`・`x-cluster-client-ip`・`fastly-client-ip` が無い件: #53 以降これらは
+  `header_custom` として注入系の検知器が検査するので、検査漏れは無い（`header` との違いはトラバーサルの単発 `../` を見ない程度）。
 
 ## 他レーンへの依頼
 

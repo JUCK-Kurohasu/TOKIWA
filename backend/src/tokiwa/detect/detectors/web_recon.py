@@ -3,6 +3,7 @@
 * ``web.sensitive_file_probe`` - requests for secrets/VCS metadata/backups/debug endpoints. A 2xx answer for a
   secret is escalated (possible *exposure*, not just an attempt) unless the response is HTML, which usually means
   an SPA catch-all route. Fingerprint = rule|source|signature so a wordlist run is one alert per file class.
+  The paths asked for through X-Original-URL / X-Rewrite-URL / X-Override-URL are probed too (audit #147).
 * ``web.scanner_ua`` - offensive tool User-Agents, scanner marker headers/paths and out-of-band (OAST)
   callback domains such as Burp Collaborator / interactsh anywhere in the request.
 * ``web.rare_method`` - TRACE/TRACK/DEBUG/CONNECT, WebDAV verbs, unknown or malformed methods, and
@@ -21,7 +22,9 @@ from tokiwa.detect.base import Detector, register_detector
 from tokiwa.detect.context import DetectionContext
 from tokiwa.detect.web_common import (
     ALL_LOCATIONS,
+    HEADER_CUSTOM,
     PATH,
+    ROUTE_OVERRIDE_HEADERS,
     Hit,
     HttpView,
     Plan,
@@ -29,6 +32,7 @@ from tokiwa.detect.web_common import (
     build_plan,
     clean_label,
     get_view,
+    override_path,
     rx,
     scan_targets,
     scan_text,
@@ -153,11 +157,25 @@ class SensitiveFileProbeDetector(WebSignatureDetector):
     def scan(self, view: HttpView) -> list[Hit]:
         return scan_text(view.path_clean, self._plan, PATH, max_hits=3)
 
+    def scan_overrides(self, view: HttpView, rounds: int) -> list[Hit]:
+        """The same file probes asked for through X-Original-URL & co. (audit #147): an upstream that honours the
+        header serves that path while the request line names a harmless one."""
+        hits: list[Hit] = []
+        for header in ROUTE_OVERRIDE_HEADERS:
+            target = override_path(view.headers.get(header, ""), rounds)
+            if target:
+                hits += [
+                    Hit(h.sig, HEADER_CUSTOM, header, h.fragment)
+                    for h in scan_text(target, self._plan, PATH, max_hits=3)
+                ]
+        return hits
+
     async def process(self, event: Event, ctx: DetectionContext) -> list[AlertDraft]:
         view = get_view(event, ctx)
-        if view is None or not view.path_clean:
+        if view is None:
             return []
-        hits = self.scan(view)
+        path_hits = self.scan(view) if view.path_clean else []
+        hits = path_hits + self.scan_overrides(view, web_settings(ctx.settings).max_decode_rounds)
         if not hits:
             return []
         hits.sort(key=lambda h: h.sig.severity.rank, reverse=True)
@@ -165,9 +183,11 @@ class SensitiveFileProbeDetector(WebSignatureDetector):
         severity = top.sig.severity
         exposure = "none"
         status = view.status or 0
-        if 200 <= status < 300:
+        # The response belongs to the request-line path: an override hit says nothing about what was served.
+        if path_hits and 200 <= status < 300:
+            path_top = max(path_hits, key=lambda h: h.sig.severity.rank)
             rct = ((event.http.response_content_type if event.http else None) or "").lower()
-            exposed = self._EXPOSED.get(top.sig.id, severity)
+            exposed = self._EXPOSED.get(path_top.sig.id, path_top.sig.severity)
             if "html" in rct:
                 exposure = "html_response_probably_spa_fallback"
             elif rct:
@@ -182,9 +202,14 @@ class SensitiveFileProbeDetector(WebSignatureDetector):
             hits,
             severity=severity,
             fingerprint=f"{self.id}|{event.source_ip or '-'}|{top.sig.id}",
-            extra_tags=("exposure_suspected",)
-            if exposure in ("suspected", "possible_unknown_content_type")
-            else (),
+            extra_tags=(
+                *(
+                    ("exposure_suspected",)
+                    if exposure in ("suspected", "possible_unknown_content_type")
+                    else ()
+                ),
+                *(("route_override",) if len(hits) > len(path_hits) else ()),
+            ),
             extra_details={"exposure": exposure},
         )
 

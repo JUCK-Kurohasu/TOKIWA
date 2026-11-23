@@ -40,6 +40,7 @@ EXPECTED_IDS = {
     "web.inspection_evasion",
     "web.header_anomaly",
     "web.uninspectable_body",
+    "web.route_override",
 }
 
 

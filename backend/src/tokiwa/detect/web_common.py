@@ -40,7 +40,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, Literal
-from urllib.parse import unquote, unquote_plus
+from urllib.parse import unquote, unquote_plus, urlsplit
 
 from tokiwa.config import Settings, WebDetectionSettings
 from tokiwa.detect.base import Detector
@@ -845,6 +845,29 @@ def clean_path(lower_path: str) -> str:
             break
         p = p.replace("/./", "/")
     return p
+
+
+# Routing overrides that IIS URL Rewrite, legacy Symfony / Zend and some Java filters honour as "the real path"
+# (audit #147): the request line says /static/app.js while the application serves the header's path. The Gate
+# strips them before forwarding (gate.proxy.ROUTE_OVERRIDE_HEADERS) but records them on the event.
+ROUTE_OVERRIDE_HEADERS = ("x-original-url", "x-rewrite-url", "x-override-url")
+
+
+def override_path(value: str, rounds: int = MAX_DECODE_ROUNDS) -> str:
+    """Path a routing-override header asks for, as :attr:`HttpView.path_clean` spells paths ("" when empty).
+
+    Absolute URLs are reduced to their path and the query / fragment is dropped, like the Gate's decoy lookup.
+    """
+    v = value.strip()[:2048]
+    if "://" in v:
+        try:
+            v = urlsplit(v).path
+        except ValueError:
+            v = ""
+    v = v.split("?", 1)[0].split("#", 1)[0]
+    if not v:
+        return ""
+    return clean_path(to_lower(decode(v if v.startswith("/") else "/" + v, rounds=rounds)))
 
 
 @dataclass(slots=True)

@@ -190,3 +190,74 @@ async def test_inflated_and_plain_bodies_are_quiet(settings: Settings) -> None:
     assert await run(settings, ev, "web.uninspectable_body") == []
     plain = gate_event(hdrs[:3], method="POST", body=b"user=alice")
     assert await run(settings, plain, "web.uninspectable_body") == []
+
+
+# ---------------------------------------------------------------------------------------------------- #147
+
+GATE_PROXIED = {"gate.action": "proxy", "gate.stripped_headers": "x-original-url"}
+
+
+async def test_override_to_another_path_is_medium_and_probes_the_target(
+    settings: Settings, make_http_event: Callable[..., Event]
+) -> None:
+    ev = make_http_event(
+        "/static/app.js",
+        headers={"user-agent": UA, "x-original-url": "/.env"},
+        tags=["gate:route_override", "gate:client_ip_header"],
+        labels=GATE_PROXIED,
+    )
+    assert ev.http is not None
+    ev.http.response_content_type = "text/plain"  # 200 for the request line, not for /.env
+    drafts = await all_web(settings, ev)
+    ro = drafts["web.route_override"]
+    assert ro.severity == "medium" and ro.details["signatures"] == ["route_override.different_path"]
+    assert ro.details["override_paths"] == {"x-original-url": "/.env"}
+    assert ro.details["param"] == "x-original-url"
+    assert ro.fingerprint == "web.route_override|203.0.113.10|route_override.different_path"
+    probe = drafts["web.sensitive_file_probe"]
+    assert probe.details["location"] == "header_custom" and probe.details["param"] == "x-original-url"
+    assert probe.severity == "medium" and probe.details["exposure"] == "none"  # no 2xx escalation
+    assert "route_override" in probe.tags
+
+
+async def test_override_variants(settings: Settings, make_http_event: Callable[..., Event]) -> None:
+    async def one(path: str, value: str, **kw: Any) -> AlertDraft | None:
+        ev = make_http_event(path, headers={"user-agent": UA, "x-rewrite-url": value}, **kw)
+        out = await run(settings, ev, "web.route_override")
+        return out[0] if out else None
+
+    # a front end repeating the URL it received (also behind a stripped prefix) is not a bypass
+    assert await one("/admin", "/Admin?x=1") is None
+    prefixed = make_http_event(
+        "/v2/orders", headers={"x-forwarded-prefix": "/api/", "x-original-url": "/api/v2/orders?page=2"}
+    )
+    assert await run(settings, prefixed, "web.route_override") == []
+    url = await one("/", "https://app.lab/admin/users?id=1#x")
+    assert url is not None and url.severity == "medium"
+    assert url.details["override_paths"] == {"x-rewrite-url": "/admin/users"}
+    empty = await one("/", " ")
+    assert empty is not None and empty.details["signature"] == "route_override.empty"
+    # no Gate tag (an older Gate that forwards the header, or another sensor): still client-sent
+    assert await one("/", "/admin", labels={"gate.action": "proxy"}) is not None
+
+
+async def test_override_the_operator_lets_through_is_quiet(
+    settings: Settings, make_http_event: Callable[..., Event]
+) -> None:
+    # gate.forward_client_headers: ["x-original-url"] (a trusted front proxy sets it): proxied, not stripped
+    trusted = make_http_event(
+        "/app",
+        headers={"user-agent": UA, "x-original-url": "/old/app"},
+        tags=["gate:route_override"],
+        labels={"gate.action": "proxy"},
+    )
+    assert await run(settings, trusted, "web.route_override") == []
+    # the same header on a decoy answer was not forwarded at all: a probe
+    decoy = make_http_event(
+        "/static/app.js",
+        headers={"user-agent": UA, "x-original-url": "/.env"},
+        tags=["gate:route_override", "gate:decoy"],
+        labels={"gate.action": "decoy"},
+    )
+    [d] = await run(settings, decoy, "web.route_override")
+    assert d.details["gate_action"] == "decoy"
