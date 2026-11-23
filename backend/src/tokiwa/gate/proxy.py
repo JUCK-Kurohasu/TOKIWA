@@ -69,6 +69,7 @@ HTTPX_FRAMING = frozenset({"host", "content-length", "transfer-encoding", "conne
 _DECODABLE = frozenset({"gzip", "x-gzip", "deflate", "identity"})
 _BODY_CLOSE = re.compile(rb"</body\s*>", re.IGNORECASE)
 _CHARSET = re.compile(r"charset\s*=\s*\"?([A-Za-z0-9._:-]+)", re.IGNORECASE)
+_META_CHARSET = re.compile(rb"<meta\b[^>]*?charset\s*=\s*[\"']?\s*([A-Za-z0-9._:-]+)", re.IGNORECASE)
 
 
 def connection_tokens(headers: Iterable[tuple[bytes, bytes]]) -> set[bytes]:
@@ -226,19 +227,55 @@ def raw_path_of(scope: Mapping[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------------------------- injection
 
 
+def _codec(label: str) -> str | None:
+    try:
+        name = codecs.lookup(label).name
+    except LookupError:
+        return None
+    # A BOM-less "utf-16"/"utf-32" codec would write a BOM in the middle of the page.
+    return {"utf-16": "utf-16-le", "utf-32": "utf-32-le"}.get(name, name)
+
+
 def charset_of(content_type: str | None) -> str:
+    """Charset named by ``Content-Type`` (UTF-8 when absent or unknown)."""
     if content_type:
         m = _CHARSET.search(content_type)
         if m:
-            try:
-                return codecs.lookup(m.group(1)).name
-            except LookupError:
-                pass
+            name = _codec(m.group(1))
+            if name:
+                return name
     return "utf-8"
 
 
-def encode_snippet(snippet: str, content_type: str | None) -> bytes:
-    return snippet.encode(charset_of(content_type), errors="xmlcharrefreplace")
+def document_charset(content_type: str | None, html: bytes | None = None) -> str | None:
+    """Encoding of an HTML document, or None when it cannot be told (audit #146).
+
+    Order as browsers do: a UTF-8 BOM, the ``Content-Type`` charset, then ``<meta charset>`` /
+    ``<meta http-equiv=Content-Type content="...; charset=...">`` within the first 1024 bytes (the WHATWG prescan
+    window; a meta declaring UTF-16 means UTF-8 there).
+    """
+    if html and html.startswith(codecs.BOM_UTF8):
+        return "utf-8"
+    if content_type:
+        m = _CHARSET.search(content_type)
+        if m and (name := _codec(m.group(1))):
+            return name
+    if html:
+        meta = _META_CHARSET.search(html[:1024])
+        if meta and (name := _codec(meta.group(1).decode("ascii"))):
+            return "utf-8" if name.startswith(("utf-16", "utf-32")) else name
+    return None
+
+
+def encode_snippet(snippet: str, content_type: str | None, html: bytes | None = None) -> bytes:
+    """The canary snippet in the page's own encoding (characters it lacks as numeric character references).
+
+    When the encoding cannot be told (no charset in the header or in a ``<meta>``, as on many Shift_JIS / EUC-JP
+    sites the snippet used to be written as UTF-8 into), only ASCII is written: every non-ASCII character becomes
+    a reference, which reads the same in any ASCII-compatible encoding.
+    """
+    charset = document_charset(content_type, html)
+    return snippet.encode(charset or "ascii", errors="xmlcharrefreplace")
 
 
 def inject_before_body_close(html: bytes, snippet: bytes) -> bytes | None:

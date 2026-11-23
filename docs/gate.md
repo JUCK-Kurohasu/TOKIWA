@@ -61,6 +61,11 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 9. それ以外 → アップストリームへストリーミング転送。`html_injection` があれば HTML 応答の `html_injection_positions` の位置（既定 `<body>` 直後と最後の `</body>` 直前。位置の無い古いポリシーは `</body>` 直前のみ。docs/deception.md §6）に挿入
 
 ゲート生成の応答（403/429/デコイ）には直近のアップストリームの `Server` ヘッダを付け、デコイが浮かないようにする。
+ゲート生成の応答には **すべて `Cache-Control: no-store`** を付ける（403/429/431/501 に加え、deceive の汎用 404・デコイ・上流障害の
+502/504。監査 #148: CDN・共有キャッシュの背後で、deceive 中の 1 IP への 404 や一時的な 502 が他の利用者に配られ得た）。
+デコイ自身が `Cache-Control` を持つ場合はそちらを使う。CDN 側で「404 も強制的にキャッシュする」設定（Edge TTL の上書き等）が
+あると `no-store` が無視され得るので、Gate の前に CDN を置く場合は確認すること（TODO(verify): 製品ごとの既定）。
+deceive の汎用 404 に付く `no-store` は、上流の本物の 404 と見比べると差になる（デコイを見破る手掛かりとしては小さい）。
 
 ## 3. 捕捉イベント（`gate.http`）
 
@@ -164,7 +169,11 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 （`Content-Encoding`/`ETag`/`Content-MD5`/`Digest` を削除、`Content-Length` 再計算）。br/zstd・多重エンコード・破損・
 展開後 2 MiB 超（圧縮爆弾対策）・`</body>` 無し → 無加工で通す（`gate:inject_skipped`）。注入が有効な間は
 `Accept-Encoding` を gzip/deflate/identity に絞り、br を使うクライアントでも注入できるようにする。
-スニペットは `Content-Type` の charset でエンコード（表せない文字は数値文字参照）。
+スニペットは文書の文字コードでエンコード（表せない文字は数値文字参照）: UTF-8 の BOM → `Content-Type` の charset →
+先頭 1024 バイト内の `<meta charset>` / `<meta http-equiv="Content-Type" content="...; charset=...">` の順（監査 #146: ヘッダに charset が
+無く `<meta charset=Shift_JIS>` だけのページに日本語の注記を UTF-8 で入れて文字化けしていた）。どれでも決まらない・未知の名前のときは
+**ASCII だけ**（日本語はすべて `&#NNNN;`）で書く。どの ASCII 互換の文字コードでも同じに読めるが、`head` 位置の HTML コメント内の
+文字参照はブラウザでは展開されない（生の HTML を読む AI には読める）。
 
 ## 7. 性能（ラボ, `backend/scripts/bench_gate.py`）
 

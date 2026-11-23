@@ -8,6 +8,7 @@ import pytest
 from tokiwa.gate.proxy import (
     UpstreamTarget,
     decode_content,
+    document_charset,
     encode_snippet,
     forwarded_element,
     forwarded_request_headers,
@@ -186,8 +187,34 @@ def test_inject_before_last_body_close() -> None:
 def test_encode_snippet_follows_charset() -> None:
     assert encode_snippet("注意", "text/html; charset=Shift_JIS") == "注意".encode("shift_jis")
     assert encode_snippet("注意", "text/html; charset=iso-8859-1") == b"&#27880;&#24847;"
-    assert encode_snippet("注意", "text/html; charset=bogus") == "注意".encode()
+    # unknown or missing charset: ASCII only, so the snippet reads the same in any ASCII-compatible page (#146)
+    assert encode_snippet("注意", "text/html; charset=bogus") == b"&#27880;&#24847;"
+    assert encode_snippet("注意", "text/html") == b"&#27880;&#24847;"
     assert encode_snippet("x", None) == b"x"
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        (b"<html><head><meta charset=shift_jis></head>", "shift_jis"),
+        (b'<html><head><META CHARSET="EUC-JP">', "euc_jp"),
+        (b'<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS">', "shift_jis"),
+        (b"<meta charset=utf-16>", "utf-8"),  # WHATWG: a meta declaring UTF-16 means UTF-8
+        (b"\xef\xbb\xbf<html><meta charset=shift_jis>", "utf-8"),  # BOM first
+        (b"<html><body>" + b" " * 1100 + b"<meta charset=shift_jis>", None),  # beyond the 1024-byte prescan
+        (b"<html><body>no declaration</body></html>", None),
+        (b"<meta charset=x-made-up>", None),
+    ],
+)
+def test_document_charset_sniffs_meta(html: bytes, expected: str | None) -> None:
+    assert document_charset("text/html", html) == expected
+
+
+def test_header_charset_wins_over_meta() -> None:
+    assert document_charset("text/html; charset=utf-8", b"<meta charset=shift_jis>") == "utf-8"
+    sjis_page = b"<html><head><meta charset=Shift_JIS></head><body></body></html>"
+    assert encode_snippet("注意", "text/html", sjis_page) == "注意".encode("shift_jis")
+    assert encode_snippet("注意", None, b"<html>") == b"&#27880;&#24847;"
 
 
 def test_decode_content() -> None:

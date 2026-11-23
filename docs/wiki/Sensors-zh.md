@@ -88,6 +88,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   Gate 也不会补充客户端没有发送的 `User-Agent` 等请求头。
 - 诱饵路径匹配时，大小写、末尾的 `/` 或 `.`、`;` 之后的部分、`%5c`（`\`）以及双重编码的差异都视为同一路径
   （`/.ENV`、`/.env;x` 也会命中 `/.env` 诱饵）。包含这类变形的路径会带上标签 `gate:path_anomaly`。
+- Gate 自己返回的响应（封禁的 403、诱饵、上游故障时的 502/504 等）都带有 `Cache-Control: no-store`。如果在 Gate 前面放置 CDN，
+  请确认 CDN 没有被设置为强制缓存 404 等响应。
 - `Content-Encoding: gzip` / `deflate` 的请求体会先解压再记录（标签 `gate:req_encoded`；发给上游的仍是压缩后的字节）。
   br、zstd 无法解压，只记录标签 `gate:req_encoding_unknown`。
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，

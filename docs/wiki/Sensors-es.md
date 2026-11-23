@@ -89,6 +89,8 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
   Gate tampoco añade un `User-Agent` ni otros encabezados que el cliente no haya enviado.
 - Al comparar con los señuelos, las diferencias de mayúsculas, una `/` o un `.` final, lo que sigue a `;`, `%5c` (`\`) y la doble codificación cuentan como la misma ruta
   (`/.ENV` y `/.env;x` también activan un señuelo `/.env`). Las rutas con estas variaciones llevan la etiqueta `gate:path_anomaly`.
+- Las respuestas que genera el propio Gate (403 de bloqueo, señuelos, 502/504 por fallos del upstream, ...) llevan `Cache-Control: no-store`. Si hay una CDN delante de Gate,
+  compruebe que no esté configurada para forzar la caché de los 404 y respuestas similares.
 - Los cuerpos de solicitud con `Content-Encoding: gzip` / `deflate` se registran descomprimidos (etiqueta `gate:req_encoded`; el upstream sigue recibiendo los bytes comprimidos).
   br y zstd no se pueden descomprimir; solo queda la etiqueta `gate:req_encoding_unknown`.
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,

@@ -89,6 +89,8 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
   The Gate also never adds a `User-Agent` or similar header that the client did not send.
 - Decoy matching treats differences in case, a trailing `/` or `.`, anything after `;`, `%5c` (`\`) and double encoding as the same path
   (`/.ENV` and `/.env;x` also hit a `/.env` decoy). Paths containing such variations get the tag `gate:path_anomaly`.
+- Responses the Gate generates itself (403 for blocks, decoys, 502/504 on upstream failures, ...) carry `Cache-Control: no-store`. If a CDN sits in front of the Gate,
+  check that it is not configured to force-cache 404s and similar responses.
 - Request bodies with `Content-Encoding: gzip` / `deflate` are recorded decompressed (tag `gate:req_encoded`; the upstream still gets the compressed bytes).
   br and zstd cannot be decompressed; only the tag `gate:req_encoding_unknown` is recorded.
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,

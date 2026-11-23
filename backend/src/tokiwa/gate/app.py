@@ -584,7 +584,7 @@ class Gate:
         encoding = b", ".join(v for k, v in headers if k == b"content-encoding").decode("latin-1")
         decoded = decode_content(body, encoding, limit)
         injected = (
-            inject_html(decoded, encode_snippet(snippet, content_type), positions)
+            inject_html(decoded, encode_snippet(snippet, content_type, decoded), positions)
             if decoded is not None
             else None
         )
@@ -622,7 +622,9 @@ class Gate:
         ]
         if mimic_server and self._upstream_server:
             headers.append((b"server", self._upstream_server))
-        if status in (403, 429, 431, 501):
+        # Never let a shared cache / CDN keep an answer meant for one client (a deceive-mode 404, a 502 during an
+        # upstream hiccup) and serve it to everyone else (#148). A decoy's own Cache-Control wins.
+        if not any(k == b"cache-control" for k, _ in extra_headers or ()):
             headers.append((b"cache-control", b"no-store"))
         if extra_headers:
             headers.extend(extra_headers)

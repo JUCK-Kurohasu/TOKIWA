@@ -16,7 +16,9 @@
 | #138 | 完全（推奨 (1)〜(5)） | `gate.proxy.STRIPPED_CLIENT_HEADERS`（`Forwarded`・`X-Real-IP`・`True-Client-IP`・`CF-Connecting-IP`・`X-Client-IP`・`X-Cluster-Client-IP`・`Fastly-Client-IP`・`X-Originating-IP`・`Client-IP`・`X-Original-Forwarded-For`・`X-Forwarded-Port/Prefix/Server/Scheme/Ssl`・`Front-End-Https`・`X-Url-Scheme`）を上流へ渡さない。Gate が `X-Real-IP: <送信元 IP>` と 1 要素の `Forwarded: for=<送信元 IP>;proto=...;host=...` を付ける（送信元 IP は Gate がイベントに使う値＝信頼時は XFF の右端。IPv6 は `"[...]"`、host は token でなければ quoted-string でエスケープ）。(3) は「XFF と同じ信頼ルール」を **XFF のチェーンから組み立てる** 形では採らず、Gate の判定値 1 要素にした（左側はクライアントが書けるので `1.2.3.4;proto=https` で `Forwarded` に引数を足せる — 統合前の助言で変更）。**既存の X-Forwarded-For/Proto/Host の処理（trust_forwarded_for を含む）はバイト単位で不変**（既存テストもそのまま通る）。除去したヘッダ名は `gate:client_ip_header` + `gate.stripped_headers`（名前は固定語彙のみ）、値は #140 の優先ヘッダとしてイベントに残る（`STRIPPED_CLIENT_HEADERS ⊆ PRIORITY_HEADERS` をテスト）。前段の信頼できるプロキシが付けるヘッダ用に `gate.forward_client_headers`（既定 `[]`）。docs/gate.md §6 の「上流に IP を偽装させない」を正確化 | （このコミット） |
 | #147 | 完全（推奨 (1)(2)。(3) の web_recon ルールは web-detect レーンへ依頼） | `X-Original-URL`・`X-Rewrite-URL`・`X-Override-URL` も上流へ渡さない（`forward_client_headers` で許可可）。値のパスをデコイ照合にかけ、一致すればデコイを返す（上流には転送しない、DECEPTION イベントも出る）。タグ `gate:route_override` | （このコミット） |
 | #149 | 完全 | `build_request` の後、Gate が渡したヘッダ一覧に無い名前を `request.headers` から削除（Host・Content-Length・Transfer-Encoding・Connection だけは httpx に任せる）。httpx の既定 `User-Agent: python-httpx`・`Accept: */*`・`Accept-Encoding` が上流に届かない。上の未登録の指摘（クッキージャー）もこの規則で二重に防がれる。テスト: 生の ASGI scope（httpx クライアントだと自分の既定ヘッダを付けてしまう）で Host だけの要求が上流で UA/Accept/Accept-Encoding/Cookie なし、クライアントが送った UA・Accept はそのまま | 1a96ae4 |
-| #54 | 部分（推奨 (1)(2)(3) は完全。overlong UTF-8 は印のみ、(4) 上流タイプ別の正規化プロファイルは未着手） | `gate.policy.normalize_path` は **変えず**（サーバー側の検証・保存・`shadows_site` が使う。大文字小文字を保つ）、その上に照合キー `match_key()` を追加し `DecoyMatcher.build`（完全一致・前方一致の両方）と `match` に対称にかける: 2 回目のパーセントデコード、`\`→`/`、各セグメントの NUL・`;` 以降を除去（`..;` は `..` に）、ドットセグメント解決 **の後** に末尾ドット・空白と `::$DATA` を除去、小文字化、末尾 `/` なし。前方一致は `key + "/"` で比べるので `/admin` も `/admin/*` に当たる（`/administrator` は当たらない）。照合キーが `/` になる完全一致ルート（`/;x`・`/%2e`・`/ `）も拒否（サーバーの #65 の検証は `normalize_path` なので通ってしまう）。`gate:path_anomaly` + `gate.path_anomaly`（nul / semicolon / backslash / double_encoding / invalid_utf8 / trailing_dot_or_space / ntfs_stream）を全要求に。テスト `tests/gate/test_gate_decoy_variants.py`（L06-03 の再現ターゲット 20 種がデコイに当たる、`.env.bak` 等は当たらない、ルート化するルートの拒否、`normalize_path` 不変、Gate 経由で `/.env;x` がデコイ応答・上流に届かない・path は送ったまま記録） | （このコミット） |
+| #54 | 部分（推奨 (1)(2)(3) は完全。overlong UTF-8 は印のみ、(4) 上流タイプ別の正規化プロファイルは未着手） | `gate.policy.normalize_path` は **変えず**（サーバー側の検証・保存・`shadows_site` が使う。大文字小文字を保つ）、その上に照合キー `match_key()` を追加し `DecoyMatcher.build`（完全一致・前方一致の両方）と `match` に対称にかける: 2 回目のパーセントデコード、`\`→`/`、各セグメントの NUL・`;` 以降を除去（`..;` は `..` に）、ドットセグメント解決 **の後** に末尾ドット・空白と `::$DATA` を除去、小文字化、末尾 `/` なし。前方一致は `key + "/"` で比べるので `/admin` も `/admin/*` に当たる（`/administrator` は当たらない）。照合キーが `/` になる完全一致ルート（`/;x`・`/%2e`・`/ `）も拒否（サーバーの #65 の検証は `normalize_path` なので通ってしまう）。`gate:path_anomaly` + `gate.path_anomaly`（nul / semicolon / backslash / double_encoding / invalid_utf8 / trailing_dot_or_space / ntfs_stream）を全要求に。テスト `tests/gate/test_gate_decoy_variants.py`（L06-03 の再現ターゲット 20 種がデコイに当たる、`.env.bak` 等は当たらない、ルート化するルートの拒否、`normalize_path` 不変、Gate 経由で `/.env;x` がデコイ応答・上流に届かない・path は送ったまま記録） | 3e61719 |
+| #146 | 完全 | `gate.proxy.document_charset()`: UTF-8 BOM → `Content-Type` の charset → 先頭 1024 バイト内の `<meta charset>` / `http-equiv` の順で文字コードを決め（meta の UTF-16 は WHATWG どおり UTF-8、BOM なしの utf-16/32 コーデックは BOM を書かない LE に）、決まらない・未知の名前なら **ASCII のみ**（非 ASCII は `&#NNNN;`）でスニペットを符号化。`encode_snippet(snippet, content_type, html)` に展開後の HTML を渡す。テスト: `test_gate_proxy.py`（meta・http-equiv・BOM・1024 バイト超・未知名・ヘッダ優先）、`test_gate_app.py::test_html_injection_follows_meta_charset`（ヘッダ `text/html` + `<meta charset="Shift_JIS">` の上流ページで日本語の注記が Shift_JIS で正しく読める） | （このコミット） |
+| #148 | 完全（Vary / CDN-Cache-Control は付けない — 要判断） | Gate 生成の応答（`_respond`: 403/429/431/501・deceive の汎用 404・デコイ・502/504）すべてに `Cache-Control: no-store`。デコイ自身が `Cache-Control` を持つときはそれを使い二重にしない。docs/gate.md・wiki Sensors（4 言語）に CDN 配下での注意。テスト: 汎用 404・502/504 に `no-store` が 1 つ、デコイ指定の値が優先 | （このコミット） |
 
 ## 未登録の指摘（このレーンで発見）
 
@@ -49,6 +51,13 @@
   `/admin` にも当たるようになった。
 - **#54 overlong UTF-8（`%c0%ae`）は `.` として扱わない**: 現行の ASGI サーバーは U+FFFD に置き換えるため元のバイト列が残らない。
   `gate:path_anomaly`（`invalid_utf8`）の印だけ付ける。古い IIS 等、overlong を解釈する上流の背後では迂回できる。
+- **#146 文字コードが決まらないページへの注入を UTF-8 から ASCII（数値文字参照）に変えた**: ヘッダにも `<meta>` にも charset が
+  無いページでは日本語の注記が `&#NNNN;` になる。ブラウザ表示（隠し要素なので見えない）と生 HTML を読む AI のどちらでも元の文字として
+  解釈されるが、`head` 位置の HTML コメント内では文字参照は展開されない（生 HTML を読む AI には読める想定）。未知の charset 名
+  （例 `charset=bogus`）も同じ扱い（以前は UTF-8）。
+- **#148 `Vary: *` / `CDN-Cache-Control` / `Surrogate-Control` は付けなかった**: `no-store` は RFC 9111 で共有キャッシュも保存しては
+  ならない指示。CDN 固有ヘッダは本物の応答との差（デコイの見破り材料）を増やすので見送り。CDN 側で 404 を強制キャッシュする設定が
+  あれば効かない（docs に注意書き）。また deceive の汎用 404 に付く `no-store` は、別 IP から見た本物の 404 との小さな差になる。
 
 ## 既定動作の変更
 
@@ -63,6 +72,8 @@
 - （#149）クライアントが送らない `User-Agent`・`Accept`・`Accept-Encoding` を上流へ付けない（以前は httpx の既定値が付いた）。
 - （#54）デコイ照合が大文字小文字・末尾 `/`・`;` 以降・末尾ドット/空白・`\`・二重エンコード・`::$DATA` を区別しない。
   照合キーがルートになる完全一致ルートは Gate が拒否（WARN）。`gate:path_anomaly` タグが新たに付く。
+- （#146）charset がヘッダに無いページは `<meta>` の文字コードで注入、決まらなければ ASCII（数値文字参照）。以前は常に UTF-8。
+- （#148）Gate 生成の全応答に `Cache-Control: no-store`（以前は 403/429/501 だけ）。
 
 ## 失敗した試み
 

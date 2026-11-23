@@ -88,6 +88,8 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
   クライアントが送っていない `User-Agent` などを Gate が補うこともありません。
 - デコイの照合は大文字小文字・末尾の `/` や `.`・`;` 以降・`%5c`（`\`）・二重エンコードの違いを同じパスとみなします
   （`/.ENV` や `/.env;x` も `/.env` のデコイに当たります）。こうした変形を含むパスにはタグ `gate:path_anomaly` が付きます。
+- Gate 自身が返す応答（遮断の 403、デコイ、上流障害の 502/504 など）には `Cache-Control: no-store` を付けます。Gate の前に CDN を
+  置く場合は、CDN が 404 などを強制的にキャッシュする設定になっていないか確認してください。
 - `Content-Encoding: gzip` / `deflate` の要求ボディは展開してから記録します（タグ `gate:req_encoded`。上流には圧縮したまま送ります）。
   br・zstd は展開できず、タグ `gate:req_encoding_unknown` だけが残ります。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、
