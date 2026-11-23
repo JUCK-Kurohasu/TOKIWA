@@ -75,6 +75,7 @@ def _rowcount(result: Any) -> int:
     """Rows matched by an UPDATE (``Result`` is typed without ``rowcount``; the cursor result has it)."""
     return int(getattr(result, "rowcount", 0) or 0)
 
+
 TIER_RULES = "rules"
 _SIGNATURE_TAGS = frozenset({scoring.TAG_KEV, scoring.TAG_AI_AGENT, scoring.TAG_PORT_REQUEST})
 _MAX_ALERTS_PER_INCIDENT = 500
