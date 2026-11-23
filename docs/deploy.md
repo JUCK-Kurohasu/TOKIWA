@@ -227,6 +227,9 @@ PostgreSQL はホストに公開しない（compose ネットワーク内のみ�
 - `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` を設定（通知リンク等）。UI と API が同一オリジンなら
   CORS 設定は不要。
 - SSE（`/api/v1/stream`）はバッファリングを切り、タイムアウトを長くする。
+- SSE の URL には 1 回限り・60 秒の券（`?ticket=`）が載る（監査 #100。以前は 12 時間有効な JWT が `?access_token=` で載り、
+  プロキシのアクセスログに残った）。券は使用済みなら無価値だが、念のため stream の location はアクセスログを切る（下の nginx 例）か
+  クエリを記録しない書式にする。旧形式 `?access_token=` を使うクライアントが残っていると、TOKIWA が WARNING を出す。
 - プロキシが別ホスト/別コンテナの場合、uvicorn に `X-Forwarded-*` を信頼させる: `FORWARDED_ALLOW_IPS=<proxy の IP/CIDR>`。
 - TOKIWA 自体は `127.0.0.1:8788`（compose 既定）に置き、TLS はプロキシで終端する。
 - セキュリティヘッダ（CSP・`X-Frame-Options: DENY`・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`、
@@ -248,6 +251,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;   # CSP 等は TOKIWA が付ける
 
     location /api/v1/stream {
+        access_log off;                       # URL に単回使用の券（?ticket=）が載る。残すなら $uri だけの log_format に
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

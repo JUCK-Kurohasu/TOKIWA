@@ -85,6 +85,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - 请 **在域名（或子域名）的根路径下公开**。尚不支持在 `/tokiwa/` 这类子路径下提供服务。
 - 设置 `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal`（用于通知中的链接等）。
 - 实时更新（SSE：`/api/v1/stream`）需要 **关闭缓冲并延长超时**。
+  界面连接时在 URL 中携带的是 60 秒内有效、仅能使用一次的票据（`?ticket=`），而不是登录令牌（JWT）。为稳妥起见，不要在代理的访问日志中记录此路径（见下例中的 `access_log off;`）。
 - 如果代理位于其他主机 / 其他容器，请设置 `FORWARDED_ALLOW_IPS=<代理的 IP/CIDR>`。
 
 nginx 示例：
@@ -94,9 +95,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # 用于传感器发来的摄取批次
+    client_max_body_size 32m;                  # 用于传感器发来的摄取批次（与 server.max_ingest_body_bytes 一致）
 
     location /api/v1/stream {
+        access_log off;                        # URL 中带有一次性票据（?ticket=）
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

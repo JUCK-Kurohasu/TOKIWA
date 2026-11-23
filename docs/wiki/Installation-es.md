@@ -85,6 +85,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - **Publíquelo en la raíz de un dominio (o subdominio)**. La publicación en una subruta como `/tokiwa/` no está soportada.
 - Defina `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` (se usa, por ejemplo, en los enlaces de las notificaciones).
 - Para las actualizaciones en tiempo real (SSE: `/api/v1/stream`), **desactive el búfer y alargue el tiempo de espera**.
+  La interfaz se conecta con un ticket de un solo uso válido 60 segundos (`?ticket=`) en la URL, no con su token de sesión (JWT). Por precaución, excluya esta ruta del registro de acceso del proxy (`access_log off;` en el ejemplo siguiente).
 - Si el proxy está en otro host u otro contenedor, defina `FORWARDED_ALLOW_IPS=<IP/CIDR del proxy>`.
 
 Ejemplo de nginx:
@@ -94,9 +95,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # Para los lotes de ingesta de los sensores
+    client_max_body_size 32m;                  # Para los lotes de ingesta de los sensores (igual que server.max_ingest_body_bytes)
 
     location /api/v1/stream {
+        access_log off;                        # la URL lleva un ticket de un solo uso (?ticket=)
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

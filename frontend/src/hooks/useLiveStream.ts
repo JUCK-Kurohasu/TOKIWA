@@ -7,10 +7,10 @@
  *   follow the `[<resource>, ...params]` query-key convention refresh automatically.
  * - The last {@link BUFFER_SIZE} messages are kept so a live feed survives page navigation.
  *
- * Why not `openEventStream()` from api/client.ts: it hides open/error state, which we need for the
- * connection indicator and for reconnecting after the server closes the stream (EventSource gives up
- * permanently on HTTP errors such as 401/404/502). The URL and auth scheme are identical
- * (`/api/v1/stream?access_token=<JWT>`).
+ * Auth (audit #100): each connection first fetches a single-use ticket (`streamUrl()` in api/client.ts:
+ * POST /stream/ticket with the JWT, then `/api/v1/stream?ticket=...`), so the JWT never appears in a URL.
+ * EventSource's own reconnect re-uses the old URL and is refused (401 -> CLOSED); the backoff below then
+ * connects again with a fresh ticket.
  *
  * Usage:
  *   const { status } = useLiveStream();                       // just keep caches fresh
@@ -19,6 +19,7 @@
  */
 import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { streamUrl } from "@/api/client";
 import { authStore } from "@/stores/auth";
 
 export type LiveStatus = "idle" | "connecting" | "open" | "reconnecting";
@@ -33,7 +34,6 @@ export interface LiveMessage {
 
 type Listener = (msg: LiveMessage) => void;
 
-const STREAM_URL = "/api/v1/stream";
 const BUFFER_SIZE = 100;
 const CLOSE_GRACE_MS = 1500;
 const MAX_BACKOFF_MS = 60_000;
@@ -54,7 +54,8 @@ export const TOPIC_INVALIDATIONS: { prefix: string; keys: QueryKey[]; delayMs: n
   { prefix: "event.ingested", keys: [["dashboard"], ["sessions"], ["hosts"]], delayMs: 15_000 },
 ];
 
-class LiveStreamManager {
+/** Exported for tests; use the hooks below (one shared instance per tab). */
+export class LiveStreamManager {
   private es: EventSource | null = null;
   private token: string | null = null;
   private listeners = new Set<Listener>();
@@ -69,6 +70,9 @@ class LiveStreamManager {
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingInvalidations = new Map<string, ReturnType<typeof setTimeout>>();
   private unsubscribeAuth: (() => void) | null = null;
+  /** Bumped by every connect/teardown: a ticket that arrives after a newer connect/teardown is discarded. */
+  private generation = 0;
+  private fetchingTicket = false;
 
   // ----- subscriptions -----
   subscribe(listener: Listener): () => void {
@@ -122,7 +126,7 @@ class LiveStreamManager {
         }
       });
     }
-    if (!this.es && !this.retryTimer) this.connect();
+    if (!this.es && !this.retryTimer && !this.fetchingTicket) this.connect();
   }
 
   private maybeClose() {
@@ -140,6 +144,8 @@ class LiveStreamManager {
   }
 
   private teardown() {
+    this.generation += 1;
+    this.fetchingTicket = false;
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -160,7 +166,25 @@ class LiveStreamManager {
       return;
     }
     this.setStatus(this.attempt === 0 ? "connecting" : "reconnecting");
-    const es = new EventSource(`${STREAM_URL}?access_token=${encodeURIComponent(this.token)}`);
+    const generation = ++this.generation;
+    this.fetchingTicket = true;
+    streamUrl().then(
+      (url) => {
+        if (generation !== this.generation) return; // torn down / reconnected while the ticket was in flight
+        this.fetchingTicket = false;
+        if (this.listeners.size === 0) return;
+        this.open(url);
+      },
+      () => {
+        if (generation !== this.generation) return;
+        this.fetchingTicket = false;
+        this.scheduleReconnect(); // server unreachable / 5xx (a 401 also logs out -> auth listener)
+      },
+    );
+  }
+
+  private open(url: string) {
+    const es = new EventSource(url);
     this.es = es;
     es.onopen = () => {
       this.attempt = 0;

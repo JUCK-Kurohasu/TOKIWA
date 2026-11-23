@@ -85,6 +85,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - **ドメイン（またはサブドメイン）のルートで公開** してください。`/tokiwa/` のようなサブパスでの配信は未対応です。
 - `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` を設定します（通知のリンクなどに使われます）。
 - リアルタイム更新（SSE: `/api/v1/stream`）は **バッファリングを切り、タイムアウトを長く** します。
+  UI はログイン用のトークン（JWT）ではなく、60 秒・1 回限りの券（`?ticket=`）を URL に載せて接続します。念のため、このパスはプロキシのアクセスログに残さない設定にします（下の例の `access_log off;`）。
 - プロキシが別ホスト／別コンテナなら `FORWARDED_ALLOW_IPS=<プロキシの IP/CIDR>` を設定します。
 
 nginx の例:
@@ -94,9 +95,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # センサーからの取り込みバッチ用
+    client_max_body_size 32m;                  # センサーからの取り込みバッチ用（server.max_ingest_body_bytes と揃える）
 
     location /api/v1/stream {
+        access_log off;                        # URL に 1 回限りの券（?ticket=）が載るため
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
