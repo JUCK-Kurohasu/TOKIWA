@@ -128,6 +128,7 @@ medium は LLM トリアージ（`triage.min_severity_for_llm` 既定 medium）�
 | id | 意図 | MITRE | 重大度 | 指標（`details.signatures`） |
 |---|---|---|---|---|
 | `web.header_anomaly` | ヘッダ数の異常・非リストヘッダの重複（#140） | T1190 | low / medium | `header_anomaly.count`（ヘッダ行数が `header_count_low`（既定 40）超で low、`header_count_medium`（既定 64）超で medium）, `header_anomaly.capture_dropped`(medium: Gate が 64 名に収まらず記録しなかったヘッダがある = `gate.headers_dropped`), `header_anomaly.rejected`(medium: `gate.max_request_headers` 超で 431 = `gate:too_many_headers`), `header_anomaly.duplicate_framing`(medium: Host / Content-Length / Transfer-Encoding の重複), `header_anomaly.duplicate`(low: User-Agent・Referer・X-Real-IP 等の重複 = `gate.duplicate_headers`)。ヘッダ数は Gate が捕捉を打ち切ったときの `gate.header_count`（実数）、それ以外は記録したヘッダ名の数（同名の繰り返しは畳まれるので過小になりうる）。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らない |
+| `web.uninspectable_body` | Gate が展開できない `Content-Encoding` の要求ボディ（#141） | T1190 | low / medium | `body.encoding_unknown`（br・zstd・compress・3 段以上 = `gate:req_encoding_unknown`。**本文はイベントに残らない**。上流が受け付けた（status 200〜399）なら medium、それ以外は low）, `body.decode_failed`(low: gzip / deflate と宣言して壊れている = `gate:req_decode_failed`。Gate は生の先頭をテキストとして記録するので、`Content-Encoding` を無視して生のまま読むアプリへの平文ペイロードは他の `web.*` が検査する)。gzip / deflate は Gate が展開して検査済み（`gate:req_encoded`）なので鳴らない |
 
 ## 3. レート / 振る舞い検知器（`ctx.window`, 送信元 IP ごと, イベント時刻基準）
 

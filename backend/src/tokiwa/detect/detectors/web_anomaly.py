@@ -5,6 +5,8 @@ by ``tokiwa.gate.capture``), plus the parts of the request itself that only make
 
 * ``web.header_anomaly`` (audit #140) - far more header lines than a client sends (padding to push headers out
   of the sensor's capture), or one of the non-list headers (Host, Content-Length ...) sent twice.
+* ``web.uninspectable_body`` (audit #141) - a request body behind a ``Content-Encoding`` the Gate could not undo
+  (br / zstd / deeper stacks, or a corrupt gzip / deflate stream): no body detector saw what the application got.
 
 Each alert carries ``details.signatures`` (indicator ids), ``location`` and ``param`` like the ``web.*``
 signature alerts, so marking one false positive suppresses that indicator only (``detect.suppress.match_of``).
@@ -33,6 +35,11 @@ TAG_DUPLICATE_HEADER = "gate:duplicate_header"
 LABEL_HEADER_COUNT = "gate.header_count"  # header lines received (set when the capture was truncated)
 LABEL_HEADERS_DROPPED = "gate.headers_dropped"  # lines whose names did not fit the 64 recorded names
 LABEL_DUPLICATE_HEADERS = "gate.duplicate_headers"  # non-list headers that arrived more than once
+TAG_REQ_ENCODING_UNKNOWN = "gate:req_encoding_unknown"  # coding the Gate does not inflate: body not recorded
+TAG_REQ_DECODE_FAILED = (
+    "gate:req_decode_failed"  # declared gzip / deflate, not a valid stream: raw prefix recorded
+)
+LABEL_REQUEST_ENCODING = "gate.request_encoding"
 
 # Duplicates of these decide where a request goes or where it ends: RFC 9112 requires a 400 for several Host
 # lines and rejecting differing Content-Length values, so a front end and a back end that pick different copies
@@ -165,5 +172,64 @@ class HeaderAnomalyDetector(Detector):
                 "duplicate_headers": duplicates[:16],
                 # attacker-chosen names: a short, printable sample of the tail (the padding is usually there)
                 "header_names_sample": [clean_label(n, 40) for n in names[-MAX_NAMES_SAMPLE:]],
+            },
+        )
+
+
+# ---------------------------------------------------------------------------------------------------------
+# web.uninspectable_body (audit #141)
+# ---------------------------------------------------------------------------------------------------------
+
+
+@register_detector
+class UninspectableBodyDetector(Detector):
+    id = "web.uninspectable_body"
+    name = "Request body hidden behind Content-Encoding"
+    description = (
+        "The request body uses a Content-Encoding the Gate does not undo (br, zstd, compress, more than two "
+        "codings) or a gzip / deflate stream that does not inflate, so no body detector saw the content. "
+        "Applications that inflate request bodies (or ignore Content-Encoding and read the bytes as they are) "
+        "still process it. Medium when the application accepted the request (status below 400)."
+    )
+    category = AlertCategory.ANOMALY
+    kinds = frozenset({EventKind.HTTP})
+    mitre = ("T1190",)
+    default_severity = _L
+
+    async def process(self, event: Event, ctx: DetectionContext) -> list[AlertDraft]:
+        tags = set(event.tags)
+        unknown = TAG_REQ_ENCODING_UNKNOWN in tags
+        if not unknown and TAG_REQ_DECODE_FAILED not in tags:
+            return []
+        view = get_view(event, ctx)
+        if view is None or event.http is None:
+            return []
+        status = view.status
+        accepted = status is not None and 200 <= status < 400
+        coding = clean_label(view.headers.get("content-encoding", ""), 60) or "?"
+        found: list[tuple[Severity, str, str]] = []
+        if unknown:
+            # Nothing of the body is on the event: the application may have read a payload nobody inspected.
+            severity = _M if accepted else _L
+            found.append(
+                (severity, "body.encoding_unknown", f"body not inspected (Content-Encoding: {coding})")
+            )
+        else:
+            # The Gate kept the raw prefix (body detectors ran on it); an upstream that cannot inflate it either
+            # usually rejects the request, so this is mostly fuzzing or a broken client.
+            found.append((_L, "body.decode_failed", f"corrupt compressed body (Content-Encoding: {coding})"))
+        return _draft(
+            self,
+            event,
+            view,
+            found,
+            location="body",
+            param=None,
+            confidence=0.55,
+            extra={
+                "content_encoding": coding,
+                "request_encoding": clean_label((event.labels or {}).get(LABEL_REQUEST_ENCODING, ""), 40),
+                "request_body_size": event.http.request_body_size,
+                "upstream_accepted": accepted,
             },
         )

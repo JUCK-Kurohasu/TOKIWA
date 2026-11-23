@@ -6,6 +6,7 @@ The events are built with the Gate's own :class:`EventBuilder` where the signal 
 
 from __future__ import annotations
 
+import gzip
 from collections.abc import Callable
 from typing import Any
 
@@ -151,3 +152,41 @@ async def test_header_anomaly_ignores_deception_copy_and_plain_sensors(
     det = DetectionEngine(settings).all_detectors()["web.header_anomaly"]
     ev = gate_event(browser_headers(70))
     assert not det.accepts(ev.model_copy(update={"kind": "deception"}))  # one alert per request, not two
+
+
+# ---------------------------------------------------------------------------------------------------- #141
+
+FORM = "application/x-www-form-urlencoded"
+SQLI_FORM = b"user=admin&password=1' UNION SELECT password FROM users--"
+
+
+async def test_unknown_coding_accepted_by_the_app_is_medium(settings: Settings) -> None:
+    hdrs = [("host", "app.lab"), ("user-agent", UA), ("content-type", FORM), ("content-encoding", "br")]
+    ev = gate_event(hdrs, method="POST", body=b"\x1b\x2a\x00\xf8\x07opaque", status=200)
+    assert "gate:req_encoding_unknown" in ev.tags and ev.http is not None and ev.http.request_body is None
+    [d] = await run(settings, ev, "web.uninspectable_body")
+    assert d.severity == "medium" and d.details["signatures"] == ["body.encoding_unknown"]
+    assert d.details["content_encoding"] == "br" and d.details["upstream_accepted"] is True
+    assert d.details["location"] == "body"
+    rejected = gate_event(hdrs, method="POST", body=b"\x1b\x2a\x00opaque", status=415)
+    [d] = await run(settings, rejected, "web.uninspectable_body")
+    assert d.severity == "low"
+
+
+async def test_corrupt_gzip_is_low_and_the_raw_body_is_still_inspected(settings: Settings) -> None:
+    hdrs = [("host", "app.lab"), ("user-agent", UA), ("content-type", FORM), ("content-encoding", "gzip")]
+    ev = gate_event(hdrs, method="POST", body=SQLI_FORM)  # an app ignoring Content-Encoding reads this as is
+    assert "gate:req_decode_failed" in ev.tags
+    drafts = await all_web(settings, ev)
+    assert drafts["web.uninspectable_body"].severity == "low"
+    assert drafts["web.uninspectable_body"].details["signatures"] == ["body.decode_failed"]
+    assert drafts["web.sqli"].details["param"] == "password"
+
+
+async def test_inflated_and_plain_bodies_are_quiet(settings: Settings) -> None:
+    hdrs = [("host", "app.lab"), ("user-agent", UA), ("content-type", FORM), ("content-encoding", "gzip")]
+    ev = gate_event(hdrs, method="POST", body=gzip.compress(b"user=alice&remember=1"))
+    assert "gate:req_encoded" in ev.tags
+    assert await run(settings, ev, "web.uninspectable_body") == []
+    plain = gate_event(hdrs[:3], method="POST", body=b"user=alice")
+    assert await run(settings, plain, "web.uninspectable_body") == []

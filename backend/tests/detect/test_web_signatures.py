@@ -39,6 +39,7 @@ EXPECTED_IDS = {
     "web.request_flood",
     "web.inspection_evasion",
     "web.header_anomaly",
+    "web.uninspectable_body",
 }
 
 
@@ -86,7 +87,7 @@ def test_every_signature_detector_has_positive_cases() -> None:
     # needs >8 KiB / >128-leaf bodies: covered by tests/detect/test_web_limits.py
     long_inputs = {"web.inspection_evasion"}
     # read what the Gate records (tags / labels / raw header block): tests/detect/test_web_anomaly.py
-    gate_recorded = {"web.header_anomaly"}
+    gate_recorded = {"web.header_anomaly", "web.uninspectable_body"}
     assert covered == EXPECTED_IDS - stateful - long_inputs - gate_recorded
 
 
