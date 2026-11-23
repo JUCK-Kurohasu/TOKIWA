@@ -42,6 +42,11 @@ Se cierran las sesiones existentes de ese usuario. Si los inicios de sesión se 
 **La sesión se cerró al reiniciar**
 Es posible que se haya perdido la clave de firma (`data/secret.key`). Compruebe que el directorio de datos sea persistente.
 
+**Un ajuste que cambié no tiene efecto (se sigue usando el valor por defecto)**
+Busque en el registro de arranque las líneas WARNING que empiezan por `config:` (nombran claves desconocidas, variables de entorno mal escritas y un archivo de configuración que no se encuentra).
+`tokiwa config show --changed` muestra los valores efectivos y su origen (entorno / archivo de configuración / valor por defecto) ([Referencia de configuración](Configuration-es)).
+Si monta `tokiwa.yaml` en Docker y aparece `config: ...: is a directory`, la ruta del archivo en el host es incorrecta.
+
 ## Sensores e ingesta
 
 **Los eventos no llegan aunque el tráfico pasa por Gate**

@@ -42,7 +42,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("TOKIWA_ENV", "test")
-    monkeypatch.setenv("TOKIWA_CONFIG", str(tmp_path / "none.yaml"))
+    monkeypatch.setenv("TOKIWA_CONFIG", os.devnull)  # explicitly no YAML file (#161: a missing one warns)
     monkeypatch.setenv("TOKIWA_SERVER__DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("TOKIWA_DATABASE__URL", f"sqlite+aiosqlite:///{tmp_path / 'tokiwa.db'}")
     monkeypatch.setenv("TOKIWA_LLM__PROVIDER", "mock")

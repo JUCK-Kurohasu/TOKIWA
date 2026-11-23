@@ -13,6 +13,7 @@ Sub-command groups are provided by modules (created by their owners) and attache
     tokiwa eval run ...          replay + metrics                   (tokiwa.eval.cli)
     tokiwa sim run ...           lab traffic simulator              (tokiwa.eval.sim_cli)
     tokiwa data purge|export     subject-level delete / export      (tokiwa.data_cli)
+    tokiwa config show           effective settings, secrets masked (tokiwa.config_cli)
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ _SUBCOMMANDS = {
     "eval": "tokiwa.eval.cli",
     "sim": "tokiwa.eval.sim_cli",
     "data": "tokiwa.data_cli",
+    "config": "tokiwa.config_cli",
 }
 for _name, _mod in _SUBCOMMANDS.items():
     try:
@@ -57,10 +59,13 @@ for _name, _mod in _SUBCOMMANDS.items():
 
 
 def _setup_logging() -> None:
-    logging.basicConfig(
-        level=get_settings().log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # Handler first, so the configuration warnings logged while the settings are read are formatted (#161).
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    settings = get_settings()
+    logging.getLogger().setLevel(settings.log_level.upper())
+    from tokiwa.config_diagnostics import startup_summary
+
+    logging.getLogger("tokiwa.config").info("%s", startup_summary(settings))
 
 
 @app.command()

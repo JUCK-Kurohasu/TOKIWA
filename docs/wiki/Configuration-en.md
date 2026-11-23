@@ -7,7 +7,7 @@
 Items higher in the list take precedence.
 
 1. **Environment variables** `TOKIWA_*` (nesting levels are joined with `__`; for example, `TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`)
-2. **YAML file**: the path given in `TOKIWA_CONFIG` (default: `tokiwa.yaml` in the current directory; ignored if it doesn't exist)
+2. **YAML file**: the path given in `TOKIWA_CONFIG` (default: `tokiwa.yaml` in the current directory, optional. A file named in `TOKIWA_CONFIG` that is missing or a directory is logged as a WARNING at startup. `TOKIWA_CONFIG=` (empty) reads no YAML file)
 3. **Defaults** (`backend/src/tokiwa/config.py`)
 
 In addition, the following two can be **overridden at runtime from the Web UI**, and those values are stored in the DB.
@@ -31,6 +31,31 @@ With Docker Compose, `.env` is passed to the container as environment variables.
 - **Write lists and dictionaries as JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **Do not set a value to empty** (what an empty string means differs per setting). An empty `TOKIWA_SERVER__SECRET_KEY=` is treated as unset, so the generated key in `data_dir/secret.key` is used. A key you set must have at least 32 characters; a shorter one stops the server from starting.
 - We recommend passing secrets (API keys, passwords) in environment variables rather than in YAML.
+
+### Checking the configuration (typos, effective values)
+
+A misspelt setting is ignored and that setting keeps its default. So that you notice, the following are logged as a **WARNING** at
+startup (names and paths only, never values):
+
+- Unknown keys in the YAML file (`llm.providr` → `did you mean llm.provider?`; keys are case-sensitive)
+- `TOKIWA_*` environment variables that name no setting (`TOKIWA_LLM__PROVIDR`, or `TOKIWA_LLM_PROVIDER` with one underscore instead of two)
+- A file named in `TOKIWA_CONFIG` that does not exist or is a directory (a Docker bind mount creates a directory when the source file is missing)
+
+With `TOKIWA_STRICT_CONFIG=1` the server refuses to start when any of these is found (the default only warns). Variables used by
+Compose, the healthcheck and the lab scripts rather than by the settings (`TOKIWA_BIND`, `TOKIWA_HEALTHCHECK_URL`, ...) and e-mail
+password variables are not reported. The `tokiwa serve` startup log also has one INFO line with the config file that was read,
+`data_dir`, the database (password masked) and the LLM provider.
+
+`tokiwa config show` prints the effective values and where each came from (`env` / `file` / `default`, and `ui` for values saved in
+the UI with `--db`). Secrets are shown as `<set>`; passwords and queries in URLs and the path of webhook URLs are hidden.
+
+```bash
+tokiwa config show                       # every setting and its source
+tokiwa config show --changed -s llm      # only llm.* values changed from the default
+tokiwa config show --db                  # include LLM overrides saved in the UI (ui)
+tokiwa config show --check               # exit code 1 if problems are found (pre-deploy check)
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### YAML example
 

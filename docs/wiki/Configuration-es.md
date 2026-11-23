@@ -7,7 +7,7 @@
 Cuanto más arriba en la lista, mayor prioridad.
 
 1. **Variables de entorno** `TOKIWA_*` (los niveles anidados se unen con `__`; por ejemplo: `TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`)
-2. **Archivo YAML**: la ruta indicada en `TOKIWA_CONFIG` (por defecto, `tokiwa.yaml` en el directorio actual; si no existe, se ignora)
+2. **Archivo YAML**: la ruta indicada en `TOKIWA_CONFIG` (por defecto, `tokiwa.yaml` en el directorio actual, opcional. Si el archivo indicado en `TOKIWA_CONFIG` no existe o es un directorio, se registra un WARNING al arrancar. `TOKIWA_CONFIG=` (vacío) no lee ningún YAML)
 3. **Valores por defecto** (`backend/src/tokiwa/config.py`)
 
 Además, los dos elementos siguientes pueden **sobrescribirse en tiempo de ejecución desde la interfaz web**, y esos valores se guardan en la base de datos.
@@ -32,6 +32,31 @@ Con Docker Compose, `.env` se pasa al contenedor como variables de entorno. Si e
 - **Las listas y los diccionarios se escriben en JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **No defina valores vacíos** (lo que significa una cadena vacía depende del ajuste). Un `TOKIWA_SERVER__SECRET_KEY=` vacío se trata como no definido y se usa la clave generada en `data_dir/secret.key`. Una clave definida debe tener al menos 32 caracteres; si es más corta, el servidor no arranca.
 - Se recomienda pasar los secretos (claves de API, contraseñas) mediante variables de entorno y no en el YAML.
+
+### Comprobar la configuración (erratas, valores efectivos)
+
+Un ajuste mal escrito se ignora y ese ajuste conserva su valor por defecto. Para que lo note, al arrancar se registra como **WARNING**
+lo siguiente (solo nombres y rutas, nunca valores):
+
+- Claves desconocidas en el YAML (`llm.providr` → `did you mean llm.provider?`; las claves distinguen mayúsculas y minúsculas)
+- Variables `TOKIWA_*` que no corresponden a ningún ajuste (`TOKIWA_LLM__PROVIDR`, o `TOKIWA_LLM_PROVIDER` con un guion bajo en lugar de dos)
+- Un archivo indicado en `TOKIWA_CONFIG` que no existe o es un directorio (un bind mount de Docker crea un directorio si falta el archivo de origen)
+
+Con `TOKIWA_STRICT_CONFIG=1` el servidor se niega a arrancar si encuentra alguno de estos problemas (por defecto solo avisa). Las
+variables que usan Compose, el healthcheck y los scripts del laboratorio en lugar de los ajustes (`TOKIWA_BIND`,
+`TOKIWA_HEALTHCHECK_URL`, ...) y las variables de contraseña del correo no se notifican. El registro de arranque de `tokiwa serve`
+incluye además una línea INFO con el archivo de configuración leído, `data_dir`, la base de datos (contraseña oculta) y el proveedor LLM.
+
+`tokiwa config show` muestra los valores efectivos y su origen (`env` / `file` / `default`, y `ui` para los valores guardados en la
+interfaz con `--db`). Los secretos se muestran como `<set>`; se ocultan las contraseñas y consultas de las URL y la ruta de las URL de webhook.
+
+```bash
+tokiwa config show                       # todos los ajustes y su origen
+tokiwa config show --changed -s llm      # solo los llm.* distintos del valor por defecto
+tokiwa config show --db                  # incluye las sobrescrituras de LLM guardadas en la interfaz (ui)
+tokiwa config show --check               # código de salida 1 si hay problemas (comprobación previa al despliegue)
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### Ejemplo de YAML
 

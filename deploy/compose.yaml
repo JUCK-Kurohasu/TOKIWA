@@ -43,8 +43,14 @@ services:
       - "${TOKIWA_BIND:-127.0.0.1}:${TOKIWA_PORT:-8788}:8788"
     volumes:
       - tokiwa-data:/data
-      # Optional static config file (the image sets TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml):
-      # - ./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro
+      # Optional static config file (the image sets TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml and ships an empty one).
+      # Long syntax so a missing host file fails the start instead of being created as a directory:
+      # - type: bind
+      #   source: ./tokiwa.yaml
+      #   target: /etc/tokiwa/tokiwa.yaml
+      #   read_only: true
+      #   bind:
+      #     create_host_path: false
     depends_on:
       postgres:
         condition: service_healthy

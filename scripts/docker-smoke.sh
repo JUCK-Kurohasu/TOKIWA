@@ -57,6 +57,8 @@ docker run --rm "$IMAGE" tokiwa version
 docker run --rm "$IMAGE" --help >/dev/null
 [ "$(docker run --rm "$IMAGE" id -u)" = "10001" ] || fail "image does not run as uid 10001"
 docker run --rm -e TOKIWA_HEALTHCHECK_URL=none "$IMAGE" tokiwa-healthcheck || fail "healthcheck opt-out failed"
+# The image's baked-in settings (and its empty /etc/tokiwa/tokiwa.yaml) must not trigger config warnings (#161).
+docker run --rm "$IMAGE" config show --check >/dev/null || fail "default image configuration has problems (config show --check)"
 if docker run --rm "$IMAGE" tokiwa-healthcheck 2>/dev/null; then
     fail "healthcheck reported healthy without a running server"
 fi

@@ -20,7 +20,7 @@
 
 ```
 TOKIWA_ENV=prod
-TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml          # 無ければ無視
+TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml          # イメージには中身が空（コメントのみ）のファイルを同梱。自分の YAML をマウントして置き換える
 TOKIWA_SERVER__STATIC_DIR=/app/frontend/dist
 TOKIWA_SERVER__DATA_DIR=/data
 TOKIWA_DATABASE__URL=sqlite+aiosqlite:////data/tokiwa.db
@@ -118,8 +118,16 @@ docker run --rm --network <lab-net> -e TOKIWA_HEALTHCHECK_URL=none tokiwa:local 
 
 - **空文字で有効化しない**: `TOKIWA_SERVER__SECRET_KEY=`（空）は空文字の JWT 鍵として使われてしまう。
   未設定なら初回起動時に `/data/secret.key` が生成・永続化される。
-- `tokiwa.yaml` を使う場合は compose の `./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro` のコメントを外す
-  （`deploy/` からの相対パス）。秘密は YAML ではなく環境変数で渡す方がよい。
+- `tokiwa.yaml` を使う場合は compose の `volumes:` にある `tokiwa.yaml` のマウント（long syntax・`create_host_path: false`）の
+  コメントを外す（`deploy/` からの相対パス）。short syntax（`./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro`）は、ホスト側のファイルが
+  無いと Docker がディレクトリを作ってしまう。秘密は YAML ではなく環境変数で渡す方がよい。
+- **設定ミスは警告される**（監査 #161）: YAML の未知のキー、設定項目に当たらない `TOKIWA_*` 環境変数（`TOKIWA_LLM__PROVIDR`、
+  `TOKIWA_LLM_PROVIDER` のような `_` 1 つ）、`TOKIWA_CONFIG` のファイルが無い・ディレクトリ — を起動時に `config:` で始まる
+  WARNING で出す（名前とパスのみ。値は出さない）。`TOKIWA_STRICT_CONFIG=1` で起動拒否にできる（既定は警告のみ）。
+  `TOKIWA_CONFIG=`（空）は「YAML を読まない」の明示。起動ログには読み込んだ設定ファイル・`data_dir`・DB（パスワード伏字）・
+  LLM プロバイダが INFO で 1 行出る。
+- 効いている値と出所は `docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show`（`--changed` で既定から変わった項目、
+  `--db` で画面からの LLM 上書き、`--check` で問題があれば終了コード 1）。秘密は `<set>` と表示する。
 - `.env` は compose の変数展開（`--env-file .env`）とコンテナへの環境変数（`env_file: ../.env`）の両方に使う。
   `.env` 内で `${POSTGRES_PASSWORD}` のような参照が使える。
 
@@ -321,3 +329,4 @@ Actions はコミット SHA で固定（更新時はタグと SHA を併記）�
 | tokiwa が postgres を待ち続ける | `POSTGRES_PASSWORD` 未設定だと postgres が起動しない（`docker compose logs postgres`） |
 | ログイン後すぐ 401 | `secret.key`/`TOKIWA_SERVER__SECRET_KEY` が変わった。バックアップから戻すか再ログイン |
 | SSE が途切れる/遅れる | リバースプロキシのバッファリング・タイムアウト（§9） |
+| 設定が効かない（既定値のまま） | 起動ログの `config:` WARNING と `tokiwa config show --changed`（§5） |

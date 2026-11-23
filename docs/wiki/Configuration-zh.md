@@ -7,7 +7,7 @@
 越靠上的优先级越高。
 
 1. **环境变量** `TOKIWA_*`（嵌套层级用 `__` 连接。例如：`TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`）
-2. **YAML 文件**：由 `TOKIWA_CONFIG` 指定的路径（默认为当前目录下的 `tokiwa.yaml`。不存在则忽略）
+2. **YAML 文件**：由 `TOKIWA_CONFIG` 指定的路径（默认为当前目录下的 `tokiwa.yaml`，可以不存在。`TOKIWA_CONFIG` 指定的文件不存在或是目录时，启动时记录 WARNING。`TOKIWA_CONFIG=`（空）表示不读取 YAML）
 3. **默认值**（`backend/src/tokiwa/config.py`）
 
 此外，以下 2 项可以 **在运行时从 Web UI 覆盖**，其值保存在数据库中。
@@ -30,6 +30,29 @@
 - **列表和字典用 JSON 书写**：`TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **不要设置空值**（空字符串的含义因设置项而异）。空的 `TOKIWA_SERVER__SECRET_KEY=` 会被视为未设置，使用 `data_dir/secret.key` 中自动生成的密钥。自行设置时需要至少 32 个字符，过短时服务器无法启动。
 - 建议机密信息（API 密钥、密码）通过环境变量而不是 YAML 传递。
+
+### 检查配置（拼写错误、实际生效的值）
+
+拼写错误的设置会被忽略，该项保持默认值。为便于发现，启动时将以下情况记录为 **WARNING**（只记录名称和路径，不记录值）：
+
+- YAML 中的未知键（`llm.providr` → `did you mean llm.provider?`；键区分大小写）
+- 不对应任何设置项的 `TOKIWA_*` 环境变量（`TOKIWA_LLM__PROVIDR`，或把 `__` 写成一个 `_` 的 `TOKIWA_LLM_PROVIDER` 等）
+- `TOKIWA_CONFIG` 指定的文件不存在或是目录（Docker 的 bind mount 在源文件不存在时会创建目录）
+
+设置 `TOKIWA_STRICT_CONFIG=1` 后，存在上述问题时拒绝启动（默认只警告）。Compose、健康检查和实验环境脚本使用的非设置变量
+（`TOKIWA_BIND`、`TOKIWA_HEALTHCHECK_URL` 等）以及邮件通知的密码变量不在检查范围内。`tokiwa serve` 的启动日志还会以 INFO 输出一行：
+读取的配置文件、`data_dir`、数据库（密码已遮蔽）和 LLM 提供方。
+
+用 `tokiwa config show` 查看实际生效的值及其来源（`env` / `file` / `default`，加 `--db` 时还有在界面中保存的 `ui`）。
+密钥显示为 `<set>`，URL 中的密码、查询参数以及 Webhook URL 的路径会被隐藏。
+
+```bash
+tokiwa config show                       # 全部设置项及来源
+tokiwa config show --changed -s llm      # 仅显示与默认值不同的 llm.*
+tokiwa config show --db                  # 同时反映界面中保存的 LLM 覆盖值（ui）
+tokiwa config show --check               # 发现问题时退出码为 1（部署前检查）
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### YAML 示例
 

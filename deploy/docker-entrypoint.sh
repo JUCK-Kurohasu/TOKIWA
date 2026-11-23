@@ -14,7 +14,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 case "$1" in
-    -* | serve | version | user | token | agent | gate | intel | eval | sim)
+    -* | serve | version | user | token | agent | gate | intel | eval | sim | data | config)
         set -- tokiwa "$@"
         ;;
     *)

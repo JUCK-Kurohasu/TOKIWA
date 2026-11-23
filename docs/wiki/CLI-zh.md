@@ -78,6 +78,14 @@ tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 签�
 `rotate` 签发名称、作用域和绑定都相同的新令牌，并让旧令牌在 `--grace-hours`（默认 24 小时，0 表示立即吊销）内继续有效。
 Gate 会在令牌文件变化时自动重新读取，因此把新令牌写入文件即可无需重启完成切换。名称对应多个有效令牌时请指定 id。
 
+## tokiwa config show
+
+```bash
+tokiwa config show [--changed] [-s SECTION] [--db] [--json] [--check]
+```
+
+显示实际生效的设置及其来源（密钥显示为 `<set>`）。详见 [配置参考](Configuration-zh)。
+
 ## tokiwa data purge / export
 
 ```bash

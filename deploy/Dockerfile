@@ -80,7 +80,9 @@ RUN groupadd --system --gid "${TOKIWA_GID}" tokiwa \
        --shell /usr/sbin/nologin tokiwa \
     && mkdir -p /data /etc/tokiwa \
     && chown tokiwa:tokiwa /data \
-    && chmod 0750 /data
+    && chmod 0750 /data \
+    && printf '%s\n' "# TOKIWA config file (TOKIWA_CONFIG). Empty: settings come from TOKIWA_* variables." \
+       "# Replace it with a bind mount of your own tokiwa.yaml (docs/deploy.md)." > /etc/tokiwa/tokiwa.yaml
 
 COPY --from=backend /app/.venv /app/.venv
 COPY --from=rules /out /app/rules
