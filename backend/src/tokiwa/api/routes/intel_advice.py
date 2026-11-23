@@ -18,6 +18,7 @@ from tokiwa.db.models.intel import AdvisoryRow, AssetRow, ResearchReportRow, Vul
 from tokiwa.intel.advisor import generate_advisory
 from tokiwa.intel.matcher import run_matching
 from tokiwa.intel.research import ResearchError, run_research
+from tokiwa.intel.store import WITHDRAWN_AT_KEY, WITHDRAWN_KEY
 from tokiwa.schemas.common import Page
 from tokiwa.schemas.intel import Advisory, MatchStatus, Priority, ResearchReport, VulnMatch
 
@@ -33,6 +34,11 @@ class VulnMatchOut(VulnMatch):
     kev: bool = False
     epss: float | None = None
     cvss_score: float | None = None
+    # Audit #132 (shown as a "withdrawn" badge): set when every advisory behind the vulnerability was withdrawn by
+    # its feed (``data["withdrawn_at"]``), and the withdrawn advisory ids -> timestamps (``data["withdrawn"]``),
+    # which may be partial (a CVE row keeps NVD data when only its GHSA was withdrawn).
+    vuln_withdrawn_at: str | None = None
+    vuln_withdrawn: dict[str, str] = Field(default_factory=dict)
 
 
 class MatchUpdate(BaseModel):
@@ -70,6 +76,9 @@ def _match_query() -> Any:
             VulnRow.kev,
             VulnRow.epss,
             VulnRow.cvss_score,
+            # Only the withdrawal marks, not the whole per-source ``data`` blob of every row.
+            VulnRow.data[WITHDRAWN_AT_KEY].as_string(),
+            VulnRow.data[WITHDRAWN_KEY],
         )
         .outerjoin(AssetRow, AssetRow.id == VulnMatchRow.asset_id)
         .outerjoin(VulnRow, VulnRow.id == VulnMatchRow.vuln_id)
@@ -77,7 +86,8 @@ def _match_query() -> Any:
 
 
 def _match_out(row: Any) -> VulnMatchOut:
-    match, asset_name, criticality, title, kev, epss, cvss = row
+    match, asset_name, criticality, title, kev, epss, cvss, withdrawn_at, withdrawn = row
+    marks = withdrawn if isinstance(withdrawn, dict) else {}
     return VulnMatchOut(
         **VulnMatch.model_validate(match).model_dump(),
         asset_name=asset_name,
@@ -86,6 +96,8 @@ def _match_out(row: Any) -> VulnMatchOut:
         kev=bool(kev),
         epss=epss,
         cvss_score=cvss,
+        vuln_withdrawn_at=str(withdrawn_at) if withdrawn_at else None,
+        vuln_withdrawn={str(k): str(v) for k, v in marks.items()},
     )
 
 

@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { api } from "@/api/client";
 import type { Page } from "@/api/types";
 import { MATCH_STATUSES, type MatchStatus, type VulnMatchWithAsset } from "@/api/types-intel";
+import { WithdrawnBadge, withdrawalOf } from "@/components/common/IntelBadges";
 import { OffsetPager } from "@/components/common/OffsetPager";
 import { ApiErrorState, QueryView } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
@@ -126,6 +127,10 @@ export function MatchesTab({ onOpenVuln }: { onOpenVuln: (id: string) => void })
                         >
                           {m.vuln_id}
                         </button>
+                        <WithdrawnBadge
+                          className="mt-1 flex w-fit"
+                          withdrawal={withdrawalOf(m.vuln_withdrawn_at, m.vuln_withdrawn)}
+                        />
                       </TD>
                       <TD>
                         <Link

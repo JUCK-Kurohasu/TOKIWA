@@ -104,7 +104,7 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 ## インテル（`routes/intel.py`）
 | GET | /intel/vulns | user | `?q&kev&min_epss&min_cvss&matched&source&severity&limit&offset` → `Page[VulnRecord]`（既定順: KEV→EPSS→CVSS→modified） |
 | GET | /intel/vulns/{id} | user | → `{vuln: VulnRecord, matches: VulnMatch[], advisories: Advisory[]}`（id は CVE または GHSA/JVNDB エイリアス） |
-| GET | /intel/matches | user | `?status&asset_id&vuln_id&kev&min_confidence` → `Page[VulnMatch]`（追加: `asset_name, asset_criticality, vuln_title, kev, epss, cvss_score`。KEV→EPSS→confidence 順） |
+| GET | /intel/matches | user | `?status&asset_id&vuln_id&kev&min_confidence` → `Page[VulnMatch]`（追加: `asset_name, asset_criticality, vuln_title, kev, epss, cvss_score, vuln_withdrawn_at, vuln_withdrawn`。後ろ 2 つは監査 #132: 提供元が脆弱性全体を取り下げた日時（`data.withdrawn_at`）と、取り下げられたアドバイザリ ID → 日時（`data.withdrawn`、一部のみのこともある）。KEV→EPSS→confidence 順） |
 | PATCH | /intel/matches/{id} | analyst | `{status}` |
 | POST | /intel/matches/rescan | analyst | 全資産×全脆弱性を再照合 → `{evaluated_vulns, matches, new, updated, closed}` |
 | GET | /intel/advisories | user | `?priority&status&vuln_id&since` → `Page[Advisory]`（新しい順） |

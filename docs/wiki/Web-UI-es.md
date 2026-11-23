@@ -129,6 +129,12 @@ Información de vulnerabilidades y resultados de su cotejo con los activos. Pest
 **Asset matches** (Coincidencias con activos), **Advisories** (Avisos; recomendaciones priorizadas por el LLM), **News** (Noticias; RSS), **Web research**
 (Investigación web; investigación de 0day con el LLM) y **Sources** (Fuentes; estado de las fuentes). Más detalles en [Inteligencia de vulnerabilidades](Threat-Intel-es).
 
+Los avisos que GHSA / OSV retiraron (por ser erróneos, duplicados, etc.) se marcan con la insignia **Withdrawn (retirado)** en la lista y el detalle
+de vulnerabilidades y en las coincidencias con activos (se retiró la vulnerabilidad completa y las exposiciones basadas en ella se cerraron automáticamente).
+Si solo se retiraron algunos avisos y quedan datos de otras fuentes como NVD, la insignia indica **Partly withdrawn (retirado en parte)**. Al pasar el ratón
+se ven los ID de los avisos retirados y sus fechas. La insignia indica el estado de la vulnerabilidad; no demuestra por qué se cerró una exposición concreta
+(el motivo del cierre automático conserva su texto habitual).
+
 ### Assets (Activos)
 
 Aquí se registran los hosts que se deben proteger y el software que se ejecuta en ellos (nombre del producto, versión, CPE). Los activos registrados se usan para el cotejo

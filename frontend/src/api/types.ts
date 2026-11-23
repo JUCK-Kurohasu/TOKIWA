@@ -374,6 +374,8 @@ export interface VulnRecord {
   cwe: string[];
   affected: SoftwareItem[];
   references: string[];
+  /** Per-source raw data; `withdrawn_at` / `withdrawn` mark advisories withdrawn by their feed (audit #132). */
+  data?: Record<string, unknown>;
 }
 
 export interface VulnMatch {

@@ -125,6 +125,11 @@ Vulnerability information and the results of matching it against your assets. Ta
 **Asset matches**, **Advisories** (prioritized advice from the LLM), **News** (RSS), **Web research**
 (0-day research by the LLM), **Sources**. For details, see [Vulnerability intelligence](Threat-Intel-en).
 
+Advisories that GHSA / OSV withdrew (retracted as invalid, duplicate, …) are marked **Withdrawn** in the vulnerability list and detail
+and in the asset matches (the whole vulnerability was withdrawn; exposures based on it were auto-closed). When only some advisories were
+withdrawn and data from other sources such as NVD remains, the badge reads **Partly withdrawn**. Hover the badge for the withdrawn advisory
+IDs and dates. The badge states the vulnerability's state; it does not prove why a given exposure was closed (the auto-close reason keeps its usual wording).
+
 ### Assets
 
 Register the hosts you need to protect and the software running on them (product name, version, CPE). Registered assets are used for matching
