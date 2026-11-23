@@ -63,6 +63,9 @@ Use it **only behind a trusted load balancer**. In any other environment, the so
 **WebSocket stopped working**
 Gate v0.1 does not support WebSocket (it returns 501). Route WebSocket paths so that they bypass the Gate.
 
+**No Sigma rule ever raises an alert**
+Look for an ERROR `sigma rule dir ... not found` or `sigma: no valid rule file` in the startup log. The signed-in UI calls `/api/v1/health` every 30 seconds, so look at that response in the browser's developer tools (Network tab); with curl, send the `access_token` from `/api/v1/auth/login` as `Authorization: Bearer`. If `checks.sigma.status` is `degraded`, the rule directory is missing or no valid rule could be read (admins also see the paths that were tried). Set `detection.sigma_rule_dirs` (`TOKIWA_DETECTION__SIGMA_RULE_DIRS`) to an absolute path. Without signing in, `/health` always returns `{"status": "ok"}`, so that monitors and attackers do not see internal state.
+
 ## Response
 
 **I approved an action, but nothing is blocked**

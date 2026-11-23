@@ -207,7 +207,7 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 stream の詳細: 接続直後にコメント `: connected`、15 秒ごとに `: ping` コメント。中継トピックは `alert.*` / `incident.*` /
 `action.*` / `deception.tripped` / `intel.advisory` / `llm.call`（`request_redacted`・`response_text` は除外）/
 `event.ingested`（`{"count": n}` のみ）。`?access_token=` の値は uvicorn アクセスログでマスクされる。
-| GET | /health | public | `{"status": "ok"}`。有効なユーザー JWT 付きのときだけ `version` も返す（DB 障害時も 200） |
+| GET | /health | public | 未認証（API トークンを含む）は常に `{"status": "ok"}`・200。有効なユーザー JWT 付きのときだけ `version` と `checks` も返し、`checks` のどれかが `degraded` なら `status` も `"degraded"`（HTTP は 200 のまま。DB 障害時も 200）。`checks.sigma`: `status`（`ok` / `degraded` = ルールディレクトリが無い・有効なルールファイルが 0 件 / `disabled` = 検知器を無効化・ディレクトリ未設定 / `starting` / `unknown`）, `rule_dirs`, `missing_dirs`（件数）, `file_rules_found`, `file_rules_invalid`, `rules_active`, `file_rules_active`、admin のみ `missing_dir_paths`（#177） |
 
 未定義の `/api/*` は SPA の index.html ではなく JSON の 404（`{"detail": "Not Found"}`）。`/api/docs`・`/api/openapi.json` は
 `server.expose_docs`（既定 true、本番は false 推奨）で無効化できる。ReDoc（旧 `/redoc`）は提供しない。

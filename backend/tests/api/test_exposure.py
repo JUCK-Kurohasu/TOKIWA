@@ -102,5 +102,6 @@ async def test_health_hides_version_from_anonymous_callers(
         "/api/v1/health", headers={"Authorization": f"Bearer {ingest_headers['X-Tokiwa-Token']}"}
     )
     assert api_token.json() == {"status": "ok"}
-    signed_in = await client.get("/api/v1/health", headers=admin_headers)
-    assert signed_in.json() == {"status": "ok", "version": __version__}
+    signed_in = (await client.get("/api/v1/health", headers=admin_headers)).json()
+    assert {k: signed_in[k] for k in ("status", "version")} == {"status": "ok", "version": __version__}
+    assert signed_in["checks"]["sigma"]["status"] == "ok"  # component checks: signed-in only (#177)

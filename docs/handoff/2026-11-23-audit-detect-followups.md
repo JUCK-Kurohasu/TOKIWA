@@ -16,7 +16,8 @@
 | #140 | 部分（推奨 (1)(3)(4) は gate-capture レーンで完了。(2) の「異常なヘッダ数をシグナルに」は実装したが、**41〜64 行は low**（推奨の例は「>40 で medium」）。理由は要判断 1） | 新検知器 `web.header_anomaly`（`category=anomaly`, T1190）。指標: `header_anomaly.count`（ヘッダ行数 > `detection.web.header_count_low`（既定 40）で low、> `header_count_medium`（既定 64）で medium）、`header_anomaly.capture_dropped`（medium: Gate が 64 名に収めきれず記録しなかった行がある = label `gate.headers_dropped`）、`header_anomaly.rejected`（medium: `gate:too_many_headers` = 431。同名 101 行のように件数ラベルが付かない場合もこれで拾う）、`header_anomaly.duplicate_framing`（medium: Host / Content-Length / Transfer-Encoding の重複）、`header_anomaly.duplicate`（low: その他の非リストヘッダの重複 = `gate.duplicate_headers`）。ヘッダ行数は `gate.header_count`（Gate が捕捉を打ち切ったときだけ付く実数）、無ければ `max(len(headers), len(header_order))`。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らさない。`details` に `signatures`・`location`・`param` を入れて誤検知マーク（#166）が指標単位で効くように。fingerprint `rule|ip|最も重い指標`。テスト: 70 個のパディング → medium・件数 78・未記録 14、48 行 → low、Client Hints + CDN ヘッダ + 分割 Cookie（20 行・clipped）→ 無音、しきい値の設定、431、Host 重複 → medium・UA 重複 → low、DECEPTION 種別のコピーでは重複発報しない。docs/detection/web.md §2.1・§4、wiki Configuration ×4 | 7e35122 |
 | #141 | 完全（推奨 (1) と (2) の「印を付ける」・(3) 運用文書は gate-capture レーンで完了。(2) の「web_recon で low〜medium シグナル化」をこのレーンで実装） | 新検知器 `web.uninspectable_body`（`category=anomaly`, T1190）。`gate:req_encoding_unknown`（br・zstd・compress・3 段以上。Gate は本文を記録しない）→ `body.encoding_unknown`: **上流が受け付けた（status 200〜399）なら medium**、それ以外（415・400・Gate の 403 等）は low。`gate:req_decode_failed`（gzip / deflate と宣言して展開できない。Gate は生の先頭をテキストとして記録するので他の `web.*` が検査する）→ `body.decode_failed`: low。`details.content_encoding` は `Content-Encoding` ヘッダの値（`clean_label`、60 文字）。テスト: br + 200 → medium・本文なし、br + 415 → low、壊れた gzip に平文の SQLi → low + `web.sqli`（param=password）も鳴る、正しい gzip と非圧縮は無音。docs/detection/web.md §2.1 | ccad1ff |
 | #147 | 完全（推奨 (1) と (2) の除去・タグ・デコイ照合は gate-capture レーンで完了。(2) の「値を sensitive path 検知にかける」と (3) の検知ルールをこのレーンで実装） | 新検知器 `web.route_override`（`category=exploit_attempt`, T1190）。`X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL` の値のパス（`web_common.override_path()`: 絶対 URL はパス部分、`?`・`#` 以降を除く、先頭 `/` 補完、デコード・NFKC・小文字化・`clean_path` = `HttpView.path_clean` と同じ正規化）が要求行のパスと違えば `route_override.different_path`（**medium**）、値が空なら `route_override.empty`（low）。**要求行と同じパスは鳴らさない**（`X-Forwarded-Prefix` + パスで同じ場合も）: 前段のプロキシが受けた URL をそのまま付ける形（IIS ARR、nginx の `proxy_set_header X-Original-URL $request_uri` 等）で、web-detect レーンの良性 fixture「app custom headers」もこの形（初版は同一パスを low にしていてこの fixture で落ちた）。Gate がそのヘッダを渡した（`gate:route_override` あり・`gate.action=proxy`・`gate.stripped_headers` に名前が無い = 運用者が `gate.forward_client_headers` で許可）ときは鳴らさない。タグが無い（Gate 更新前の古い Gate はこのヘッダを上流へ渡す）ときはクライアント由来として扱う。`web.sensitive_file_probe` は値のパスも同じ署名で検査（`location=header_custom`・`param`=ヘッダ名・タグ `route_override`。応答は要求行のものなので 2xx による昇格はしない）。テスト: `/static/app.js` + `X-Original-URL: /.env` → route_override medium と sensitive_file_probe medium（200 text/plain でも critical にならない）、絶対 URL、空値、タグなし、運用者許可で無音、デコイ応答では鳴る、同一パス・プレフィックス付き同一パスは無音。攻撃 fixture 3 件。docs/detection/web.md §2・§2.1 | af7884b |
-| #150 | 完全（推奨のフロント部分は frontend レーンで完了。末尾の「サーバー側にも path/UA の双方向制御文字を低重大度の検知シグナルに」をこのレーンで実装） | 新検知器 `web.deceptive_unicode`（`category=anomaly`, **T1036.002** Masquerading: Right-to-Left Override, low）。指標: `unicode.bidi_control`（U+202A〜U+202E・U+2066〜U+2069 は常に、LRM・RLM・ALM は文脈付き）、`unicode.zero_width`（U+200B・U+2060・U+FEFF は常に、ZWNJ・ZWJ・U+180E・ハングルの埋め字 U+115F/U+1160/U+3164/U+FFA0 は文脈付き）、`unicode.tag_characters`（U+E0000〜U+E007F、旗の絵文字 = U+1F3F4 に続く列は除く）。「文脈付き」= 隣が ASCII か値の端のときだけ（`/.e<ZWJ>nv` は鳴り、ペルシア語の ZWNJ・絵文字の ZWJ 列は鳴らない）。対象: デコード後のパス（アクセスログの `%E2%80%8B` も Gate のデコード済みパスも同じ判定）、User-Agent、全ヘッダ値（Gate は latin-1 で記録するので UTF-8 として読み直す `as_received()`）。**クエリ・ボディは対象外**（RTL 文字列・絵文字の本文に普通に含まれる）。候補文字の正規表現 1 本（`rx()` 登録で ReDoS テスト対象）で先にふるい、ASCII だけの値は即スキップ。`details.code_points`（場所ごとの `U+XXXX 名前`）・`details.excerpts`（`<U+202E>` 形式）。タイトル・`matched`・抜粋は ASCII のみ（テストで確認）。並べ替え文字の集合は UI の `BIDI_RE` と同じ。テスト: パスの RLO、パーセントエンコードの ZWSP、ASCII 間の ZWJ、Gate 経由の UA（latin-1）の RLO、ヘッダのタグ文字（ASCII smuggling）、ペルシア語・絵文字の家族・イングランド旗・日本語のパス、RTL のクエリ、ボディ、Gate 経由の日本語ヘッダは無音。docs/detection/web.md §2.1 | （このコミット） |
+| #150 | 完全（推奨のフロント部分は frontend レーンで完了。末尾の「サーバー側にも path/UA の双方向制御文字を低重大度の検知シグナルに」をこのレーンで実装） | 新検知器 `web.deceptive_unicode`（`category=anomaly`, **T1036.002** Masquerading: Right-to-Left Override, low）。指標: `unicode.bidi_control`（U+202A〜U+202E・U+2066〜U+2069 は常に、LRM・RLM・ALM は文脈付き）、`unicode.zero_width`（U+200B・U+2060・U+FEFF は常に、ZWNJ・ZWJ・U+180E・ハングルの埋め字 U+115F/U+1160/U+3164/U+FFA0 は文脈付き）、`unicode.tag_characters`（U+E0000〜U+E007F、旗の絵文字 = U+1F3F4 に続く列は除く）。「文脈付き」= 隣が ASCII か値の端のときだけ（`/.e<ZWJ>nv` は鳴り、ペルシア語の ZWNJ・絵文字の ZWJ 列は鳴らない）。対象: デコード後のパス（アクセスログの `%E2%80%8B` も Gate のデコード済みパスも同じ判定）、User-Agent、全ヘッダ値（Gate は latin-1 で記録するので UTF-8 として読み直す `as_received()`）。**クエリ・ボディは対象外**（RTL 文字列・絵文字の本文に普通に含まれる）。候補文字の正規表現 1 本（`rx()` 登録で ReDoS テスト対象）で先にふるい、ASCII だけの値は即スキップ。`details.code_points`（場所ごとの `U+XXXX 名前`）・`details.excerpts`（`<U+202E>` 形式）。タイトル・`matched`・抜粋は ASCII のみ（テストで確認）。並べ替え文字の集合は UI の `BIDI_RE` と同じ。テスト: パスの RLO、パーセントエンコードの ZWSP、ASCII 間の ZWJ、Gate 経由の UA（latin-1）の RLO、ヘッダのタグ文字（ASCII smuggling）、ペルシア語・絵文字の家族・イングランド旗・日本語のパス、RTL のクエリ、ボディ、Gate 経由の日本語ヘッダは無音。docs/detection/web.md §2.1 | c15bcba |
+| #177 | 完全（推奨のうち既定パス・起動時 ERROR・eval の `sigma_rules_loaded` は eval-docs レーンで完了。残りの「/health の degraded 表示」をこのレーンで実装。0 件読み込みの起動時 ERROR も追加） | `SigmaRuleStore`（`detect/sigma/loader.py`）に `file_rules_found`（ディレクトリから読めた有効なルールファイル数。rules テーブルの status を適用する **前** なので、運用者が無効化した組み込みルールは「欠落」に数えない。未読込は None）・`file_rules_invalid` と `health(detector_enabled, include_paths)`（属性を読むだけ。ファイル・DB に触れない）。ディレクトリはあるのに有効なルールが 0 件なら起動時に ERROR を 1 回（ディレクトリ欠落は eval-docs レーンの ERROR が既にある）。`GET /api/v1/health`: **未認証（API トークン含む）は従来どおり常に `{"status": "ok"}`・200**。有効なユーザー JWT 付きのときだけ `version` に加えて `checks.sigma`（`status` = ok / degraded / disabled / starting / unknown、`rule_dirs`・`missing_dirs`（件数）・`file_rules_found`・`file_rules_invalid`・`rules_active`・`file_rules_active`、**admin のみ** `missing_dir_paths`）を返し、degraded があれば `status: "degraded"`（HTTP は 200 のまま）。検知器 `sigma` の無効化（設定・`PATCH /detectors` の上書きとも `engine.is_enabled` で判定）と `sigma_rule_dirs: []` は `disabled`（degraded にしない）。判断の理由は要判断 2。テスト `tests/api/test_health_checks.py`: 同梱ルール → ok・20 件以上・viewer も見える、ディレクトリ欠落 → degraded・admin にだけパス・viewer にはパスなし・未認証は `{"status": "ok"}`、壊れたルール 1 件だけのディレクトリ → degraded・invalid 1、検知器無効 → disabled で全体 ok、組み込みルールを 1 件無効化 → ok のまま・active が 1 減る。docs/api-contract.md、docs/detection/sigma.md、wiki Troubleshooting ×4（「Sigma ルールのアラートが 1 件も出ない」） | （このコミット） |
 
 ## 要判断
 
@@ -25,6 +26,12 @@
    40 行前後になりうる（行数は各ヘッダの一般的な付与状況からの見積もりで、実測ではない）。そこで「41〜64 行 = low、Gate が記録しきれない
    （64 名超）・431・65 行超 = medium」にした。low は LLM トリアージ・通知に乗らない（インシデントの起点にはなる）。推奨どおりにするなら
    `detection.web.header_count_medium: 40`。統合担当は #140 を Closes にせず Refs のままにするか、この判断を受け入れて Closes にするかを決める。
+2. **#177 の degraded を誰に見せるか**: 未認証の `/health` には出さない（常に `{"status": "ok"}`・200）。理由: (a) Docker HEALTHCHECK
+   （`deploy/healthcheck.py` は 2xx かどうかだけを見る）やロードバランサが 503 を受けるとコンテナの再起動・振り分け停止になり、再起動では
+   直らない問題（ディレクトリが無い）のために **他のすべての検知まで止まる**。(b) 「Sigma が止まっている」は攻撃者に何が見えていないかを
+   教える情報（http-hardening レーンが version を隠したのと同じ理由）。(c) パスはサーバーのファイル配置なので admin のみ。
+   代償: 外部の監視から degraded を見るにはユーザー JWT が要る（API トークン = センサー用では見えない）。監視用に「health スコープの
+   API トークン」を作るかは要判断（今回は作っていない）。UI はまだ degraded を表示しない（frontend レーンへ依頼）。
 
 ## 送信元 IP の扱い（遮断提案との関係）
 
@@ -50,6 +57,8 @@
   書き換えのあるパスごとに medium が出る**（その構成では上流が必要なら `gate.forward_client_headers: ["x-original-url"]`、不要なら
   `web.route_override` を無効化）。
 - （#150）新しい検知器 `web.deceptive_unicode`（low）が既定で有効。
+- （#177）ログイン済みの `GET /api/v1/health` の応答に `checks` が増え、Sigma のルールディレクトリ欠落・0 件で `status` が
+  `"degraded"` になる（以前は常に `"ok"`）。未認証の応答・HTTP ステータスは不変。ディレクトリはあるのに有効なルールが 0 件なら起動時 ERROR。
 
 ## 失敗した試み
 
@@ -66,6 +75,14 @@
   test_web_anomaly.py で検査する）を除外集合に追加。`fixtures/web_attacks.json` に #147 の 3 件。
 - `backend/src/tokiwa/detect/web_common.py`（所有範囲の該当部分）: `ROUTE_OVERRIDE_HEADERS` と `override_path()` を追加（他は不変）。
 - `backend/src/tokiwa/detect/detectors/web_recon.py`（所有）: `SensitiveFileProbeDetector.scan_overrides()`。要求行だけの要求の挙動は不変。
+- `backend/src/tokiwa/api/routes/health.py`（#177 の degraded 表示のみ所有）: `system_checks()` と認証時の `checks`。未認証の分岐は不変。
+- `backend/src/tokiwa/detect/sigma/loader.py`（読み込み件数の公開のみ所有）: `file_rules_found` / `file_rules_invalid` / `health()`、
+  `load_file_rules()` で件数を数えて 0 件なら ERROR。読み込みのロジックは不変。
+- `backend/tests/api/test_exposure.py`（http-hardening レーンのテスト）: `test_health_hides_version_from_anonymous_callers` の
+  ログイン時の完全一致の 1 行を「status・version が一致 + `checks.sigma.status == "ok"`」に変更（未認証・不正トークン・API トークンの
+  完全一致はそのまま）。
+- `backend/tests/api/test_health_checks.py`（新規。viewer を作る `tests/api/conftest.py` のフィクスチャを使うため tests/api に置いた）。
+- `docs/api-contract.md`: `/health` の行。`docs/detection/sigma.md`: 1 項目追加。`docs/wiki/Troubleshooting*.md`（4 言語）: 1 項目追加。
 
 ## 見送った依頼（gate-capture レーンの NOTES にあったもの）
 
@@ -84,6 +101,10 @@
   ほしい。`Content-Encoding: br` を付けた **平文** の SQLi を、符号化を無視して生のまま読むアプリ（要求ボディを展開しない FastAPI 等）に
   送ると、アプリは平文を処理するのにイベントには本文が無い（`web.uninspectable_body` は鳴るが中身のクラスは分からない）。
   `decode_failed` の場合は既にそうしている（`capture.py` の `body.status != "unknown"`）。
+
+- **frontend（#177）**: `AppShell.tsx` の `SystemStatus` は `/health` の `status` を見ずに緑の点を出している。`status === "degraded"` の
+  ときに警告色と「Sigma ルール未読込」等の表示（`checks.sigma` の `missing_dirs` / `file_rules_found`。admin には `missing_dir_paths`）を
+  出してほしい。応答の型は `{status, version, checks?: {sigma: {...}}}`（`frontend/src/api/types.ts` には型が無く、AppShell 内のインライン型）。
 
 ## 未検証事項
 

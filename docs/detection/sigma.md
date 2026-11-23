@@ -14,6 +14,9 @@ TOKIWA は Sigma ルールを **TOKIWA の `Event` に対してインメモリ�
 - 起動時（`@on_startup`）にファイルを `rules` テーブルへ `source=builtin` で同期する（`meta.rule_key` で対応付け。
   内容はファイルに追従、status と hit_count は保持。ファイルが消えた行は削除）。`POST /rules/reload` でも同期。
 - 不正なルールはスキップしてログに出す（`get_rule_store().errors`、`/rules/reload` の応答）。
+- ルールディレクトリが見つからない・有効なルールファイルが 0 件のときは起動時に ERROR を 1 回出し、ログイン済みの
+  `GET /api/v1/health` が `status: "degraded"` と `checks.sigma`（件数。admin には探したパスも）を返す（#177。未認証の `/health` は常に
+  `{"status": "ok"}`）。件数は `SigmaRuleStore.file_rules_found` / `file_rules_invalid` / `missing_dirs`、判定は `SigmaRuleStore.health()`。
 - ルール変更 API は commit 後にストアを再読込するので **次に取り込んだイベントから反映** される。
 - `hit_count` はメモリで集計し、60 秒ごとのジョブ（`sigma.flush_hits`）・シャットダウン時・
   `GET /rules` / `GET /rules/{id}` の直前にまとめて DB へ書く（検知ループでは DB に書かない）。
