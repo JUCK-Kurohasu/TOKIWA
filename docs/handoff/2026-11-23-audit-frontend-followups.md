@@ -10,8 +10,16 @@
 |---|---|---|---|
 | lost update（Issue 未登録。web-detect レーンが再現） | 完全 | `triage/service.py` の `_triage_alert`: 状態の書き込みを条件付き UPDATE に。(1) `new → triaging` は `WHERE status='new'`（ORM の `row.status = ...` は無条件 UPDATE になるので廃止）。自動トリアージで 0 行（読んだ後に人間が変えた）なら LLM を呼ばずに終える。(2) 判定の保存は 1 文で `triage` は常に書き、`status` は `CASE WHEN status IN ('new','triaging') THEN 'triaged' ELSE status END`。保存後に行を読み直してから `alert.updated` を publish（以前は古い状態を流しえた）。(3) 実行中に誤検知へ変わったアラートからは対処を提案しない（実行開始時に既に誤検知だった強制再トリアージは従来どおり）。テスト `tests/triage/test_triage_status_race.py`（コンテキスト読込中の FP・LLM 呼び出し中の FP・acknowledged・通常の new→triaging→triaged・FP の強制再トリアージ・取り込み直後の PATCH の E2E）。修正前のコードで E2E は 3/3 失敗、修正後は成功を確認 | fee2f0c |
 | #166 / #173 UI | UI は完全（Issue としては部分。下記） | `frontend/src/pages/alerts/`: (1) `FalsePositiveDialog.tsx` — 状態を誤検知にすると開く。再発の抑制を「サーバー既定（初期選択、`suppress` を送らない）/ 抑制しない（`suppress:false`）/ 時間指定（`suppress_hours`、1〜8760）/ 恒久（`suppress_permanent`）」、「送信元を問わない」（`suppress_any_source`、攻撃も黙る旨の警告付き）、理由（`reason`）。アラート詳細と一覧の一括変更の両方で使う（一括は以前、黙って既定の抑制を作っていた）。(2) 誤検知から戻すとき（詳細・一括）に「抑制も解除される」確認。(3) 誤検知のアラート詳細に、そのアラートから作られた抑制（`GET /alert-suppressions?source_alert_id=…&active=false`）と解除ボタン。(4) 新ページ `/alert-suppressions`（サイドバー「監視 → 抑制・許可リスト」、アラート一覧の右上にもリンク）: 種類タブ（すべて / 誤検知 / 許可リスト）・期限切れ・解除済みの表示切替・解除（analyst、確認付き）・**許可リスト作成は admin だけにボタン表示**（CIDR と期間が必須、ルール ID・パス任意、扱い downgrade / suppress、ルールを絞らないときは警告）。サーバー側の上限（`allowlist_max_hours`・/8・/32）は UI から読めないのでヒントで示し、422 の文言をそのまま表示。純粋関数は `suppression.ts`、テスト `suppression.test.tsx`（9 件）。wiki Web-UI ×4 に「アラート」の誤検知ダイアログと新節「抑制・許可リスト」 | 2b381d2 |
-| #132 UI | UI は完全（Issue は sensors の残り 1 点で部分。下記） | `components/common/IntelBadges.tsx` に `withdrawalOf` / `vulnWithdrawal` / `WithdrawnBadge`: `data.withdrawn_at`（脆弱性全体が取り下げ）→「取り下げ済み」、`data.withdrawn` だけ（一部のアドバイザリ）→「一部取り下げ」。ツールチップに取り下げられたアドバイザリ ID と日時。表示箇所: 脆弱性一覧（`VulnsTab`）、脆弱性詳細の見出し（`VulnDetailDialog`）と、その中の閉じた露出、資産一致の一覧（`MatchesTab`）。露出一覧のために backend `VulnMatchOut` に `vuln_withdrawn_at` / `vuln_withdrawn` を追加（`intel_advice.py`、JSON パスで 2 つの印だけを取得し `data` 全体は読まない）。型 `VulnRecord.data?`・`VulnMatchWithAsset.vuln_withdrawn*?`。テスト `tests/intel/test_intel_withdrawn_api.py`（全体取り下げ・一部取り下げ・PATCH の応答）、`IntelBadges.test.tsx`。api-contract、wiki Web-UI ×4 | 2e35b59 |
+| #132 UI | 完全（sensors レーンの 3c3206a と合わせて推奨を全部満たす。下記） | `components/common/IntelBadges.tsx` に `withdrawalOf` / `vulnWithdrawal` / `WithdrawnBadge`: `data.withdrawn_at`（脆弱性全体が取り下げ）→「取り下げ済み」、`data.withdrawn` だけ（一部のアドバイザリ）→「一部取り下げ」。ツールチップに取り下げられたアドバイザリ ID と日時。表示箇所: 脆弱性一覧（`VulnsTab`）、脆弱性詳細の見出し（`VulnDetailDialog`）と、その中の閉じた露出、資産一致の一覧（`MatchesTab`）。露出一覧のために backend `VulnMatchOut` に `vuln_withdrawn_at` / `vuln_withdrawn` を追加（`intel_advice.py`、JSON パスで 2 つの印だけを取得し `data` 全体は読まない）。型 `VulnRecord.data?`・`VulnMatchWithAsset.vuln_withdrawn*?`。テスト `tests/intel/test_intel_withdrawn_api.py`（全体取り下げ・一部取り下げ・PATCH の応答）、`IntelBadges.test.tsx`。api-contract、wiki Web-UI ×4 | 2e35b59 |
 | #40 UI | 推奨 (3) の UI 部分は完全（Issue は部分。下記） | `components/common/provenanceSummary.ts`（純粋関数 `summarizeProvenance`: イベントの `ingest.token_id` / `ingest.token` でトークン別に集計、センサー・データセット・`ingest.claimed_sensor_id`・`ingest.trust=low` の件数。ラベルの無いイベントは「出所の記録なし」として最後に別枠で数え、安全扱いしない。インシデントで重複する証拠は 1 回だけ数える）と `Provenance.tsx`（`ProvenancePanel` / `ActionProvenance`）。**承認ダイアログ**（`ResponseActions.tsx` の `ApproveDialog`）: 対処の `alert_id` のアラート詳細（`GET /alerts/{id}` の証拠、最新 200 件）から集計。インシデントだけに紐付く対処はインシデント詳細のアラートのうち先頭 5 件（`MAX_INCIDENT_ALERTS`）の証拠をまとめる。手動提案で紐付けが無ければ出さない。**アラート詳細**: 右列に「証拠を送ったトークン / センサー」（追加の取得なし）。`ingest.trust=low` が 1 件でもあれば danger の警告（偽造の可能性・承認前に Gate ログや他センサーで確認）とトークン行に「低信頼 N 件」。テスト `Provenance.test.tsx`（4 件）。wiki Web-UI ×4（アラート・対処） | 32e5343 |
+
+## チェック（最終）
+
+- backend: `uv run pytest -q` 全体 2015 件すべて成功（exit 0。ベースライン 2007 + 新規 8: triage 6・intel 2）。警告 1 件
+  （`tests/respond/test_respond_api.py` の後始末で aiosqlite のスレッドが閉じたループに触れる。このレーンの変更とは無関係）。
+  `ruff check` / `ruff format --check` 緑、`mypy src` は既知の 4 件のみ。
+- frontend: `npm run typecheck` 0 件、`npm run lint` 緑、`npx vitest run` 66 件成功（新規 15: suppression 9・Provenance 4・IntelBadges 2）、`npm run build` 成功。
+- `python3 scripts/check_wiki.py` OK（14 ページ × 4 言語）。
 
 ## 要判断
 
@@ -26,9 +34,11 @@
 
 - （#132）バッジは脆弱性の状態を表すもので、露出が閉じた理由を断定しない（自動クローズの理由欄は matcher の従来の文言のまま。
   一部取り下げの CVE で露出が閉じた場合、資産のソフトウェア変更が理由のこともある）。理由欄に「取り下げ」を書くのは matcher 側の変更になるので見送った。
-- （#132 の Close 判断）sensors レーンが残した「OSV の取り下げが querybatch で返らない場合の扱い（未確認）」は未解決のまま。UI 分は満たしたので、
-  統合担当が sensors の NOTES と合わせて Closes にするか判断する。TOKIWA が生成したアドバイザリ（アドバイザリタブ）にはバッジを出していない
-  （アドバイザリは脆弱性レコードを持たない。脆弱性 ID から開く詳細ではバッジが出る）。
+- （#132 の Close 判断）推奨を項目ごとに確認: (a) withdrawn を捨てずに渡して既存行に印を付ける・(b) affected を空にする・(c) matcher の auto-close・
+  (e) テスト（取り込み済み GHSA が withdrawn で再取得されたら mitigated(auto)）は sensors レーン（3c3206a, `tests/intel/test_intel_withdrawn.py`）、
+  (d)「UI に『取り下げ済み』バッジ」はこのレーン（2e35b59）。**推奨はすべて満たしたので Closes #132 に格上げしてよい**と判断する。
+  sensors の NOTES の「OSV の取り下げが querybatch で返らない場合」は推奨の項目ではなく未検証の事実（下の未検証事項）。
+  TOKIWA が生成したアドバイザリ（アドバイザリタブ）にはバッジを出していない（アドバイザリは脆弱性レコードを持たない。脆弱性 ID から開く詳細ではバッジが出る）。
 
 - （#40 の Close 判断）**#40 は Refs のまま**。このレーンで足したのは推奨 (3) の前半「承認 UI に『このアラートを作ったトークン/センサー』を表示」と、
   (2) の後半の一部「『証拠の出所: token X』を承認画面に明示」。残り: (2)「低信頼ソースのみで構成されたインシデントから block を提案しない」
@@ -66,6 +76,10 @@
   切っていた autouse フィクスチャ）は、この修正で不要になった。外すかどうかは detect 側の判断（このレーンでは触っていない）。
 
 ## 未検証事項
+
+- （#132）OSV の `/v1/querybatch` が取り下げ済みエントリを返すかは未確認（sensors の NOTES から引き継ぎ。返さなければ OSV 由来の取り下げは届かない）。
+- （#132）`VulnRow.data["withdrawn_at"].as_string()` / `VulnRow.data["withdrawn"]` は SQLite でのみ実行。PostgreSQL の `JSON` 型では `->>` / `->` に
+  なるはず（SQLAlchemy の JSON 添字演算）だが未実行。
 
 - （UI 全般）ブラウザでの実画面の確認はしていない（typecheck・lint・vitest の静的描画テスト・build のみ）。
 
