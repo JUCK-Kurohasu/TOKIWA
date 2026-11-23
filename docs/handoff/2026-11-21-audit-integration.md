@@ -62,3 +62,12 @@ Issue 化はしていない（要判断: 監査 Issue として追加登録す�
 | 8 | respond-notify（完了） | 09309b5 | backend 1735 passed | 衝突なし。#168 の残り（要約プロンプトに個人名を書かない指示）を統合担当が追加 |
 | 9 | deception（完了） | d50bf49 | backend 1825 passed / mypy 既知 4 件 / frontend 緑 | `respond/policy.py`・`schemas/response.py`（GatePolicy に `entry_expires_at`（#64）と `html_injection_positions`（#41）を両方）・`docs/response.md` が衝突 → 両方残し、`policy_version` はキーワード引数で両方を渡す |
 | 10 | 自動承認のガード（#133 の残余リスク） | 0124c45 | 同上（134.9 秒） | deception レーンの報告: 実 LLM なら弱いデセプション証拠でも block_ip を提案しうる → respond 側で自動承認しない |
+
+## 第 3 弾（2026-11-22〜23）
+
+| 順 | レーン | マージ | 全チェック | 備考 |
+|---|---|---|---|---|
+| 11 | 自動承認ガードの拡張 + Data-Handling の古い記述 | 95343eb | backend 1824 passed + 1 件 flaky | `/.env` を `<img>` で踏ませると `web.sensitive_file_probe`（high）も同じインシデントに入り、最初のガードを素通りしていた → 証拠イベントがすべてブラウザ誘発のアラートも弱い証拠に（e2e テストで確認） |
+| 12 | flaky テストの修正 | 852caf6 | 同上 | `test_canary_header_with_unknown_value_is_an_attempt[typo]`: 末尾の `a`→`A` は #30 の大文字小文字無視で一致してしまう（テストの不具合） |
+| 13 | gate-capture・sensors（完了） | eec4748 | backend 1956 passed / mypy 既知 4 件 / frontend 緑 | 衝突なし |
+| 14 | web-detect（完了） | 4fc2046 | backend 2007 passed（193 秒）/ mypy 既知 4 件 / frontend 緑 / wiki OK | 衝突なし |
