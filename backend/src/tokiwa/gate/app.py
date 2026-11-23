@@ -78,6 +78,8 @@ GENERIC_404 = (
     b"<body><h1>Not Found</h1><p>The requested URL was not found on this server.</p></body></html>\n"
 )
 _NO_INJECT_STATUS = frozenset({204, 206, 304})
+# Request body held in memory while a tarpitted request waits (watching for a disconnect reads the body too).
+TARPIT_BUFFER_BYTES = 64 * 1024
 _DECOY_HEADER_DENY = HOP_BY_HOP | {b"content-length", b"content-encoding", b"content-type", b"date"}
 
 
@@ -166,6 +168,8 @@ class Gate:
             h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
         self._sleep = sleep
+        self._tarpit_active = 0  # requests currently held by the tarpit (#99)
+        self._tarpit_per_client: Counter[str] = Counter()
         self.counters: Counter[str] = Counter()
         self._tasks: list[asyncio.Task[None]] = []
         self._upstream_server: bytes | None = None  # mimicked on gate-generated responses
@@ -340,7 +344,26 @@ class Gate:
             delay_ms = min(tarpit[1], TARPIT_MAX_MS)
             ex.tag("gate:tarpit")
             ex.labels["gate.tarpit_ms"] = str(delay_ms)
-            await self._sleep(delay_ms / 1000.0)
+            key = ex.client_ip or "unknown"
+            if not self._tarpit_acquire(key):
+                # Holding more of this client's requests would cost the Gate more than the client (#99).
+                ex.tag("gate:tarpit_overflow")
+                ex.labels["gate.action"] = "tarpit_overflow"
+                retry = str(max(1, delay_ms // 1000)).encode()
+                await self._respond(
+                    send, ex, 429, RATE_LIMITED_BODY, b"text/plain; charset=utf-8", [(b"retry-after", retry)]
+                )
+                return
+            try:
+                waited = await self._tarpit_wait(receive, delay_ms / 1000.0)
+            finally:
+                self._tarpit_release(key)
+            if waited is None:  # the client hung up while held: nothing left to answer or forward
+                ex.tag("gate:client_disconnect")
+                ex.labels["gate.action"] = "client_disconnect"
+                ex.status = 499
+                return
+            receive = waited
 
         decoy = policy.decoys.match(ex.path)
         override = _route_override_path(ex)
@@ -365,6 +388,63 @@ class Gate:
 
         ex.labels["gate.action"] = "proxy"
         await self._proxy(scope, receive, send, ex, policy)
+
+    # -------------------------------------------------------------------------------------------- tarpit
+    def _tarpit_acquire(self, key: str) -> bool:
+        s = self.settings
+        if s.tarpit_max_concurrent and self._tarpit_active >= s.tarpit_max_concurrent:
+            return False
+        if s.tarpit_max_per_client and self._tarpit_per_client[key] >= s.tarpit_max_per_client:
+            return False
+        self._tarpit_active += 1
+        self._tarpit_per_client[key] += 1
+        return True
+
+    def _tarpit_release(self, key: str) -> None:
+        self._tarpit_active -= 1
+        self._tarpit_per_client[key] -= 1
+        if self._tarpit_per_client[key] <= 0:
+            del self._tarpit_per_client[key]
+
+    async def _tarpit_wait(self, receive: Receive, seconds: float) -> Receive | None:
+        """Hold the request for ``seconds`` unless the client disconnects first (then None).
+
+        Watching for ``http.disconnect`` means calling ``receive()``, which also yields request-body chunks; those
+        are kept (up to TARPIT_BUFFER_BYTES) and replayed by the returned ``receive`` so the body still reaches
+        the capture and the upstream. Past that bound the wait finishes without disconnect detection.
+        """
+        buffered: list[Message] = []
+        size = 0
+        sleeper = asyncio.ensure_future(self._sleep(seconds))
+        pending: asyncio.Future[Message] | None = None
+        try:
+            while not sleeper.done():
+                if size > TARPIT_BUFFER_BYTES:
+                    await sleeper
+                    break
+                pending = asyncio.ensure_future(receive())
+                await asyncio.wait({sleeper, pending}, return_when=asyncio.FIRST_COMPLETED)
+                if not pending.done():
+                    break  # slept the full delay; the receive() in flight is cancelled below
+                message = pending.result()
+                pending = None
+                if message.get("type") == "http.disconnect":
+                    return None
+                buffered.append(message)
+                size += len(message.get("body", b""))
+        finally:
+            for fut in (pending, sleeper):
+                if fut is not None and not fut.done():
+                    fut.cancel()
+        if not buffered:
+            return receive
+
+        async def replay() -> Message:
+            if buffered:
+                return buffered.pop(0)
+            return await receive()
+
+        return replay
 
     # -------------------------------------------------------------------------------------------- decoys
     async def _serve_decoy(

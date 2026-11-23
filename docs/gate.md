@@ -36,10 +36,12 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | trust_forwarded_for | `--trust-forwarded-for` | false | 信頼できる LB の背後でのみ |
 | max_request_headers | — | 100 | ヘッダ行がこれを超える要求は上流へ転送せず **431**（`gate:too_many_headers`）。0 で無効。Apache の `LimitRequestFields` と同じ既定 |
 | forward_client_headers | — | `[]` | 既定では除去する送信元 IP 系・ルーティング上書きヘッダ（§6）のうち、そのまま上流へ渡すもの。Gate の前段の信頼できるプロキシが付け、上流が読むものだけ（例: Cloudflare 配下で `["cf-connecting-ip"]`） |
+| tarpit_max_concurrent | — | 256 | tarpit で同時に保持する要求の上限（全体）。超えた要求は **429**（`gate:tarpit_overflow`）。0 で無制限 |
+| tarpit_max_per_client | — | 8 | 同じ送信元 IP から同時に保持する要求の上限。超えた要求は 429。0 で無制限 |
 
 `GateSettings` に無い運用ノブ（`GateOptions`、CLI のみ）: `--upstream-timeout`（30s, 接続 5s）、
 `--max-queue`（10000 件）、`--preserve-host/--rewrite-host`（既定は Caddy 同様にクライアントの Host を転送）、
-`--access-log`。HTML 注入上限 2 MiB、デコイ時の本文読み取りタイムアウト 5s はコード定数。
+`--access-log`、`--limit-concurrency`（uvicorn の同時接続・タスク上限。超えると 503。既定は無制限）。HTML 注入上限 2 MiB、デコイ時の本文読み取りタイムアウト 5s はコード定数。
 
 ヘルスチェック: `GET /__tokiwa/health` → `{"status":"ok"}`。ループバック/プライベート IP からは
 ポリシー版・シッパー統計・処理件数も返す（インターネットには内部情報を出さない）。プロキシもイベント化もしない。
@@ -50,7 +52,11 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 2. `blocked` に一致 → **403**（本文を読まずに即応答。タグ `gate:blocked`, label `gate.rule`）
 3. `rate_limited` に一致 → クライアント IP ごとのトークンバケット（容量 N、N/60 個/秒で補充）。空なら **429** + `Retry-After`
 4. WebSocket（`Upgrade: websocket` / websocket scope）→ **501**（v1 は非対応。ログ + `gate:websocket_unsupported`）
-5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）
+5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）。保持中の要求が `tarpit_max_concurrent`（全体）/
+   `tarpit_max_per_client`（同じ IP）に達していれば待たせずに **429** + `Retry-After`（`gate:tarpit_overflow`）。待っている間に
+   クライアントが切断したら、その時点でやめて上流へ転送しない（`gate:client_disconnect`, status 499。監査 #99: 以前は撃ちっ放しの
+   要求でも 30 秒ずつ Gate の資源を保持し、攻撃者より防御側の負担になっていた）。切断の監視中に読んだ本文（64 KiB まで）は
+   そのまま上流・捕捉に渡す
 6. パスが `DecoyRoute` に一致 → デコイを返す（**アップストリームへは一切転送しない**）。HTTP イベント（`gate:decoy`）+
    `kind=deception` イベント（`dataset=gate.deception`, `deception.asset_id/asset_kind`）を送る。`X-Original-URL` / `X-Rewrite-URL` /
    `X-Override-URL` の値がデコイに一致する場合も同じ（`gate:route_override`。監査 #147: 上流がこのヘッダでルーティングする構成では
@@ -90,8 +96,9 @@ deceive の汎用 404 に付く `no-store` は、上流の本物の 404 と見�
   `gate:req_encoded`（要求ボディを展開した。label `gate.request_encoding`, `gate.request_body_decoded_bytes`）、
   `gate:req_encoding_unknown`（br・zstd・3 段以上など展開できない符号化。本文は記録しない）、`gate:req_decode_failed`（gzip/deflate と
   宣言したが壊れている）、`gate:client_ip_header`（§6 で除去したヘッダがあった。label `gate.stripped_headers`）、
-  `gate:route_override`（`X-Original-URL` 等があった）、`gate:path_anomaly`（§5。label `gate.path_anomaly`）
-- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers）, `gate.rule`, `gate.policy`,
+  `gate:route_override`（`X-Original-URL` 等があった）、`gate:path_anomaly`（§5。label `gate.path_anomaly`）、
+  `gate:tarpit_overflow`（tarpit の枠が埋まっていて 429）
+- labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers/tarpit_overflow/client_disconnect）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
 **送信前に `tokiwa.llm.redact`** を適用: ヘッダ（`sensitive_headers` は値を丸ごとマスク）、パス、クエリ、Referer、UA、本文。

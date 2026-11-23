@@ -138,6 +138,7 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `gate.trust_forwarded_for` | false | Trust `X-Forwarded-For` |
 | `gate.max_request_headers` | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | `gate.forward_client_headers` | `[]` | Headers normally removed (`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `X-Original-URL`, ...) to pass to the upstream unchanged (only ones a trusted proxy in front sets) |
+| `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Max requests held by the tarpit at once (in total / per IP). Requests beyond get 429. 0 = no cap |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA server |
 | `agent.ingest_token` | None | API token (scope: ingest) |
 | `agent.interval_seconds` | 10 | Host sensor collection interval |

@@ -359,6 +359,10 @@ class GateSettings(BaseModel):
     # trusted proxy in front of the Gate sets and the upstream reads (e.g. ["cf-connecting-ip"] behind Cloudflare)
     # to pass them through unchanged. Case-insensitive.
     forward_client_headers: list[str] = Field(default_factory=list)
+    # Tarpit holds each matching request for up to 30 s. Requests beyond these many held at once (in total / per
+    # client IP) get 429 instead of a slot, so a flood of fire-and-forget requests cannot pile up in the Gate. 0 = no cap.
+    tarpit_max_concurrent: int = Field(default=256, ge=0)
+    tarpit_max_per_client: int = Field(default=8, ge=0)
 
 
 class AgentSettings(BaseModel):

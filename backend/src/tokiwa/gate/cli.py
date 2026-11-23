@@ -108,6 +108,9 @@ def run(
         help="Forward the client Host header (default) or the upstream's",
     ),
     access_log: bool = typer.Option(False, help="Enable uvicorn access log (the gate captures anyway)"),
+    limit_concurrency: int | None = typer.Option(
+        None, help="Max concurrent connections+tasks before uvicorn answers 503 (default: unlimited)"
+    ),
     log_level: str | None = typer.Option(None, help="Log level (default from TOKIWA_LOG_LEVEL)"),
 ) -> None:
     """Run TOKIWA Gate in front of an upstream web app."""
@@ -150,4 +153,5 @@ def run(
         server_header=False,
         date_header=False,
         lifespan="on",
+        limit_concurrency=limit_concurrency,
     )

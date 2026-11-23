@@ -83,10 +83,13 @@ def test_gate_run_starts_uvicorn(settings: Settings, monkeypatch: pytest.MonkeyP
             str(token_file),
             "--capture-body-bytes",
             "1024",
+            "--limit-concurrency",
+            "2000",
         ],
     )
     assert result.exit_code == 0, result.output
     assert captured["host"] == "127.0.0.1" and captured["port"] == 18080
+    assert captured["limit_concurrency"] == 2000
     assert captured["proxy_headers"] is False
     assert captured["server_header"] is False and captured["date_header"] is False
     gate = captured["app"].state.gate

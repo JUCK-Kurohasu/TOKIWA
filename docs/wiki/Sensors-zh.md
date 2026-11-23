@@ -74,9 +74,10 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 | forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 默认会移除的请求头（见下文）中，要原样转发给上游的那些 |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）；超出的请求返回 429（0 表示不限制） |
 
 仅 CLI 提供的运维参数：`--upstream-timeout`（30 秒）、`--max-queue`（待发送事件上限 10,000 条）、
-`--preserve-host / --rewrite-host`、`--access-log`。
+`--preserve-host / --rewrite-host`、`--access-log`、`--limit-concurrency`（并发连接上限，超出返回 503，默认不限制）。
 
 ### 需要了解的行为
 

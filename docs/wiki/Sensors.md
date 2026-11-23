@@ -74,9 +74,10 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431（0 で無効） |
 | forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 既定では除去するヘッダ（下記）のうち、そのまま上流へ渡すもの |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit で同時に保持する要求の上限（全体 / 同じ IP）。超えた要求は 429（0 で無制限） |
 
 CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue`（送信待ちイベントの上限 10,000 件）、
-`--preserve-host / --rewrite-host`、`--access-log`。
+`--preserve-host / --rewrite-host`、`--access-log`、`--limit-concurrency`（同時接続の上限。超えると 503。既定は無制限）。
 
 ### 知っておくべき挙動
 

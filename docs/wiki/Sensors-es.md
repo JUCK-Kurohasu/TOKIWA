@@ -75,9 +75,10 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Encabezados que normalmente se eliminan (ver abajo) y que se pasan sin cambios al upstream |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP); las que excedan reciben 429 (0 = sin límite) |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),
-`--preserve-host / --rewrite-host`, `--access-log`.
+`--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (límite de conexiones simultáneas; por encima, 503; sin límite por defecto).
 
 ### Comportamientos que conviene conocer
 

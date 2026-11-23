@@ -75,9 +75,10 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Headers normally removed (see below) to pass to the upstream unchanged |
+| tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Max requests held by the tarpit at once (in total / per IP); requests beyond get 429 (0 = no cap) |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),
-`--preserve-host / --rewrite-host`, `--access-log`.
+`--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (cap on concurrent connections; 503 beyond it; unlimited by default).
 
 ### Behavior you should know about
 
