@@ -94,6 +94,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | `max_future_skew_seconds` | 120 | How far a sensor clock may run ahead. Events dated further in the future get the receive time instead, the tag `clock_skew` and the label `ingest.original_timestamp` (the original time); the audit entry `ingest.clock_skew` is written at most once per token every 10 minutes. Past timestamps (late or re-sent events) are kept |
 | `max_live_sessions` | 4096 | Maximum number of sessions kept in memory. When full, one-request low-score sessions are evicted first and sessions with AI, canary or decoy evidence last. Heavy eviction logs a WARNING (a flood of one-request clients can reset session features); raise the limit if it appears under normal load |
 | `web.*` | — | Thresholds for web rate-based detections (bursts of errors, login failures, floods, and so on) |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Inspection limits of the web signature detections. Parameters, headers, JSON values and multipart parts past a count limit are not dropped but inspected together; text past the character limit is not inspected. Reaching a limit is recorded in the alert's `details.inspection_truncated` and the tag `inspection-truncated`; if what comes before the limit looks like padding (one repeated character, empty dummy items), `web.inspection_evasion` (low) fires |
 
 ### Triage and correlation (`triage.*`)
 

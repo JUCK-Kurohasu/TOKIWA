@@ -93,6 +93,7 @@ deception:
 | `max_future_skew_seconds` | 120 | センサーの時計が進んでいても許す秒数。これより未来の時刻のイベントは受信時刻に置き換え、タグ `clock_skew` とラベル `ingest.original_timestamp`（元の時刻）を付ける（監査ログ `ingest.clock_skew` はトークンごとに 10 分に 1 回）。過去の時刻（遅延・再送）はそのまま |
 | `max_live_sessions` | 4096 | メモリ上に保持するセッション数の上限。溢れたら 1 リクエストだけの低スコアのセッションから追い出し、AI 判定・カナリア・デコイの証拠があるセッションは最後に回す。追い出しが多いと WARNING ログ（1 リクエストのクライアントの大量送信でセッションの特徴量をリセットされる恐れ）。通常の負荷で出るなら上げる |
 | `web.*` | — | Web 系のレート検知のしきい値（エラーの連発、ログイン失敗、フラッドなど） |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 署名検知の検査上限。個数の上限を超えたパラメータ・ヘッダ・JSON の値・multipart のパートは捨てずにまとめて検査する。文字数の上限を超えた部分は検査しない。上限に達するとアラートの `details.inspection_truncated` とタグ `inspection-truncated` に残り、上限の手前が詰め物（同じ文字の繰り返し・空のダミー要素）なら `web.inspection_evasion`（low）が出る |
 
 ### トリアージ・相関（`triage.*`）
 

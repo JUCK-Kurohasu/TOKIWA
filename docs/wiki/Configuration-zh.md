@@ -93,6 +93,7 @@ deception:
 | `max_future_skew_seconds` | 120 | 允许传感器时钟超前的秒数。时间戳比这更靠后的事件改用接收时间，并加上标签 `clock_skew` 和标注 `ingest.original_timestamp`（原始时间）；审计日志 `ingest.clock_skew` 每个令牌每 10 分钟最多记录一次。过去的时间戳（延迟或重发的事件）保持不变 |
 | `max_live_sessions` | 4096 | 内存中保留的会话数上限。满了以后先淘汰只有 1 个请求的低分会话，带有 AI 判定、金丝雀或诱饵证据的会话最后淘汰。淘汰过多时输出 WARNING 日志（大量只发 1 个请求的客户端可能重置会话特征）；正常负载下也出现时请调大 |
 | `web.*` | — | Web 类速率检测的阈值（连续错误、登录失败、洪泛等） |
+| `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 签名检测的检查上限。超出数量上限的参数、请求头、JSON 值和 multipart 部分不会被丢弃，而是合并在一起检查；超出字符数上限的部分不检查。达到上限时记录在告警的 `details.inspection_truncated` 和标签 `inspection-truncated` 中；如果上限之前的内容像填充（同一字符重复、空的虚拟元素），会产生 `web.inspection_evasion`（low） |
 
 ### 分诊（研判）与关联（`triage.*`）
 

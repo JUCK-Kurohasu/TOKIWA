@@ -28,7 +28,7 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 |---|---|
 | `path` | パス（クエリなし。`path` に `?` が含まれ `query` が空なら分割する） |
 | `query` | クエリのパラメータごと（`name=value`、`param` に名前） |
-| `body` | フォーム / JSON の文字列リーフ（`param` は `a.b[0]`）/ multipart パート。構造化できなければボディ全体 |
+| `body` | フォーム / JSON の文字列リーフ（`param` は `a.b[0]`）/ JSON のキー（全キーを 1 つにまとめた `param=(json keys)`）/ multipart パート。構造化できなければボディ全体 |
 | `body_raw` | ボディ全体（構造化できた場合のみ追加。XXE・デシリアライズ・RSC 用） |
 | `header` | 反射・記録されやすいヘッダ（User-Agent, Referer, Origin, X-Forwarded-For 系, Forwarded, X-Api-Version ...） |
 | `header_other` | その他のヘッダ（Log4Shell / OGNL / Shellshock 用）。Authorization 等は検査しない |
@@ -36,6 +36,25 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 | `filename` | multipart のファイル名 |
 
 各フィールドは `detection.web.max_inspect_chars`（既定 8192）で切り詰めてからデコードする（CPU/ReDoS ガード）。
+
+#### 1.2.1 検査の上限と打ち切り（#51）
+
+構造の上限（`detection.web.max_params` / `max_headers` / `max_json_leaves` / `max_json_depth` / `max_multipart_parts`）を
+超えた分は **捨てずに** 1 つの「あふれ」ターゲット（`param=(overflow)`）にまとめて検査する。以前は JSON の 129 番目以降の
+リーフ・17 段目以降・キー名・multipart の 33 番目以降のパート・65 個目以降の Cookie / ヘッダが黙って捨てられ、
+ダミー要素を前に置くだけで全 `web.*` を回避できた。まとめるときの区切りは NUL（空白にもシェルの区切りにも
+ならないので、隣り合う項目が 1 つの文として読まれない）。
+
+- 上限に達したことは、その要求から出た `web.*` 署名アラートの `details.inspection_truncated`（理由の一覧）と
+  タグ `inspection-truncated` に残る。理由: `json_leaves` / `json_depth` / `multipart_parts` / `params:<location>` /
+  `cookies` / `headers`（あふれを検査済み）、`chars:<location>` / `body_chars`（`max_inspect_chars` 以降は**未検査**）、
+  `sensor_body`（センサーがボディの先頭しか捕捉していない。`request_body_size` との比較による概算で、マスキングで多少ずれる）。
+- 上限に達しただけでは別のアラートにしない（アップロードや一括 API は普通に上限を超える）。上限の手前が
+  **詰め物** に見えるときだけ `web.inspection_evasion`（low）を出す: 上限で切られたフィールドの 90% 以上が同じ 1 文字
+  （NUL と U+FFFD はバイナリの痕跡なので除く）、あふれた JSON リーフ・multipart パート・パラメータ・Cookie・ヘッダの
+  9 割以上が空か同じ値（16 個以上のとき）。`details.indicators` に `padding:<場所>` が入る。
+- `max_inspect_chars` 以降の文字列は今も検査しない（CPU の上限）。そこに置かれたペイロードは、手前が詰め物なら
+  `web.inspection_evasion` だけが鳴る。
 
 ### 1.3 アラート形式
 
@@ -68,6 +87,7 @@ HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQ
 | `web.sensitive_file_probe` | 機微ファイル探索 | T1595.003, T1083, T1552.001 | medium | `file.secrets`（.env, .aws/credentials, id_rsa, wp-config.php.bak, .htpasswd, .kube/config ...）, `file.vcs`（.git/config, .svn）, `file.debug_endpoint`(high: actuator/env, heapdump, phpunit eval-stdin, _ignition) , `file.webshell`(high), `file.backup`（backup.zip, *.sql, `~`）, `file.admin_console`, `file.info_disclosure`(low: server-status, phpinfo, .DS_Store) |
 | `web.scanner_ua` | 攻撃ツール・スキャナ | T1595, T1595.002 | medium | UA: sqlmap/commix/havij/xsstrike/hydra(high), nikto, nuclei, ffuf, gobuster, dirbuster, dirsearch, feroxbuster, wfuzz, wpscan, masscan, zgrab, Nmap NSE, Acunetix, Netsparker, w3af, Nessus, OpenVAS, ZAP ...、CensysInspect(low)。UA の表は AI 判定と共通の `aidetect/ua_catalog.py`（ここで鳴るツールと AI 判定で `scanner` になるツールは同じ集合。#124） / マーカーヘッダ（Acunetix-Aspect, X-Scan-Memo 等）/ マーカーパス（Nmap の `/nice ports,/Trinity.txt.bak` 等）/ OAST ドメイン(high: Burp Collaborator, oastify, interactsh, dnslog.cn, ceye.io。全 location) |
 | `web.rare_method` | 稀な HTTP メソッド | T1595 | low | TRACE/TRACK/DEBUG/CONNECT(medium), WebDAV 動詞(low), 非標準トークン(low), 不正なトークン(medium), `X-HTTP-Method-Override` 等での偽装 |
+| `web.inspection_evasion` | 検査上限を盾にした回避（#51） | T1190 | low | `padding:<場所>`（上限の手前の詰め物。§1.2.1）。fingerprint は `rule|ip|path_key` |
 
 `sensitive_file_probe` は応答も見る: **2xx かつ非 HTML** なら露出の疑い（secrets/vcs/debug/webshell → critical,
 backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で Content-Type 不明なら最大 high、
@@ -88,7 +108,11 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 
 | キー | 既定 | 説明 |
 |---|---|---|
-| `max_inspect_chars` | 8192 | フィールドごとの検査上限 |
+| `max_inspect_chars` | 8192 | フィールドごとの検査上限（これ以降の文字列は検査しない） |
+| `max_params` / `max_headers` | 64 / 64 | パラメータ・Cookie / ヘッダを個別に検査する数。超えた分はまとめて検査（§1.2.1） |
+| `max_json_leaves` / `max_json_depth` | 128 / 16 | JSON の文字列リーフを個別に検査する数 / 深さ。超えた分はまとめて検査 |
+| `max_multipart_parts` | 32 | multipart のパートを個別に検査する数。超えた分はまとめて検査 |
+| `max_decode_rounds` | 3 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる） |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |
 | `login_path_regex` | login, signin, auth, session, token, wp-login.php, xmlrpc.php, j_security_check ... | ログイン系パス（大小無視）。不正/2000 文字超の正規表現は既定値にフォールバック |
 | `credential_window_seconds` / `_fail_statuses` / `_min_failures` / `_min_unique_users` | 300 / [401, 403] / 10 / 4 | credential_stuffing |

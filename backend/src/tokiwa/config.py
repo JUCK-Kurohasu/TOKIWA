@@ -145,6 +145,15 @@ class WebDetectionSettings(BaseModel):
 
     # Per-field cap before decoding (ReDoS / CPU guard). Gate captures 4 KiB of body by default.
     max_inspect_chars: int = 8192
+    # Structural limits of the request view (audit #51). Items past a limit are not dropped: they are inspected
+    # together as one "(overflow)" target and the alert records ``inspection_truncated`` (docs/detection/web.md).
+    max_params: int = Field(default=64, ge=2, le=4096)  # query / form parameters and cookies
+    max_headers: int = Field(default=64, ge=1, le=4096)
+    max_json_leaves: int = Field(default=128, ge=1, le=4096)  # string values inspected one by one
+    max_json_depth: int = Field(default=16, ge=1, le=256)
+    max_multipart_parts: int = Field(default=32, ge=1, le=1024)
+    # Rounds of URL/HTML/JS unescaping per value; decoding stops earlier as soon as the value is stable.
+    max_decode_rounds: int = Field(default=3, ge=1, le=16)
     # web.error_burst: 4xx storm from one source (directory brute force)
     error_burst_window_seconds: float = 60.0
     error_burst_min_errors: int = 30

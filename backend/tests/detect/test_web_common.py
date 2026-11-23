@@ -115,7 +115,13 @@ def test_build_view_targets(make_http_event: Callable[..., Event]) -> None:
         by_loc.setdefault(t.location, []).append((t.param, t.value))
     assert by_loc[PATH] == [(None, "/a/b")]
     assert by_loc[QUERY] == [("id", "1"), (None, "flag"), ("q", "a b")]
-    assert by_loc[BODY] == [("user.name", "bob"), ("user.tags[0]", "x"), ("user.tags[1]", "y")]
+    assert by_loc[BODY] == [
+        ("user.name", "bob"),
+        ("user.tags[0]", "x"),
+        ("user.tags[1]", "y"),
+        ("(json keys)", "user\x00n\x00name\x00tags"),  # keys are inspected too (audit #51)
+    ]
+    assert view.truncated == () and view.evasion == ()
     assert len(by_loc[BODY_RAW]) == 1
     assert by_loc[COOKIE] == [("theme", "dark"), ("sid", "abc")]
     assert (("user-agent", "ua")) in by_loc[HEADER] and ("x-api-version", "1") in by_loc[HEADER]

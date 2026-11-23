@@ -35,7 +35,7 @@ import json
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, ClassVar, Literal
 from urllib.parse import unquote, unquote_plus
@@ -86,6 +86,7 @@ INJECTABLE_HEADERS = frozenset(
 # Never inspected as payload carriers: credentials (redacted anyway) and pure framing headers.
 _SKIP_HEADERS = frozenset({"authorization", "proxy-authorization", "content-length", "connection"})
 
+# Defaults of the structural limits; the effective values come from ``detection.web`` (WebDetectionSettings).
 MAX_DECODE_ROUNDS = 3
 MAX_PARAMS = 64
 MAX_HEADERS = 64
@@ -93,6 +94,54 @@ MAX_JSON_LEAVES = 128
 MAX_JSON_DEPTH = 16
 MAX_MULTIPART_PARTS = 32
 MAX_FRAGMENT = 200
+
+# Joins the items folded into one "overflow" target (JSON keys, leaves past the limit, extra headers). NUL is
+# neither whitespace (the ``norm`` view would collapse it into a space) nor a shell separator (``\n`` would make
+# web.cmd_injection read "name<LF>id" as ";id"), so no signature treats two neighbouring items as one statement.
+OVERFLOW_SEP = "\x00"
+OVERFLOW_PARAM = "(overflow)"
+JSON_KEYS_PARAM = "(json keys)"
+
+# Reasons recorded in ``HttpView.truncated`` when a limit was reached (audit #51). Items past a structural limit
+# are still inspected (folded into one overflow target); only text past ``max_inspect_chars`` is not.
+TRUNC_JSON_LEAVES = "json_leaves"
+TRUNC_JSON_DEPTH = "json_depth"
+TRUNC_MULTIPART_PARTS = "multipart_parts"
+TRUNC_PARAMS = "params"
+TRUNC_COOKIES = "cookies"
+TRUNC_HEADERS = "headers"
+TRUNC_CHARS = "chars"  # "chars:<location>" - a field longer than max_inspect_chars was cut
+TRUNC_BODY = "body_chars"  # the body was longer than max_inspect_chars (the rest is not inspected)
+# The sensor captured only a prefix of the body (request_body_size is larger than the captured text).
+TRUNC_SENSOR_BODY = "sensor_body"
+INSPECTION_TRUNCATED_TAG = "inspection-truncated"
+
+# Evasion indicators recorded in ``HttpView.evasion`` (web.inspection_evasion turns them into a low alert).
+EVADE_PADDING = "padding"  # "padding:<location|json_leaves|multipart_parts|params:...|sensor_body>"
+PADDING_MIN_CHARS = 1024
+PADDING_MIN_ITEMS = 16
+
+
+def is_padding(text: str) -> bool:
+    """True when one character makes up >= 90% of a long text ("A" * 8200 in front of a payload).
+
+    NUL / U+FFFD runs are left out: they are what binary uploads look like after UTF-8 decoding with replacement.
+    Only a few candidate characters are counted (``str.count`` is C speed), never the whole alphabet.
+    """
+    n = len(text)
+    if n < PADDING_MIN_CHARS:
+        return False
+    candidates = {text[0], text[n // 2], text[-1]} - {"\x00", "�"}
+    return any(text.count(c) * 10 >= n * 9 for c in candidates)
+
+
+def is_padding_items(items: list[str]) -> bool:
+    """True when a list that overflowed a structural limit is mostly empty / identical items (dummy elements)."""
+    if len(items) < PADDING_MIN_ITEMS:
+        return False
+    distinct = {i for i in items if i}
+    return len(distinct) * 10 <= len(items)
+
 
 _SCRATCH_KEY = "web.view"
 
@@ -263,52 +312,152 @@ def make_target(
     name: str | None = None,
     plus: bool = False,
     max_chars: int = 8192,
+    rounds: int = MAX_DECODE_ROUNDS,
+    notes: set[str] | None = None,
 ) -> Target:
-    """Build a target. With ``name`` the text is treated as ``name=value`` (both parts decoded separately)."""
-    text = text[:max_chars]
+    """Build a target. With ``name`` the text is treated as ``name=value`` (both parts decoded separately).
+
+    ``notes`` collects ``chars:<location>`` when the text had to be cut to ``max_chars`` (audit #51).
+    """
+    if len(text) > max_chars:
+        text = text[:max_chars]
+        if notes is not None:
+            notes.add(f"{TRUNC_CHARS}:{location}")
     if name is not None:
-        dname = decode(name[:256], plus=plus)
-        dvalue = decode(text, plus=plus)
+        dname = decode(name[:256], plus=plus, rounds=rounds)
+        dvalue = decode(text, plus=plus, rounds=rounds)
         raw = f"{name[:256]}={text}".lower()
         decoded = f"{dname}={dvalue}"
         lower = to_lower(decoded)
         value = to_lower(dvalue)
     else:
-        decoded = decode(text, plus=plus)
+        decoded = decode(text, plus=plus, rounds=rounds)
         raw = text.lower()
         lower = to_lower(decoded)
         value = lower
     return Target(location, param, raw, decoded, lower, normalize(lower), value)
 
 
-def _split_params(qs: str, location: str, max_chars: int, plus: bool) -> list[Target]:
+@dataclass(slots=True)
+class _Build:
+    """Limits + the truncation notes of one :func:`build_view` call."""
+
+    max_chars: int = 8192
+    rounds: int = MAX_DECODE_ROUNDS
+    max_params: int = MAX_PARAMS
+    max_headers: int = MAX_HEADERS
+    max_json_leaves: int = MAX_JSON_LEAVES
+    max_json_depth: int = MAX_JSON_DEPTH
+    max_multipart_parts: int = MAX_MULTIPART_PARTS
+    notes: set[str] | None = None
+    flags: set[str] = field(default_factory=set)  # evasion indicators (padding, ambiguous framing)
+
+    @classmethod
+    def from_settings(cls, cfg: WebDetectionSettings | None, max_chars: int) -> _Build:
+        if cfg is None:
+            return cls(max_chars=max_chars, notes=set())
+        return cls(
+            max_chars=max_chars,
+            rounds=cfg.max_decode_rounds,
+            max_params=cfg.max_params,
+            max_headers=cfg.max_headers,
+            max_json_leaves=cfg.max_json_leaves,
+            max_json_depth=cfg.max_json_depth,
+            max_multipart_parts=cfg.max_multipart_parts,
+            notes=set(),
+        )
+
+    def note(self, reason: str) -> None:
+        if self.notes is not None:
+            self.notes.add(reason)
+
+    def flag(self, reason: str) -> None:
+        self.flags.add(reason)
+
+    def target(
+        self,
+        location: str,
+        text: str,
+        *,
+        param: str | None = None,
+        name: str | None = None,
+        plus: bool = False,
+    ) -> Target:
+        if len(text) > self.max_chars and is_padding(text[: self.max_chars]):
+            self.flag(f"{EVADE_PADDING}:{location}")
+        return make_target(
+            location,
+            text,
+            param=param,
+            name=name,
+            plus=plus,
+            max_chars=self.max_chars,
+            rounds=self.rounds,
+            notes=self.notes,
+        )
+
+
+def _split_params(qs: str, location: str, b: _Build, plus: bool) -> list[Target]:
     out: list[Target] = []
     pieces = qs.split("&")
-    if len(pieces) > MAX_PARAMS:
-        pieces = [*pieces[: MAX_PARAMS - 1], "&".join(pieces[MAX_PARAMS - 1 :])]
+    if len(pieces) > b.max_params:
+        # The tail stays inspected as one piece (its first name labels it), never dropped.
+        if is_padding_items(pieces[: b.max_params - 1]):
+            b.flag(f"{EVADE_PADDING}:{TRUNC_PARAMS}:{location}")
+        pieces = [*pieces[: b.max_params - 1], "&".join(pieces[b.max_params - 1 :])]
+        b.note(f"{TRUNC_PARAMS}:{location}")
     for piece in pieces:
         if not piece:
             continue
         name, sep, value = piece.partition("=")
         if sep:
-            pname = clean_label(decode(name[:256], plus=plus))
-            out.append(make_target(location, value, param=pname, name=name, plus=plus, max_chars=max_chars))
+            pname = clean_label(decode(name[:256], plus=plus, rounds=b.rounds))
+            out.append(b.target(location, value, param=pname, name=name, plus=plus))
         else:
-            out.append(make_target(location, piece, plus=plus, max_chars=max_chars))
+            out.append(b.target(location, piece, plus=plus))
     return out
 
 
-def _json_leaves(obj: Any, prefix: str, out: list[tuple[str, str]], depth: int) -> None:
-    if len(out) >= MAX_JSON_LEAVES or depth > MAX_JSON_DEPTH:
-        return
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            _json_leaves(v, f"{prefix}.{k}" if prefix else str(k), out, depth + 1)
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            _json_leaves(v, f"{prefix}[{i}]", out, depth + 1)
-    elif isinstance(obj, str):
-        out.append((prefix[:100], obj))
+def _json_targets(data: Any, b: _Build) -> list[Target]:
+    """String leaves as targets; keys and everything past the leaf/depth limits folded into overflow targets.
+
+    Before audit #51 the walk stopped at the 128th leaf / 16th level and ignored keys, so 128 dummy elements in
+    front of the payload, or a payload used as a key (sort field names, NoSQL operators) hid it from every
+    ``web.*`` detector. Now nothing in the (already length-capped) body is skipped: keys go to one target, and
+    leaves past the limits to another, each joined with :data:`OVERFLOW_SEP`. The walk is iterative, so the
+    nesting depth json.loads accepted cannot overflow the Python stack here.
+    """
+    leaves: list[tuple[str, str]] = []
+    keys: list[str] = []
+    overflow: list[str] = []
+    stack: list[tuple[Any, str, int]] = [(data, "", 0)]
+    while stack:
+        obj, prefix, depth = stack.pop()
+        if isinstance(obj, dict):
+            items = list(obj.items())
+            keys.extend(str(k) for k, _ in items)
+            for k, v in reversed(items):
+                stack.append((v, (f"{prefix}.{k}" if prefix else str(k))[:200], depth + 1))
+        elif isinstance(obj, list):
+            for i in range(len(obj) - 1, -1, -1):
+                stack.append((obj[i], f"{prefix}[{i}]"[:200], depth + 1))
+        elif isinstance(obj, str):
+            if depth > b.max_json_depth:
+                b.note(TRUNC_JSON_DEPTH)
+                overflow.append(obj)
+            elif len(leaves) >= b.max_json_leaves:
+                b.note(TRUNC_JSON_LEAVES)
+                overflow.append(obj)
+            else:
+                leaves.append((prefix[:100], obj))
+    out = [b.target(BODY, v, param=clean_label(k) or None) for k, v in leaves]
+    if overflow and is_padding_items([v for _, v in leaves]):
+        b.flag(f"{EVADE_PADDING}:{TRUNC_JSON_LEAVES}")
+    if overflow:
+        out.append(b.target(BODY, OVERFLOW_SEP.join(overflow), param=OVERFLOW_PARAM))
+    if keys:
+        out.append(b.target(BODY, OVERFLOW_SEP.join(keys), param=JSON_KEYS_PARAM))
+    return out
 
 
 _BOUNDARY = rx(r'(?:B|b)oundary="?([^";,\s]{1,200})', "multipart.boundary")
@@ -317,7 +466,7 @@ _PART_FILENAME = rx(r'\bfilename="([^"\r\n]{0,500})"', "multipart.filename")
 _FORMISH = rx(r"^[\w.\[\]%-]{1,100}=[^\r\n<>{}]{0,8192}$", "body.formish")
 
 
-def _parse_multipart(body: str, content_type: str, max_chars: int) -> list[Target] | None:
+def _parse_multipart(body: str, content_type: str, b: _Build) -> list[Target] | None:
     m = _BOUNDARY.search(content_type)
     if m:
         boundary = m.group(1)
@@ -328,8 +477,20 @@ def _parse_multipart(body: str, content_type: str, max_chars: int) -> list[Targe
     if not boundary:
         return None
     out: list[Target] = []
-    for chunk in body.split("--" + boundary)[1 : MAX_MULTIPART_PARTS + 1]:
+    contents: list[str] = []
+    delim = "--" + boundary
+    chunks = body.split(delim)[1:]
+    for idx, chunk in enumerate(chunks):
         if chunk.startswith("--"):
+            break
+        if idx >= b.max_multipart_parts:
+            # Parts past the limit stay inspected as one raw chunk (headers included) instead of being dropped.
+            b.note(TRUNC_MULTIPART_PARTS)
+            if is_padding_items(contents):
+                b.flag(f"{EVADE_PADDING}:{TRUNC_MULTIPART_PARTS}")
+            rest = delim.join(chunks[idx:]).strip("\r\n")
+            if rest:
+                out.append(b.target(BODY, rest, param=OVERFLOW_PARAM))
             break
         head, sep, content = chunk.partition("\r\n\r\n")
         if not sep:
@@ -338,44 +499,50 @@ def _parse_multipart(body: str, content_type: str, max_chars: int) -> list[Targe
         fn = _PART_FILENAME.search(head)
         pname = clean_label(nm.group(1)) if nm else None
         if fn and fn.group(1):
-            out.append(make_target(FILENAME, fn.group(1), param=pname, max_chars=max_chars))
+            out.append(b.target(FILENAME, fn.group(1), param=pname))
         content = content.strip("\r\n")
+        contents.append(content)
         if content:
-            out.append(make_target(BODY, content, param=pname, max_chars=max_chars))
+            out.append(b.target(BODY, content, param=pname))
     return out
 
 
-def _parse_body(body: str, content_type: str, max_chars: int) -> list[Target] | None:
+def _parse_body(body: str, content_type: str, b: _Build) -> list[Target] | None:
     """Split a body into parameter targets, or ``None`` when it is unstructured (inspect it whole)."""
     ct = content_type.lower()
     if "multipart/" in ct or (not ct and body.startswith("--")):
-        return _parse_multipart(body, content_type, max_chars)
+        return _parse_multipart(body, content_type, b)
     head = body.lstrip()[:1]
     if "json" in ct or (head in ("{", "[") and "xml" not in ct):
         try:
             data = json.loads(body)
         except Exception:  # truncated capture, invalid JSON, absurd nesting -> inspect whole body
             return None
-        leaves: list[tuple[str, str]] = []
-        _json_leaves(data, "", leaves, 0)
-        return [make_target(BODY, v, param=clean_label(k) or None, max_chars=max_chars) for k, v in leaves]
+        return _json_targets(data, b)
     if "x-www-form-urlencoded" in ct or (not ct and _FORMISH.match(body)):
-        return _split_params(body, BODY, max_chars, plus=True)
+        return _split_params(body, BODY, b, plus=True)
     return None
 
 
-def _cookie_targets(cookie: str, max_chars: int) -> list[Target]:
+def _cookie_targets(cookie: str, b: _Build) -> list[Target]:
     out: list[Target] = []
-    for piece in cookie.split(";")[:MAX_PARAMS]:
+    pieces = cookie.split(";")
+    if len(pieces) > b.max_params:
+        # Same folding as query parameters: the tail is inspected as the value of the last kept cookie.
+        if is_padding_items([p.strip() for p in pieces[: b.max_params - 1]]):
+            b.flag(f"{EVADE_PADDING}:{TRUNC_COOKIES}")
+        pieces = [*pieces[: b.max_params - 1], ";".join(pieces[b.max_params - 1 :])]
+        b.note(TRUNC_COOKIES)
+    for piece in pieces:
         piece = piece.strip()
         if not piece:
             continue
         name, sep, value = piece.partition("=")
         pname = clean_label(name.strip()) or None
         if sep:
-            out.append(make_target(COOKIE, value, param=pname, name=name.strip(), max_chars=max_chars))
+            out.append(b.target(COOKIE, value, param=pname, name=name.strip()))
         else:
-            out.append(make_target(COOKIE, piece, param=pname, max_chars=max_chars))
+            out.append(b.target(COOKIE, piece, param=pname))
     return out
 
 
@@ -431,6 +598,10 @@ class HttpView:
     content_type: str
     headers: dict[str, str]
     targets: list[Target]
+    # Limits that were reached while building the targets (``TRUNC_*`` reasons, sorted). Empty = complete view.
+    truncated: tuple[str, ...] = ()
+    # Evasion indicators (``EVADE_*`` reasons, sorted): padding in front of a limit, ambiguous framing.
+    evasion: tuple[str, ...] = ()
 
     def entities(self, param: str | None = None) -> dict[str, str]:
         ents = {"path": clean_label(self.path, 200), "host": clean_label(self.host, 200)}
@@ -439,17 +610,21 @@ class HttpView:
         return {k: v for k, v in ents.items() if v}
 
 
-def build_view(event: Event, max_chars: int = 8192) -> HttpView | None:
+def build_view(
+    event: Event, max_chars: int = 8192, cfg: WebDetectionSettings | None = None
+) -> HttpView | None:
     http = event.http
     if http is None:
         return None
+    b = _Build.from_settings(cfg, max_chars)
+    header_items = list(http.headers.items())
     headers: dict[str, str] = {}
-    for k, v in list(http.headers.items())[:MAX_HEADERS]:
-        headers[str(k).lower()] = str(v)[:max_chars]
+    for k, v in header_items[: b.max_headers]:
+        headers[str(k).lower()] = str(v)
     if http.user_agent and "user-agent" not in headers:
-        headers["user-agent"] = http.user_agent[:max_chars]
+        headers["user-agent"] = http.user_agent
     if http.referrer and "referer" not in headers:
-        headers["referer"] = http.referrer[:max_chars]
+        headers["referer"] = http.referrer
 
     path_raw = http.path or ""
     query_raw = http.query or ""
@@ -460,33 +635,57 @@ def build_view(event: Event, max_chars: int = 8192) -> HttpView | None:
 
     targets: list[Target] = []
     if path_raw:
-        targets.append(make_target(PATH, path_raw, max_chars=max_chars))
+        targets.append(b.target(PATH, path_raw))
     if query_raw:
-        targets.extend(_split_params(query_raw[:max_chars], QUERY, max_chars, plus=True))
+        if len(query_raw) > max_chars:
+            b.note(f"{TRUNC_CHARS}:{QUERY}")
+            if is_padding(query_raw[:max_chars]):
+                b.flag(f"{EVADE_PADDING}:{QUERY}")
+        targets.extend(_split_params(query_raw[:max_chars], QUERY, b, plus=True))
 
     raw_content_type = http.content_type or headers.get("content-type") or ""
     content_type = raw_content_type.lower()
     body = http.request_body
     if body:
-        body = body[:max_chars]
-        parts = _parse_body(body, raw_content_type, max_chars)  # multipart boundary is case-sensitive
+        if http.request_body_size and http.request_body_size > len(body.encode("utf-8", "replace")):
+            b.note(TRUNC_SENSOR_BODY)  # approximate: redaction can change the captured length a little
+            if is_padding(body[:max_chars]):
+                b.flag(f"{EVADE_PADDING}:{TRUNC_SENSOR_BODY}")
+        if len(body) > max_chars:
+            b.note(TRUNC_BODY)
+            body = body[:max_chars]
+            if is_padding(body):
+                b.flag(f"{EVADE_PADDING}:{BODY}")
+        parts = _parse_body(body, raw_content_type, b)  # multipart boundary is case-sensitive
         if parts is None:
-            targets.append(make_target(BODY, body, max_chars=max_chars))
+            targets.append(b.target(BODY, body))
         else:
             targets.extend(parts)
-            targets.append(make_target(BODY_RAW, body, max_chars=max_chars))
+            targets.append(b.target(BODY_RAW, body))
 
     for name, value in headers.items():
         if not value or name in _SKIP_HEADERS:
             continue
         if name == "cookie":
-            targets.extend(_cookie_targets(value, max_chars))
+            targets.extend(_cookie_targets(value, b))
         elif name in INJECTABLE_HEADERS:
-            targets.append(make_target(HEADER, value, param=name, max_chars=max_chars))
+            targets.append(b.target(HEADER, value, param=name))
         else:
-            targets.append(make_target(HEADER_OTHER, value, param=name, max_chars=max_chars))
+            targets.append(b.target(HEADER_OTHER, value, param=name))
+    if len(header_items) > b.max_headers:
+        # Headers past the limit are inspected together ("name: value" items) instead of being dropped.
+        b.note(TRUNC_HEADERS)
+        if is_padding_items([str(v) for _, v in header_items[: b.max_headers]]):
+            b.flag(f"{EVADE_PADDING}:{TRUNC_HEADERS}")
+        rest = [
+            f"{str(k).lower()}: {v}"
+            for k, v in header_items[b.max_headers :]
+            if str(k).lower() not in _SKIP_HEADERS
+        ]
+        if rest:
+            targets.append(b.target(HEADER_OTHER, OVERFLOW_SEP.join(rest), param=OVERFLOW_PARAM))
 
-    lower_path = to_lower(decode(path_raw[:max_chars]))
+    lower_path = to_lower(decode(path_raw[:max_chars], rounds=b.rounds))
     host = http.host or (event.destination.hostname if event.destination else None) or ""
     if not host and event.destination and event.destination.ip:
         host = event.destination.ip
@@ -499,8 +698,10 @@ def build_view(event: Event, max_chars: int = 8192) -> HttpView | None:
         path_key=path_key(lower_path),
         status=http.status,
         content_type=content_type,
-        headers=headers,
+        headers={k: v[:max_chars] for k, v in headers.items()},
         targets=targets,
+        truncated=tuple(sorted(b.notes or ())),
+        evasion=tuple(sorted(b.flags)),
     )
 
 
@@ -513,7 +714,8 @@ def get_view(event: Event, ctx: DetectionContext | None) -> HttpView | None:
     cached = ctx.scratch.get(_SCRATCH_KEY)
     if isinstance(cached, HttpView) and cached.source is event:
         return cached
-    view = build_view(event, web_settings(ctx.settings).max_inspect_chars)
+    cfg = web_settings(ctx.settings)
+    view = build_view(event, cfg.max_inspect_chars, cfg)
     ctx.scratch[_SCRATCH_KEY] = view
     return view
 
@@ -687,6 +889,11 @@ class WebSignatureDetector(Detector):
             "method": view.method,
             "status": view.status,
         }
+        if view.truncated:
+            # Part of the request was not inspected (or only as an overflow target): analysts and the triage
+            # LLM should know the verdict rests on an incomplete view (audit #51).
+            details["inspection_truncated"] = list(view.truncated)
+            extra_tags = (*extra_tags, INSPECTION_TRUNCATED_TAG)
         if extra_details:
             details.update(extra_details)
         return [
