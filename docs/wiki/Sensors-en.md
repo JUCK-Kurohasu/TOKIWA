@@ -82,6 +82,8 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
 
 - **Use `--trust-forwarded-for` only behind a trusted load balancer**. Without it, `X-Forwarded-*` headers sent by the client
   are discarded and replaced with the values the Gate observed (to prevent source IP spoofing).
+- Request bodies with `Content-Encoding: gzip` / `deflate` are recorded decompressed (tag `gate:req_encoded`; the upstream still gets the compressed bytes).
+  br and zstd cannot be decompressed; only the tag `gate:req_encoding_unknown` is recorded.
 - Captured data is **redacted on the Gate before it is sent** (header values such as `Authorization` and `Cookie`,
   parameter values such as `password=`, tokens, keys, email addresses, and so on).
 - Events keep up to 64 distinct request headers. Headers used for detection (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import codecs
 import time
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -194,6 +195,89 @@ def decode_prefix(prefix: bytes, truncated: bool) -> str:
     return codecs.getincrementaldecoder("utf-8")(errors="replace").decode(prefix, final=not truncated)
 
 
+def body_text(data: bytes, truncated: bool, content_type: str | None) -> str | None:
+    """Decoded text of a (prefix of a) textual body; None for binary or empty bodies."""
+    if not data:
+        return None
+    kind = classify_content_type(content_type)
+    if kind is False or (kind is None and not looks_textual(data[:512])):
+        return None
+    return decode_prefix(data, truncated)
+
+
+# Request Content-Encoding the Gate undoes before capture (audit #141). Upstreams such as Express body-parser or
+# ASP.NET Core's request decompression inflate these, so a compressed SQLi reached the app but not the detectors.
+_REQUEST_CODINGS: dict[str, tuple[int, ...]] = {
+    "gzip": (16 + zlib.MAX_WBITS,),
+    "x-gzip": (16 + zlib.MAX_WBITS,),
+    "deflate": (zlib.MAX_WBITS, -zlib.MAX_WBITS),  # zlib-wrapped (correct) or raw (common in the wild)
+}
+MAX_REQUEST_CODINGS = 2  # "gzip, gzip" is decoded; deeper stacks are reported as unknown
+
+
+@dataclass(slots=True)
+class DecodedBody:
+    data: bytes
+    truncated: bool
+    codings: tuple[str, ...] = ()  # the codings listed in Content-Encoding (minus identity)
+    # identity | decoded | unknown (unsupported coding) | failed (corrupt stream) | empty (nothing captured)
+    status: str = "identity"
+
+
+def _inflate(data: bytes, wbits: int, limit: int) -> tuple[bytes, bool] | None:
+    """Inflate at most ``limit`` output bytes. Returns (output, incomplete) or None when ``data`` is not this format.
+
+    Concatenated gzip members are one valid gzip stream (and inflated as such by upstreams), so every member is
+    read: a harmless first member must not hide the payload in the second.
+    """
+    out = bytearray()
+    rest = data
+    while True:
+        d = zlib.decompressobj(wbits)
+        try:
+            out += d.decompress(rest, limit - len(out))
+        except zlib.error:
+            return (bytes(out), True) if out else None
+        if len(out) >= limit and (d.unconsumed_tail or not d.eof):
+            return bytes(out[:limit]), True  # output limit reached: the decompression-bomb guard
+        if not d.eof:
+            return bytes(out), True  # the captured compressed prefix ends mid-stream
+        rest = d.unused_data
+        if not rest or wbits != 16 + zlib.MAX_WBITS or len(out) >= limit:
+            return bytes(out), bool(rest)
+
+
+def decode_request_body(
+    prefix: bytes, content_encoding: str | None, limit: int, truncated: bool
+) -> DecodedBody:
+    """Undo the request's ``Content-Encoding`` on the captured prefix, producing at most ``limit`` bytes.
+
+    Only the prefix is inflated and the output is capped at the capture limit, so neither a decompression bomb
+    nor a large compressed body costs more than ``capture_body_bytes`` of work and memory.
+    """
+    codings = tuple(
+        c for c in (p.strip().lower() for p in (content_encoding or "").split(",")) if c and c != "identity"
+    )
+    if not codings:
+        return DecodedBody(prefix, truncated)
+    if not prefix or limit <= 0:  # nothing captured (and limit 0 would mean "unlimited" to zlib)
+        return DecodedBody(prefix, truncated, codings, "empty")
+    if len(codings) > MAX_REQUEST_CODINGS or any(c not in _REQUEST_CODINGS for c in codings):
+        return DecodedBody(prefix, truncated, codings, "unknown")
+    data = prefix
+    for coding in reversed(codings):  # the last listed coding was applied last
+        result = None
+        for wbits in _REQUEST_CODINGS[coding]:
+            result = _inflate(data, wbits, limit)
+            if result is not None:
+                break
+        if result is None:
+            return DecodedBody(prefix, truncated, codings, "failed")
+        data, incomplete = result
+        truncated = truncated or incomplete
+    return DecodedBody(data, truncated, codings, "decoded")
+
+
 class BodyCapture:
     """Keeps the first ``limit`` bytes of a streamed body and counts the total size."""
 
@@ -223,12 +307,7 @@ class BodyCapture:
 
     def text(self, content_type: str | None) -> str | None:
         """Decoded prefix for textual bodies; None for binary or empty bodies (size is still recorded)."""
-        if not self._buf:
-            return None
-        kind = classify_content_type(content_type)
-        if kind is False or (kind is None and not looks_textual(bytes(self._buf[:512]))):
-            return None
-        return decode_prefix(bytes(self._buf), self.truncated)
+        return body_text(bytes(self._buf), self.truncated, content_type)
 
 
 @dataclass(slots=True)
@@ -382,7 +461,28 @@ class EventBuilder:
             ex.labels["gate.duplicate_headers"] = ",".join(cap.duplicated)
         return cap
 
-    def http_info(self, ex: Exchange, cap: HeaderCapture | None = None) -> HttpInfo:
+    def decode_body(self, ex: Exchange, cap: HeaderCapture) -> DecodedBody:
+        """Undo the request Content-Encoding on the captured prefix and say on the event that it was encoded."""
+        body = decode_request_body(
+            ex.body.prefix, cap.headers.get("content-encoding"), self.capture_body_bytes, ex.body.truncated
+        )
+        if body.status in ("identity", "empty"):
+            return body
+        known = [c for c in body.codings if c in _REQUEST_CODINGS]
+        ex.labels["gate.request_encoding"] = ",".join(known) if len(known) == len(body.codings) else "unknown"
+        if body.status == "decoded":
+            # request_body is the inflated text; request_body_size stays the wire size
+            ex.tag("gate:req_encoded")
+            ex.labels["gate.request_body_decoded_bytes"] = str(len(body.data))
+        elif body.status == "unknown":
+            ex.tag("gate:req_encoding_unknown")  # br / zstd / compress / deeper stacks: body not inspectable
+        else:
+            ex.tag("gate:req_decode_failed")  # declared gzip/deflate but not a valid stream
+        return body
+
+    def http_info(
+        self, ex: Exchange, cap: HeaderCapture | None = None, body: DecodedBody | None = None
+    ) -> HttpInfo:
         cfg = self.redaction
         cap = cap or capture_headers(ex.raw_headers, priority=self.priority_headers)
         headers, order = cap.headers, cap.order
@@ -392,7 +492,12 @@ class EventBuilder:
             declared = headers.get("content-length", "")
             if declared.isdigit():
                 body_size = max(body_size, int(declared))
-        body_text = ex.body.text(content_type)
+        if body is None:
+            body = decode_request_body(
+                ex.body.prefix, headers.get("content-encoding"), self.capture_body_bytes, ex.body.truncated
+            )
+        # An unsupported coding stays opaque bytes: sniffing them could only produce garbage "text".
+        text = body_text(body.data, body.truncated, content_type) if body.status != "unknown" else None
         return HttpInfo(
             method=ex.method,
             scheme=ex.scheme,
@@ -405,7 +510,7 @@ class EventBuilder:
             referrer=redact_text(headers.get("referer"), cfg),
             content_type=content_type,
             request_body_size=body_size,
-            request_body=redact_text(body_text, self.body_redaction) if body_text else None,
+            request_body=redact_text(text, self.body_redaction) if text else None,
             status=ex.status,
             response_size=ex.response_size,
             response_content_type=ex.response_content_type,
@@ -416,7 +521,8 @@ class EventBuilder:
     def build(self, ex: Exchange) -> list[Event]:
         """One HTTP event per exchange, plus a DECEPTION event when a Mirage decoy was served."""
         ex.finish()
-        http = self.http_info(ex, self.capture(ex))
+        cap = self.capture(ex)
+        http = self.http_info(ex, cap, self.decode_body(ex, cap))
         source = _endpoint(ex.client_ip, ex.client_port)
         destination = _endpoint(ex.server_ip, ex.server_port)
         message = f"{ex.method} {http.path} -> {ex.status}"

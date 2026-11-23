@@ -69,12 +69,19 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
   連結は 8192 文字で打ち切る。`header_order` は到着順で、同じ名前は 2 回まで
 - `request_body`: 先頭 `capture_body_bytes` を UTF-8（置換）で。テキスト系 Content-Type のみ。不明・multipart は内容で判定、
   バイナリはサイズ（`request_body_size`）のみ。多バイト文字の途中で切れた末尾は捨てる
+- `Content-Encoding: gzip` / `x-gzip` / `deflate`（zlib 形式・raw の両方、2 段まで、gzip の複数メンバーも）の要求ボディは、捕捉した
+  先頭を **展開してから** `request_body` に入れる（監査 #141: Express の body-parser 等は展開して処理するのに、検知器は圧縮バイト列を
+  見ていた）。展開後も `capture_body_bytes` で打ち切る（圧縮爆弾対策。展開するのは捕捉した先頭だけ）。`request_body_size` は
+  転送路上の（圧縮された）サイズのまま。上流へは元の圧縮バイト列をそのまま送る
 - `status / response_size / response_content_type / duration_ms`（tarpit 込みのクライアント体感）/ `http_version`
 - `timestamp` = リクエスト到着時刻（AI リズム特徴量用）
 - tags: `gate:blocked|rate_limited|tarpit|decoy|decoy_generic|deceive|html_injected|inject_skipped|upstream_error|client_disconnect|websocket_unsupported|body_timeout`、
   `gate:headers_truncated`（64 名を超えた・連結を打ち切った。label `gate.header_count`=受信したヘッダ行数, `gate.headers_dropped`, `gate.headers_clipped`）、
   `gate:duplicate_header`（Host・Content-Length・User-Agent・`Sec-Fetch-*` などリストでないヘッダが 2 回以上。label `gate.duplicate_headers`）、
-  `gate:too_many_headers`（431）
+  `gate:too_many_headers`（431）、
+  `gate:req_encoded`（要求ボディを展開した。label `gate.request_encoding`, `gate.request_body_decoded_bytes`）、
+  `gate:req_encoding_unknown`（br・zstd・3 段以上など展開できない符号化。本文は記録しない）、`gate:req_decode_failed`（gzip/deflate と
+  宣言したが壊れている）
 - labels: `gate.action`（proxy/blocked/rate_limited/decoy/deceive/upstream_error/websocket/too_many_headers）, `gate.rule`, `gate.policy`,
   `gate.tarpit_ms`, `gate.upstream_ms`, `gate.decoy_asset`, `gate.peer_ip`（XFF 採用時の実ピア）, `gate.error`
 
@@ -158,6 +165,10 @@ uv run python scripts/bench_gate.py [--duration 10 --concurrency 32 --inject --p
 - 単一プロセス（uvicorn workers=1）前提。レートリミット状態はプロセス内メモリ（LRU 10 万キー。溢れたキーは満タンから
   再開＝fail-open 側）。複数ワーカー/複数ゲートでは IP ごとの上限が台数倍になる。
 - 捕捉は**リクエスト**本文のみ。応答本文は保存しない（サイズと型のみ）。
+- 上流が **要求ボディを展開するか**（例: Express の body-parser、ASP.NET Core の RequestDecompression。対応する符号化は製品・版による。
+  TODO(verify): 版ごとの br 対応）を
+  確認すること。Gate は br・zstd を展開できない（`gate:req_encoding_unknown` だけ残る）ので、上流がそれらを展開する構成では
+  圧縮ボディ内の攻撃は検知されない。
 - 本文の redact は正規表現ベース。未知形式の秘密は残りうる。`capture_body_bytes=0` で本文捕捉を止められる。
 - `trust_forwarded_for` は信頼 LB が 1 段の構成を想定（右端 1 個を採用）。多段構成は未対応。
 - `/__tokiwa/health` の詳細は RFC1918 等の「プライベート」判定（Python `ipaddress.is_private`）に依存。

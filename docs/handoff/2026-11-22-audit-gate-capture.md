@@ -11,7 +11,8 @@
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
 | （未登録・high 相当）Gate の共有 httpx クッキージャー | 完全 | 上流・サーバー用の httpx クライアントに「何も保存しない」ポリシーの `CookieJar` を渡す。テスト `tests/gate/test_gate_upstream_headers.py`（A の Set-Cookie が B の要求に付かない・ジャーが空のまま・クライアント自身の Cookie はそのまま転送） | 6326b7e |
-| #140 | 部分（推奨 (1)(3)(4) と「truncated 印・ヘッダ数」は完全。(2) の web_recon で「異常なヘッダ数」を medium シグナルにする部分は web-detect レーンへ依頼） | `gate.capture.capture_headers()` を作り直し: `PRIORITY_HEADERS`（UA・Referer・Host・Origin・Cookie・Content-*・Accept-*・`Sec-Fetch-*`・Client Hints・送信元 IP 系・ルーティング上書き・`web_common.INJECTABLE_HEADERS` 全部）とデセプションのカナリアヘッダ（`deception.canary_header`）は位置に関係なく必ず残し、残りの枠（合計 64 名 = `web_common.MAX_HEADERS`）を到着順に使う。辞書は到着順のままなので Web 検知器の `[:64]` で全部見える。超過は `gate:headers_truncated` + label `gate.header_count`（受信行数）/`gate.headers_dropped`。同名ヘッダの連結は 8192 文字で打ち切り（`gate.headers_clipped`）、`header_order` は同じ名前 2 回まで。リストでないヘッダ（Host・Content-Length・UA・`Sec-Fetch-*` 等）の重複は `gate:duplicate_header` + `gate.duplicate_headers`。推奨 (3): `gate.max_request_headers`（既定 100、0 で無効）を超えるヘッダ行の要求は転送せず 431（`gate:too_many_headers`。デコイ・deceive の判定より後＝ローカル応答はそのまま）。テスト `tests/gate/test_gate_header_capture.py`（ダミー 70 個の後ろの UA・Referer の SQLi・`Sec-Fetch-*`・Origin・カナリアヘッダ・X-Api-Version が残る、DB 往復後も `induced_by()` が理由を返す、`decisive_canary_hit()` が効く、`web_common.build_view()` が Referer の UNION SELECT を見る、`INJECTABLE_HEADERS ⊆ PRIORITY_HEADERS` のドリフト検査、重複・連結上限、431 と無効化、設定したカナリアヘッダ名の優先） | （このコミット） |
+| #140 | 部分（推奨 (1)(3)(4) と「truncated 印・ヘッダ数」は完全。(2) の web_recon で「異常なヘッダ数」を medium シグナルにする部分は web-detect レーンへ依頼） | `gate.capture.capture_headers()` を作り直し: `PRIORITY_HEADERS`（UA・Referer・Host・Origin・Cookie・Content-*・Accept-*・`Sec-Fetch-*`・Client Hints・送信元 IP 系・ルーティング上書き・`web_common.INJECTABLE_HEADERS` 全部）とデセプションのカナリアヘッダ（`deception.canary_header`）は位置に関係なく必ず残し、残りの枠（合計 64 名 = `web_common.MAX_HEADERS`）を到着順に使う。辞書は到着順のままなので Web 検知器の `[:64]` で全部見える。超過は `gate:headers_truncated` + label `gate.header_count`（受信行数）/`gate.headers_dropped`。同名ヘッダの連結は 8192 文字で打ち切り（`gate.headers_clipped`）、`header_order` は同じ名前 2 回まで。リストでないヘッダ（Host・Content-Length・UA・`Sec-Fetch-*` 等）の重複は `gate:duplicate_header` + `gate.duplicate_headers`。推奨 (3): `gate.max_request_headers`（既定 100、0 で無効）を超えるヘッダ行の要求は転送せず 431（`gate:too_many_headers`。デコイ・deceive の判定より後＝ローカル応答はそのまま）。テスト `tests/gate/test_gate_header_capture.py`（ダミー 70 個の後ろの UA・Referer の SQLi・`Sec-Fetch-*`・Origin・カナリアヘッダ・X-Api-Version が残る、DB 往復後も `induced_by()` が理由を返す、`decisive_canary_hit()` が効く、`web_common.build_view()` が Referer の UNION SELECT を見る、`INJECTABLE_HEADERS ⊆ PRIORITY_HEADERS` のドリフト検査、重複・連結上限、431 と無効化、設定したカナリアヘッダ名の優先） | 8e3392f |
+| #141 | 部分（推奨 (1) は完全、(2) の「展開不能を印にする」まで完全・web_recon でのシグナル化は web-detect レーンへ依頼、(3) 運用文書は完全） | `gate.capture.decode_request_body()`: `Content-Encoding` が gzip / x-gzip / deflate（zlib 形式と raw の両方、2 段まで、gzip の複数メンバーも）なら **捕捉した先頭だけ** を展開し、出力も `capture_body_bytes` で打ち切る（圧縮爆弾でも仕事量・メモリは捕捉上限まで。zlib の `max_length=0`＝無制限は捕捉 0 のとき展開しないことで回避）。展開した本文を `request_body` に入れ（テキスト判定・UTF-8 復号も展開後のバイト列で）、`gate:req_encoded` + `gate.request_encoding` / `gate.request_body_decoded_bytes`。br・zstd・3 段以上は `gate:req_encoding_unknown`（本文は記録しない）、壊れた gzip/deflate は `gate:req_decode_failed`。`request_body_size` は転送路上のサイズのまま、上流へは元の圧縮バイト列を送る（変えない）。docs/gate.md §3・§8（上流が展開するかを確認する項目）、wiki Sensors（4 言語）。テスト `tests/gate/test_gate_request_encoding.py`（各符号化・積み重ね・未知・破損・空、2 つ目の gzip メンバーに隠した本文、20 MB の圧縮爆弾が 4096 バイトで止まる、圧縮の途中で切れた先頭、イベントの印と `web_common.build_view()` が展開後の `password` パラメータに UNION SELECT を見る、Gate 経由で上流に圧縮のまま届く） | （このコミット） |
 
 ## 未登録の指摘（このレーンで発見）
 
@@ -36,6 +37,8 @@
 - （#140）イベントの `http.headers` は「先頭 64 行」から「検知用ヘッダ + 到着順の残り、合計 64 名まで」に。`header_order` は
   同じ名前を 2 回までしか並べない（以前は先頭 64 行の全部）。同名ヘッダの連結は 8192 文字まで。
 - （#140）ヘッダ行が 100 を超える要求は上流へ転送せず 431。
+- （#141）gzip / deflate の要求ボディはイベントに展開後のテキストで載る（以前は圧縮バイト列＝バイナリ扱いで本文なし）。
+  br 等の未対応符号化の本文は、以前は内容で判定していたが、今は記録しない（圧縮バイト列はテキストにならないため実質同じ）。
 
 ## 失敗した試み
 
@@ -48,5 +51,10 @@
 
 - **web-detect**: `gate:headers_truncated` / label `gate.header_count`（受信したヘッダ行数）、`gate:duplicate_header`
   （`gate.duplicate_headers`）を web_recon の「異常なヘッダ数・重複ヘッダ」シグナル（#140 推奨 (2)。例: 40 行超で medium）に。
+- **web-detect**: `gate:req_encoding_unknown` / `gate:req_decode_failed`（#141 推奨 (2)）を web_recon の low〜medium シグナルに。
+  展開済みの本文は `request_body` に入るので、既存の本文検査はそのまま効く（web_common は無変更）。
 
 ## 未検証事項
+
+- （#141）上流製品が要求ボディをどの符号化まで展開するか（Express body-parser の版ごとの br 対応、ASP.NET Core の
+  RequestDecompression の既定）は一次資料で確かめていない。docs/gate.md に `TODO(verify)` を残した。

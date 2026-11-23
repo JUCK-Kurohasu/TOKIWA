@@ -81,6 +81,8 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 - **`--trust-forwarded-for` 只能在可信的负载均衡器之后** 使用。不加此选项时，客户端发送的
   `X-Forwarded-*` 会被丢弃，并替换为 Gate 观测到的值（以防止伪造来源 IP）。
+- `Content-Encoding: gzip` / `deflate` 的请求体会先解压再记录（标签 `gate:req_encoded`；发给上游的仍是压缩后的字节）。
+  br、zstd 无法解压，只记录标签 `gate:req_encoding_unknown`。
 - 捕获的数据会 **在发送前由 Gate 端脱敏**（`Authorization`、`Cookie` 等请求头的值，
   `password=` 等参数的值，以及令牌、密钥、电子邮件地址等）。
 - 事件中最多保留 64 种请求头。User-Agent、Referer、`Sec-Fetch-*`、`X-Forwarded-*` 等用于检测的请求头无论出现在什么位置都会保留；

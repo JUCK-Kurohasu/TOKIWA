@@ -81,6 +81,8 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
 
 - **`--trust-forwarded-for` は信頼できるロードバランサの背後でのみ** 使ってください。付けないと、クライアントが送った
   `X-Forwarded-*` は捨てられ、Gate が観測した値に置き換えられます（送信元 IP の偽装を防ぐため）。
+- `Content-Encoding: gzip` / `deflate` の要求ボディは展開してから記録します（タグ `gate:req_encoded`。上流には圧縮したまま送ります）。
+  br・zstd は展開できず、タグ `gate:req_encoding_unknown` だけが残ります。
 - 捕捉したデータは **送信前に Gate 側でマスク** されます（`Authorization` や `Cookie` などのヘッダ値、
   `password=` などのパラメータ値、トークン・鍵・メールアドレスなど）。
 - イベントに残すリクエストヘッダは 64 種類までです。User-Agent・Referer・`Sec-Fetch-*`・`X-Forwarded-*` など検知に使うヘッダは

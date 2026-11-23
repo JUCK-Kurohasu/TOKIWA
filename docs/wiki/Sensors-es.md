@@ -82,6 +82,8 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
 
 - **Use `--trust-forwarded-for` solo detrás de un balanceador de carga de confianza**. Sin esta opción, los encabezados
   `X-Forwarded-*` enviados por el cliente se descartan y se sustituyen por los valores observados por Gate (para impedir la suplantación de la IP de origen).
+- Los cuerpos de solicitud con `Content-Encoding: gzip` / `deflate` se registran descomprimidos (etiqueta `gate:req_encoded`; el upstream sigue recibiendo los bytes comprimidos).
+  br y zstd no se pueden descomprimir; solo queda la etiqueta `gate:req_encoding_unknown`.
 - Los datos capturados **se enmascaran en Gate antes de enviarlos** (valores de encabezados como `Authorization` o `Cookie`,
   valores de parámetros como `password=`, tokens, claves, direcciones de correo electrónico, etc.).
 - Los eventos conservan hasta 64 encabezados distintos. Los que se usan para la detección (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
