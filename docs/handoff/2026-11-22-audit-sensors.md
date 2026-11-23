@@ -8,7 +8,7 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| #70 cmdline マスキング | 完全 | `sensors/cmdline.py`（argv 単位の専用マスカー）をホストセンサーで `redact_text` の前に適用。`agent.send_cmdline`（既定 true）で cmdline 自体を送らない選択。Copilot の `event_brief` も同じマスカーを通す（旧エージェント・他経路で入った未マスク値対策） | 9e76359 |
+| #70 cmdline マスキング | 完全（既定値だけ推奨と違う → 要判断） | `sensors/cmdline.py`（argv 単位の専用マスカー）をホストセンサーで `redact_text` の前に適用。`agent.send_cmdline`（既定 true）で cmdline 自体を送らない選択。Copilot の `event_brief` も同じマスカーを通す（旧エージェント・他経路で入った未マスク値対策） | 9e76359 |
 | #121 新規接続上限 | 部分 | 上限超過時は優先度順（ESTABLISHED > SYN_RECV、outbound > inbound > loopback、プロセス付き > 無し）に報告し、超過分は既知扱いにせず次周期へ持ち越す（seen = 既報告で継続中 ∪ 今回報告分）。PORT_SNAPSHOT に `connections_new` / `connections_truncated` と `degraded=connections_truncated`、新検知器 `sensor.connections_truncated`（medium、送信元 IP なし＝対処提案の対象にならない）。上限は既存の `agent.max_connections_per_cycle` | c053ad2 |
 | #123 Suricata to_client | 部分 | alert の source/destination を「攻撃側 / 被攻撃側」にする: (1) `alert.source`/`alert.target`（ルールの `target` キーワード）を優先、(2) `direction=to_client` かつ `metadata.attack_target` が `Client_Endpoint` ならパケット方向のまま（悪性サーバー → 自社クライアント。公式例）、(3) その他の `to_client` は入れ替え（フロー開始側＝クライアントを攻撃者に）、(4) それ以外はパケット方向。`labels` に `suricata.direction` / `suricata.attribution` / `suricata.swapped`、元の方向は raw に残る。公式例を含む fixture `suricata_eve_direction.json`。残り: 推奨 (2) net_ids の attacker/victim 分離、(3) 資産台帳の保護対象を protected_cidrs に — 他レーン | b82b27d |
 | #131 ログ書式・時刻 | 完全 | (1) 読めない行（不正 JSON・ヘッダ無し Zeek TSV）と解釈できない時刻を `ParseStats` で数え、`LogSource.health_event()` が警告ログ＋`agent.health` イベント（初回は即時、以降 `agent.health_report_seconds`=300 秒ごとに差分）。新検知器 `sensor.log_parse_failures`（読めない行 medium / 時刻のみ low、送信元 IP なし）。意図的なスキップ（Suricata stats、アクセスログでない JSON、Zeek ヘッダ）は数えない。(2) nginx `escape=default` の `\xHH`（nginx ソースで確認）を復号して取り込み（`recovered` として計数・初回警告）。(3) `agent.log_timezone`（IANA / `+09:00` / UTC。不正値は起動時に ValidationError）。未設定時はオフセット無し時刻を従来どおり UTC とみなしつつ計数・警告（アラートはしない）。Caddy の wall 時刻、µs/ns エポックも解釈。時刻の未来ずれのクランプはサーバー側 #19 の既存処理 | 7f7f1b5 |
@@ -32,17 +32,16 @@
 
 ## 失敗した試み
 
+- 特になし。`tests/sensors/` は `__init__.py` が無く兄弟テストモジュールを相対 import できないため、psutil の偽物はテストごとに持つ。
+
 ## 担当外の変更
 
+- `backend/src/tokiwa/copilot/tools.py`（copilot レーン）: `event_brief` の `process.cmdline` を `tokiwa.sensors.cmdline.mask_argv` に通す 2 行 + import 1 行（#70）。
+- `backend/src/tokiwa/api/routes/ingest.py`（api レーン）: `check_binding` で `agent.health` を dataset 縛りの例外に（定数 1 つ + 2 行、#131）。
+- `backend/src/tokiwa/detect/detectors/sensor_health.py`（新規ファイル。拡張点への追加のみ）: `sensor.connections_truncated`（#121）・`sensor.log_parse_failures`（#131）。
+- `backend/src/tokiwa/config.py`: `AgentSettings`（自セクション）に `send_cmdline` / `log_timezone`（+ validator）/ `health_report_seconds` を追加のみ。
 - `docs/wiki/Configuration*.md`（共有）: Agent の表に `agent.send_cmdline` / `max_connections_per_cycle` / `log_timezone` / `health_report_seconds` の 4 行を追加のみ。
 - `docs/wiki/Data-Handling*.md`（data-handling の成果物）: センサー表の nginx/Caddy・Zeek・ホストセンサーの 3 行を現状に合わせて修正（#169・#70）。
-
-- `backend/src/tokiwa/api/routes/ingest.py`（api レーン）: `check_binding` で `agent.health` を dataset 縛りの例外に（定数 1 つ + 2 行、#131）。
-
-- `backend/src/tokiwa/detect/detectors/sensor_health.py`（新規ファイル。拡張点への追加のみ）: `sensor.connections_truncated`（#121）。
-
-- `backend/src/tokiwa/copilot/tools.py`（copilot レーン）: `event_brief` の `process.cmdline` を `tokiwa.sensors.cmdline.mask_argv` に通す 2 行 + import 1 行（#70）。
-- `backend/src/tokiwa/config.py`: `AgentSettings` に項目追加のみ（自セクション）。
 
 ## 他レーンへの依頼
 
