@@ -95,6 +95,7 @@ deception:
 | `web.*` | — | Web 类速率检测的阈值（连续错误、登录失败、洪泛等） |
 | `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 签名检测的检查上限。超出数量上限的参数、请求头、JSON 值和 multipart 部分不会被丢弃，而是合并在一起检查；超出字符数上限的部分不检查。达到上限时记录在告警的 `details.inspection_truncated` 和标签 `inspection-truncated` 中；如果上限之前的内容像填充（同一字符重复、空的虚拟元素），会产生 `web.inspection_evasion`（low） |
 | `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | 应用自定义的请求头（X-Tenant-Id 等）也作为 SQLi、XSS、路径遍历、命令注入的检查对象。Accept、Sec-*、If-*、追踪类等框架性请求头不检查；在 `extra_framing_headers` 中添加名称（末尾 `*` 表示前缀匹配）可以排除更多。设为 false 恢复以前的行为（只检查 User-Agent、Referer、X-Forwarded-* 等） |
+| `web.max_decode_rounds` | 8 | 对一个值重复进行 URL / HTML / JS 解码的最大次数（应对多重编码；值不再变化时即停止） |
 
 ### 分诊（研判）与关联（`triage.*`）
 

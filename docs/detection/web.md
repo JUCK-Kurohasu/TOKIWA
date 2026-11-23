@@ -18,9 +18,23 @@ AI エージェントも最終的にはこれらのペイロードを使うた�
 | `norm` | `lower` + SQL コメント除去 + 空白を 1 個に圧縮 | SQLi / XSS / SSTI |
 | `value` | `name=value` の value 部分のみ（`lower` 相当） | SSRF / RFI（値が URL かどうか） |
 
-デコードは最大 3 ラウンドで安定するまで繰り返す: `%XX`（多重エンコード、`%%32%65` のような入れ子）、`%uXXXX`、
+デコードは最大 8 ラウンド（`detection.web.max_decode_rounds`。以前は 3 で、4 重 URL エンコードが素通りした #89）で安定するまで
+繰り返す: `%XX`（多重エンコード、`%%32%65` のような入れ子）、`%uXXXX`、
 overlong UTF-8（`%c0%ae` `%c0%af` `%c1%9c` `%e0%80%ae`）、`+`→空白（フォーム文脈の 1 ラウンド目のみ）、
 HTML エンティティ、`\uXXXX` / `\xXX`。SQL の `/**/` は空白に、MySQL の `/*!50000 ... */` は中身を残す。全角文字は NFKC で ASCII に寄せる。
+UTF-8 として不正な単独バイト（`%A0` 等）は U+FFFD ではなく Latin-1 の文字にする（`%A0` → U+00A0 → NFKC で空白。MySQL は 0xA0 を空白扱い）。
+
+追加のターゲット（#89）:
+
+- **base64**: `query` / `body` / `cookie` / `header_custom` の値が base64 / base64url（16 文字以上）で、デコード結果が UTF-8 かつ 95% 以上
+  表示可能な文字なら、デコード結果も `param=<名前>(base64)` として検査する（1 要求 8 個まで）。トークン・ハッシュ・ID・バイナリは
+  デコードするとテキストにならないので対象外。
+- **パラメータ汚染（HPP）**: 同名パラメータが 2 回以上あれば、値を `,` で連結した `param=<名前>(joined)` も検査する（ASP.NET の挙動。
+  他のフレームワークの先勝ち / 後勝ちは個別の値で検査済み。`TODO(verify)`）。1 location あたり 4 個まで。
+- **UTF-16 のボディ**: センサーが UTF-8 として復号したため 1 文字おきに NUL が入ったボディ（multipart 以外）は、交互パターンを確かめてから
+  NUL を除いて検査する（Jackson 等は UTF-16 の JSON を自動判定して受け付ける）。ゼロ埋めのバイナリは対象外。非 ASCII 文字はセンサー側で失われている。
+- セミコロンなしの数値文字参照（`&#x3c`）は従来から展開している。監査の行列で取りこぼしに見えたのは、直後の文字が 16 進数字
+  （`&#x3dalert` → U+03DA + `lert`）の場合で、HTML の仕様どおり貪欲に読むとブラウザでもペイロードが壊れる形だった（ブラウザでの確認は `TODO(verify)`）。
 
 ### 1.2 検査対象（location）
 
@@ -122,7 +136,7 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 | `max_params` / `max_headers` | 64 / 64 | パラメータ・Cookie / ヘッダを個別に検査する数。超えた分はまとめて検査（§1.2.1） |
 | `max_json_leaves` / `max_json_depth` | 128 / 16 | JSON の文字列リーフを個別に検査する数 / 深さ。超えた分はまとめて検査 |
 | `max_multipart_parts` | 32 | multipart のパートを個別に検査する数。超えた分はまとめて検査 |
-| `max_decode_rounds` | 3 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる） |
+| `max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる。#89 で 3 → 8） |
 | `inspect_custom_headers` | true | アプリ固有ヘッダ（`header_custom`）を注入系の検知器でも検査する（#53）。false で従来の挙動（既知の反射ヘッダだけ） |
 | `extra_framing_headers` | `[]` | 注入系の検知器で検査しないヘッダ名の追加（小文字。末尾 `*` で前方一致、例 `x-internal-*`）。値が不透明・自動生成のヘッダで誤検知するときに使う。Log4Shell 等は引き続き検査する |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |

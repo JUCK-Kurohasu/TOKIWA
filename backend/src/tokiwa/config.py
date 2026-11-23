@@ -153,7 +153,7 @@ class WebDetectionSettings(BaseModel):
     max_json_depth: int = Field(default=16, ge=1, le=256)
     max_multipart_parts: int = Field(default=32, ge=1, le=1024)
     # Rounds of URL/HTML/JS unescaping per value; decoding stops earlier as soon as the value is stable.
-    max_decode_rounds: int = Field(default=3, ge=1, le=16)
+    max_decode_rounds: int = Field(default=8, ge=1, le=16)
     # Application-specific headers (X-Tenant-Id ...) are inspected by the SQLi/XSS/traversal/command-injection
     # detectors (audit #53). false = only the well-known reflected headers (UA, Referer, X-Forwarded-*), as before.
     inspect_custom_headers: bool = True

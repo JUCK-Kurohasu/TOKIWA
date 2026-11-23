@@ -30,6 +30,8 @@ Views of a :class:`Target`:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import json
 import logging
@@ -162,7 +164,9 @@ def is_framing_header(name: str, extra: tuple[str, ...] = ()) -> bool:
 
 
 # Defaults of the structural limits; the effective values come from ``detection.web`` (WebDetectionSettings).
-MAX_DECODE_ROUNDS = 3
+# Decoding stops as soon as a value is stable, so the bound only matters for deliberately nested encodings;
+# 3 rounds let a 4x URL-encoded payload through (audit #89).
+MAX_DECODE_ROUNDS = 8
 MAX_PARAMS = 64
 MAX_HEADERS = 64
 MAX_JSON_LEAVES = 128
@@ -176,6 +180,7 @@ MAX_FRAGMENT = 200
 OVERFLOW_SEP = "\x00"
 OVERFLOW_PARAM = "(overflow)"
 JSON_KEYS_PARAM = "(json keys)"
+MAX_BASE64_TARGETS = 8  # decoded base64 parameter values per request (audit #89)
 
 # Reasons recorded in ``HttpView.truncated`` when a limit was reached (audit #51). Items past a structural limit
 # are still inspected (folded into one overflow target); only text past ``max_inspect_chars`` is not.
@@ -264,6 +269,7 @@ _PCT_U = rx(r"%[uU]([0-9a-fA-F]{4})", "decode.pct_u")
 _OVERLONG2 = rx(r"%[cC]([01])%([89abAB][0-9a-fA-F])", "decode.overlong2")
 _OVERLONG3 = rx(r"%[eE]0%([89][0-9a-fA-F])%([89abAB][0-9a-fA-F])", "decode.overlong3")
 _BS_ESC = rx(r"\\(?:u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2}))", "decode.backslash")
+_LONE_BYTE = rx(r"[\udc80-\udcff]", "decode.lone_byte")  # surrogateescape'd invalid UTF-8 bytes
 _WS = rx(r"\s+", "norm.ws")
 _CTRL = rx(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "snippet.ctrl")
 
@@ -285,6 +291,10 @@ def _sub_bs(m: re.Match[str]) -> str:
     return chr(int(m.group(1) or m.group(2), 16))
 
 
+def _sub_lone_byte(m: re.Match[str]) -> str:
+    return chr(ord(m.group(0)) - 0xDC00)
+
+
 def decode(text: str, *, plus: bool = False, rounds: int = MAX_DECODE_ROUNDS) -> str:
     """Iteratively undo URL/HTML/JS escaping until the string is stable (bounded rounds).
 
@@ -299,7 +309,14 @@ def decode(text: str, *, plus: bool = False, rounds: int = MAX_DECODE_ROUNDS) ->
                 s = _PCT_U.sub(_sub_pct_u, s)
             s = _OVERLONG3.sub(_sub_overlong3, s)
             s = _OVERLONG2.sub(_sub_overlong2, s)
-            s = unquote_plus(s) if plus and i == 0 else unquote(s)
+            # Bytes that are not valid UTF-8 (a lone %A0) become their Latin-1 character instead of U+FFFD:
+            # MySQL treats 0xA0 as whitespace, and NFKC (``lower`` view) turns U+00A0 into a space (audit #89).
+            if plus and i == 0:
+                s = unquote_plus(s, errors="surrogateescape")
+            else:
+                s = unquote(s, errors="surrogateescape")
+            if not s.isascii():
+                s = _LONE_BYTE.sub(_sub_lone_byte, s)
         elif plus and i == 0 and "+" in s:
             s = s.replace("+", " ")
         if "&" in s:
@@ -429,6 +446,8 @@ class _Build:
     extra_framing: tuple[str, ...] = ()
     notes: set[str] | None = None
     flags: set[str] = field(default_factory=set)  # evasion indicators (padding, ambiguous framing)
+    derived: list[Target] = field(default_factory=list)  # decoded base64 values (appended after the rest)
+    base64_left: int = MAX_BASE64_TARGETS
 
     @classmethod
     def from_settings(cls, cfg: WebDetectionSettings | None, max_chars: int) -> _Build:
@@ -472,6 +491,21 @@ class _Build:
     ) -> Target:
         if len(text) > self.max_chars and is_padding(text[: self.max_chars]):
             self.flag(f"{EVADE_PADDING}:{location}")
+        if location in _BASE64_LOCATIONS and self.base64_left > 0 and param not in _FOLDED_PARAMS:
+            plain = try_base64(text)
+            if plain is not None:
+                self.base64_left -= 1
+                label = f"{param or ''}{BASE64_SUFFIX}"
+                self.derived.append(
+                    make_target(
+                        location,
+                        plain,
+                        param=label,
+                        max_chars=self.max_chars,
+                        rounds=self.rounds,
+                        notes=self.notes,
+                    )
+                )
         return make_target(
             location,
             text,
@@ -484,8 +518,68 @@ class _Build:
         )
 
 
+# --- extra decodings (audit #89) -------------------------------------------------------------------------
+BASE64_SUFFIX = "(base64)"
+JOINED_SUFFIX = "(joined)"
+MAX_JOINED_TARGETS = 4
+_BASE64_LOCATIONS = frozenset({QUERY, BODY, COOKIE, HEADER_CUSTOM})
+_FOLDED_PARAMS = frozenset({OVERFLOW_PARAM, JSON_KEYS_PARAM})
+_B64_VALUE = rx(r"^[A-Za-z0-9+/_-]{16,8192}={0,2}$", "decode.base64_value")
+_B64URL = str.maketrans("-_", "+/")
+
+
+def try_base64(value: str) -> str | None:
+    """The text a base64 / base64url parameter carries, or None (not base64, or binary once decoded).
+
+    Apps that take ``filter=`` / ``state=`` / ``q=`` as base64 decode it themselves, so the signature detectors
+    must see the decoded text too. Random tokens, hashes, IDs and serialized binaries decode to non-text and
+    are skipped: the result has to be valid UTF-8 and >= 95% printable.
+    """
+    v = value.strip()
+    if "%" in v:
+        v = unquote(v)
+    if not _B64_VALUE.match(v):
+        return None
+    core = v.rstrip("=")
+    if "-" in core or "_" in core:
+        if "+" in core or "/" in core:
+            return None  # mixed alphabets: not base64 of anything
+        core = core.translate(_B64URL)
+    if len(core) % 4 == 1:
+        return None
+    try:
+        raw = base64.b64decode(core + "=" * (-len(core) % 4), validate=True)
+        text = raw.decode("utf-8")
+    except (binascii.Error, ValueError):  # UnicodeDecodeError is a ValueError
+        return None
+    if len(text) < 8:
+        return None
+    printable = sum(1 for c in text if c.isprintable() or c in "\t\r\n")
+    return text if printable * 20 >= len(text) * 19 else None
+
+
+def utf16_text(body: str) -> str | None:
+    """ASCII text that arrived as UTF-16 (``{\\x00"\\x00q\\x00...``), with the NULs removed; else None.
+
+    JSON parsers such as Jackson detect UTF-16 bodies on their own, while the sensor decoded the bytes as UTF-8,
+    so every second character is NUL and no signature matched (audit #89). Only the alternating pattern counts:
+    a zero-filled binary (NUL everywhere) or text with a few NULs is left alone. Non-ASCII characters were
+    already lost by the sensor's UTF-8 decoding; ASCII payloads survive.
+    """
+    s = body.lstrip("﻿�")  # BOM: U+FEFF, or FF FE / FE FF decoded as two U+FFFD
+    head = s[:256]
+    odd, even = head[1::2], head[0::2]
+    if len(head) < 8:
+        return None
+    odd_nul, even_nul = odd.count("\x00"), even.count("\x00")
+    little = odd_nul * 10 >= len(odd) * 9 and even_nul * 10 <= len(even)
+    big = even_nul * 10 >= len(even) * 9 and odd_nul * 10 <= len(odd)
+    return s.replace("\x00", "") if little or big else None
+
+
 def _split_params(qs: str, location: str, b: _Build, plus: bool) -> list[Target]:
     out: list[Target] = []
+    by_name: dict[str, list[str]] = {}
     pieces = qs.split("&")
     if len(pieces) > b.max_params:
         # The tail stays inspected as one piece (its first name labels it), never dropped.
@@ -500,8 +594,19 @@ def _split_params(qs: str, location: str, b: _Build, plus: bool) -> list[Target]
         if sep:
             pname = clean_label(decode(name[:256], plus=plus, rounds=b.rounds))
             out.append(b.target(location, value, param=pname, name=name, plus=plus))
+            by_name.setdefault(name, []).append(value)
         else:
             out.append(b.target(location, piece, plus=plus))
+    # HTTP parameter pollution: ASP.NET hands the app "a,b" for ?q=a&q=b, so a payload split over repeated
+    # parameters only exists joined (audit #89). TODO(verify): other frameworks keep the first or the last value
+    # (both are inspected above) or a list; comma-joining is the documented ASP.NET behaviour.
+    joined = 0
+    for name, values in by_name.items():
+        if len(values) < 2 or joined >= MAX_JOINED_TARGETS:
+            continue
+        joined += 1
+        pname = clean_label(decode(name[:256], plus=plus, rounds=b.rounds)) + JOINED_SUFFIX
+        out.append(b.target(location, ",".join(values), param=pname, name=name, plus=plus))
     return out
 
 
@@ -809,6 +914,8 @@ def build_view(
             b.note(TRUNC_SENSOR_BODY)  # approximate: redaction can change the captured length a little
             if is_padding(body[:max_chars]):
                 b.flag(f"{EVADE_PADDING}:{TRUNC_SENSOR_BODY}")
+        if "\x00" in body and "multipart/" not in content_type:
+            body = utf16_text(body) or body
         if len(body) > max_chars:
             b.note(TRUNC_BODY)
             body = body[:max_chars]
@@ -841,6 +948,8 @@ def build_view(
         if rest:
             where = HEADER_CUSTOM if b.custom_headers else HEADER_OTHER
             targets.append(b.target(where, OVERFLOW_SEP.join(rest), param=OVERFLOW_PARAM))
+
+    targets.extend(b.derived)
 
     lower_path = to_lower(decode(path_raw[:max_chars], rounds=b.rounds))
     host = http.host or (event.destination.hostname if event.destination else None) or ""
