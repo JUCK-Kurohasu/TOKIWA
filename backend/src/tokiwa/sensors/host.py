@@ -81,6 +81,31 @@ def _is_loopback(ip: str | None) -> bool:
     return bool(ip) and (str(ip).startswith("127.") or ip == "::1")
 
 
+ConnKey = tuple[str, str, int, str, int]
+
+
+def _is_inbound(c: RawConn, lport: int, listen_ports: set[int]) -> bool:
+    return c.status == "SYN_RECV" or lport in listen_ports
+
+
+def _direction(c: RawConn, key: ConnKey, listen_ports: set[int]) -> str:
+    _, _, lport, rip, _ = key
+    if _is_loopback(rip):
+        return "internal"
+    return "inbound" if _is_inbound(c, lport, listen_ports) else "outbound"
+
+
+def _priority(c: RawConn, key: ConnKey, listen_ports: set[int]) -> tuple[int, int, int]:
+    """Sort key (lower first) when a cycle has more new connections than it may report: established before
+    half-open, outbound before inbound before loopback, owned by a visible process before ownerless."""
+    direction = _direction(c, key, listen_ports)
+    return (
+        0 if c.status == "ESTABLISHED" else 1,
+        {"outbound": 0, "inbound": 1}.get(direction, 2),
+        0 if c.pid else 1,
+    )
+
+
 def _ephemeral_range() -> tuple[int, int]:
     try:
         lo, hi = _PORT_RANGE_FILE.read_text().split()
@@ -114,7 +139,9 @@ class HostSensor:
         # withheld entirely (name / exe / user are still sent).
         self.send_cmdline = send_cmdline
         self._ps = psutil_module
-        self._seen_conns: set[tuple[str, str, int, str, int]] | None = None
+        self._seen_conns: set[ConnKey] | None = None
+        self.connections_new = 0  # new connections seen in the last cycle
+        self.connections_truncated = 0  # of those, not reported yet (over max_connections; carried over)
         self._ephemeral = ephemeral_range or _ephemeral_range()
         self.degraded: set[str] = set()
 
@@ -231,7 +258,7 @@ class HostSensor:
         host: HostInfo,
     ) -> list[Event]:
         listen_ports = {s.port for s in listeners if s.protocol.startswith("tcp")}
-        current: dict[tuple[str, str, int, str, int], RawConn] = {}
+        current: dict[ConnKey, RawConn] = {}
         for c in conns:
             if c.status not in CONNECTION_STATES or c.laddr is None or c.raddr is None:
                 continue
@@ -241,22 +268,31 @@ class HostSensor:
             lip, rip = normalize_ip(c.laddr[0]) or c.laddr[0], normalize_ip(c.raddr[0]) or c.raddr[0]
             current[(proto, lip, c.laddr[1], rip, c.raddr[1])] = c
         previous = self._seen_conns or set()
-        self._seen_conns = set(current)
         new_keys = [k for k in current if k not in previous]
+        self.connections_new = len(new_keys)
+        self.connections_truncated = 0
         if len(new_keys) > self.max_connections:
+            # Audit #121: report the most telling connections first (a C2 channel must not drown in a burst of
+            # loopback / half-open noise), and keep the rest *unseen* so they are reported in a later cycle
+            # instead of silently becoming "known".
+            new_keys.sort(key=lambda k: _priority(current[k], k, listen_ports))
+            self.connections_truncated = len(new_keys) - self.max_connections
             log.warning(
-                "host sensor: %d new connections this cycle, reporting the first %d",
+                "host sensor: %d new connections this cycle, reporting %d now and carrying %d over",
                 len(new_keys),
                 self.max_connections,
+                self.connections_truncated,
             )
             new_keys = new_keys[: self.max_connections]
+        # seen = still-open connections already reported + the ones reported now (never the carried-over ones)
+        self._seen_conns = {k for k in current if k in previous} | set(new_keys)
         ts = utcnow()
         events: list[Event] = []
         for key in new_keys:
             proto, lip, lport, rip, rport = key
             c = current[key]
-            inbound = c.status == "SYN_RECV" or lport in listen_ports
-            direction = "internal" if _is_loopback(rip) else ("inbound" if inbound else "outbound")
+            direction = _direction(c, key, listen_ports)
+            inbound = _is_inbound(c, lport, listen_ports)
             local, remote = Endpoint(ip=lip, port=lport), Endpoint(ip=rip, port=rport)
             src, dst = (remote, local) if inbound else (local, remote)
             proc = self._process_info(c.pid, cache)
@@ -288,25 +324,37 @@ class HostSensor:
         cache: dict[int, ProcessInfo | None] = {}
         host = self.host_info()
         listeners = self._listeners(conns, cache)
+        snapshot_ts = utcnow()
+        # Connections first: their process lookups and the truncation count belong on the snapshot's labels.
+        connections = (
+            self._connection_events(conns, listeners, cache, host) if self.collect_connections else []
+        )
         labels: dict[str, str] = {}
-        if self.degraded:
-            labels["process_info"] = "partial"
-            labels["degraded"] = ",".join(sorted(self.degraded))
-        events = [
-            Event(
-                timestamp=utcnow(),
-                kind=EventKind.PORT_SNAPSHOT,
-                dataset="host.ports",
-                sensor_id=self.sensor_id,
-                host=host,
-                port=PortInfo(listeners=listeners),
-                message=f"{len(listeners)} listening sockets",
-                labels=labels,
+        message = f"{len(listeners)} listening sockets"
+        if self.collect_connections and self.connections_truncated:
+            # Audit #121: the saturation itself is a signal (server side: detector ``sensor.health``).
+            self.degraded.add("connections_truncated")
+            labels["connections_new"] = str(self.connections_new)
+            labels["connections_truncated"] = str(self.connections_truncated)
+            message += (
+                f"; {self.connections_new} new connections, {self.connections_truncated} over the per-cycle "
+                f"limit of {self.max_connections} carried over to the next cycle"
             )
-        ]
-        if self.collect_connections:
-            events.extend(self._connection_events(conns, listeners, cache, host))
-        return events
+        if self.degraded - {"connections_truncated"}:
+            labels["process_info"] = "partial"
+        if self.degraded:
+            labels["degraded"] = ",".join(sorted(self.degraded))
+        snapshot = Event(
+            timestamp=snapshot_ts,
+            kind=EventKind.PORT_SNAPSHOT,
+            dataset="host.ports",
+            sensor_id=self.sensor_id,
+            host=host,
+            port=PortInfo(listeners=listeners),
+            message=message,
+            labels=labels,
+        )
+        return [snapshot, *connections]
 
     async def poll(self) -> list[Event]:
         return await asyncio.to_thread(self.collect_events)

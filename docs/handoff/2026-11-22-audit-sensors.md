@@ -8,8 +8,8 @@
 
 | Issue | 状態 | 何をしたか | コミット |
 |---|---|---|---|
-| #70 cmdline マスキング | 完全 | `sensors/cmdline.py`（argv 単位の専用マスカー）をホストセンサーで `redact_text` の前に適用。`agent.send_cmdline`（既定 true）で cmdline 自体を送らない選択。Copilot の `event_brief` も同じマスカーを通す（旧エージェント・他経路で入った未マスク値対策） | (#70) |
-| #121 新規接続上限 | 未着手 | | |
+| #70 cmdline マスキング | 完全 | `sensors/cmdline.py`（argv 単位の専用マスカー）をホストセンサーで `redact_text` の前に適用。`agent.send_cmdline`（既定 true）で cmdline 自体を送らない選択。Copilot の `event_brief` も同じマスカーを通す（旧エージェント・他経路で入った未マスク値対策） | 9e76359 |
+| #121 新規接続上限 | 部分 | 上限超過時は優先度順（ESTABLISHED > SYN_RECV、outbound > inbound > loopback、プロセス付き > 無し）に報告し、超過分は既知扱いにせず次周期へ持ち越す（seen = 既報告で継続中 ∪ 今回報告分）。PORT_SNAPSHOT に `connections_new` / `connections_truncated` と `degraded=connections_truncated`、新検知器 `sensor.connections_truncated`（medium、送信元 IP なし＝対処提案の対象にならない）。上限は既存の `agent.max_connections_per_cycle` | (#121) |
 | #123 Suricata to_client | 未着手 | | |
 | #131 ログ書式・時刻 | 未着手 | | |
 | #132 withdrawn アドバイザリ | 未着手 | | |
@@ -27,10 +27,15 @@
 
 ## 担当外の変更
 
+- `backend/src/tokiwa/detect/detectors/sensor_health.py`（新規ファイル。拡張点への追加のみ）: `sensor.connections_truncated`（#121）。
+
 - `backend/src/tokiwa/copilot/tools.py`（copilot レーン）: `event_brief` の `process.cmdline` を `tokiwa.sensors.cmdline.mask_argv` に通す 2 行 + import 1 行（#70）。
 - `backend/src/tokiwa/config.py`: `AgentSettings` に項目追加のみ（自セクション）。
 
 ## 他レーンへの依頼
+
+- （#121 残り）監査推奨 (2) の「SYN_RECV を件数サマリ（ポート別・送信元数）に集約し個別イベントにしない」は未対応。現状は優先度で後回しにするだけで、
+  持続的な SYN フラッドでは毎周期 1000 件の SYN_RECV イベントが送られる（取り込み負荷）。集約はイベント形（新 dataset）を伴うので別タスク。
 
 - llm レーン: `llm/redact.py` の `url_credentials` はユーザー名が空の URL（`redis://:pw@host`）を拾わない（`([^/\s:@]+)` が 1 文字以上を要求）。
   cmdline はセンサー側で補ったが、nginx / Gate のクエリ等は未対応。`([^/\s:@]*)` にすれば直る。
