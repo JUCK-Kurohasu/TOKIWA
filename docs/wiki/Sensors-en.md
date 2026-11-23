@@ -69,7 +69,7 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | upstream | `--upstream` | `http://127.0.0.1:3000` | Where to forward requests. A path prefix is also allowed (`http://app/base`) |
 | listen | `--listen host:port` | `0.0.0.0:8080` | Listen address |
 | server_url | `--server` | `http://127.0.0.1:8788` | TOKIWA server |
-| ingest_token | `--token` / `--token-file` | None | Requires the `ingest` and `gate` scopes |
+| ingest_token | `--token-file` (avoid `--token`: visible in `ps`) | None | Requires the `ingest` and `gate` scopes. The environment variable `TOKIWA_GATE__INGEST_TOKEN` also works |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Number of leading bytes of the request body to capture (0 disables capture) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | How often to pull the policy |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |

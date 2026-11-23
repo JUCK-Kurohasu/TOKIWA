@@ -28,7 +28,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | listen_host / listen_port | `--listen host:port` | 0.0.0.0:8080 | `[::]:8080`, `:8080` 可 |
 | server_url | `--server` | http://127.0.0.1:8788 | |
 | token_file | `--token-file` | なし | 変更（mtime/サイズ/inode）時と 401 受信時に読み直す。空・読めないときは直前のトークンを維持 |
-| ingest_token | `--token` / `--token-file` | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示） |
+| ingest_token | `--token-file` / env（`--token` は非推奨） | なし | scope `ingest` と `gate` が必要（`token create` の既定は `ingest` のみなので `--scope gate` を明示）。`--token` は引数が `ps`・`docker inspect` に見えるので起動時に警告する（監査 #143、docs/deploy.md §4） |
 | sensor_id | `--sensor-id` | gate-1 | イベントの `sensor_id` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 0 で本文捕捉なし |
 | batch_size / flush_interval_seconds | `--batch-size` / `--flush-interval` | 100 / 1.0 | |

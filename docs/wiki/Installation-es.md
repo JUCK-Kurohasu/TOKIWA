@@ -53,10 +53,14 @@ docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --s
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
 # Sensor de host (usa los espacios de nombres de PID / red del host para ver sus puertos y procesos)
+# Pase el token en un archivo env con permisos 600, /etc/tokiwa/agent.env (una línea: TOKIWA_AGENT__INGEST_TOKEN=tkw_...)
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -e TOKIWA_AGENT__INGEST_TOKEN=tkw_... -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 ```
 
+- **No pase los tokens de API como argumentos de línea de comandos, como `--token tkw_...`.** Los argumentos son visibles para otros usuarios
+  del mismo host mediante `ps`, y para los administradores de Docker mediante `docker inspect`. Use `--token-file` para Gate (se vuelve a leer
+  cuando cambia) y la variable de entorno `TOKIWA_AGENT__INGEST_TOKEN` para Agent (`--env-file` o el `.env` de compose). Los pasos están en `docs/deploy.md` §4.
 - A los roles sin HTTP (agent / sim) se les añade `TOKIWA_HEALTHCHECK_URL=none`. La comprobación de estado de Gate es
   `http://127.0.0.1:8080/__tokiwa/health`.
 - Agent puede necesitar privilegios equivalentes a root para leer la información de procesos de otros usuarios (la imagen no se ejecuta como root).

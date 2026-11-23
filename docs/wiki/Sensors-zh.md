@@ -68,7 +68,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | upstream | `--upstream` | `http://127.0.0.1:3000` | 转发目标。也可以带路径前缀（`http://app/base`） |
 | listen | `--listen host:port` | `0.0.0.0:8080` | 监听地址 |
 | server_url | `--server` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
-| ingest_token | `--token` / `--token-file` | 无 | 需要 `ingest` 和 `gate` 作用域 |
+| ingest_token | `--token-file`（不要用 `--token`：会在 `ps` 中可见） | 无 | 需要 `ingest` 和 `gate` 作用域。也可以用环境变量 `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节（0 表示不捕获） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | 拉取策略的间隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |

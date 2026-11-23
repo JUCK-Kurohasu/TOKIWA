@@ -68,7 +68,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | upstream | `--upstream` | `http://127.0.0.1:3000` | 転送先。パス接頭辞も可（`http://app/base`） |
 | listen | `--listen host:port` | `0.0.0.0:8080` | 待ち受けアドレス |
 | server_url | `--server` | `http://127.0.0.1:8788` | TOKIWA サーバー |
-| ingest_token | `--token` / `--token-file` | なし | スコープ `ingest` と `gate` が必要 |
+| ingest_token | `--token-file`（`--token` は `ps` で見えるので使わない） | なし | スコープ `ingest` と `gate` が必要。環境変数 `TOKIWA_GATE__INGEST_TOKEN` でも可 |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕捉するリクエストボディの先頭バイト数（0 で捕捉しない） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ポリシーを取りに行く間隔 |
 | trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |

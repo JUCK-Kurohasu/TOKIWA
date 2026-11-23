@@ -78,14 +78,22 @@ docker compose -f deploy/compose.yaml exec tokiwa tokiwa token create gate-1 --s
 #   .env に TOKIWA_GATE__INGEST_TOKEN / TOKIWA_GATE__UPSTREAM を設定して
 docker compose -f deploy/compose.yaml --env-file .env --profile gate up -d
 
-# 単体 docker run の例
+# 単体 docker run の例。トークンはファイルで渡す（`token create` の出力をエディタで貼り付け、コンテナの uid 10001 が読めるように）。
+# ディレクトリごとマウントするのは、ローテーションでファイルを置き換えても Gate が新しいトークンを読めるようにするため
+sudo install -d -m 700 /etc/tokiwa/gate && sudoedit /etc/tokiwa/gate/token
+sudo chown 10001:10001 /etc/tokiwa/gate/token && sudo chmod 400 /etc/tokiwa/gate/token
 docker run -d --name tokiwa-gate -p 8080:8080 \
   -e TOKIWA_HEALTHCHECK_URL=http://127.0.0.1:8080/__tokiwa/health \
-  tokiwa:local gate run --upstream http://app:3000 --server http://tokiwa:8788 --token tkw_...
+  -v /etc/tokiwa/gate:/run/secrets/tokiwa-gate:ro \
+  tokiwa:local gate run --upstream http://app:3000 --server http://tokiwa:8788 \
+  --token-file /run/secrets/tokiwa-gate/token
 
-# ホストセンサー（ホストのポート/プロセスを見るには host の PID/ネットワーク名前空間が必要）
+# ホストセンサー（ホストのポート/プロセスを見るには host の PID/ネットワーク名前空間が必要）。
+# agent に --token-file は無いので env ファイル（中身は TOKIWA_AGENT__INGEST_TOKEN=tkw_... の 1 行）で渡す。
+# --env-file は docker コマンド側が読むので、docker を実行するユーザーだけが読める権限 600 にする
+sudo install -m 600 -o "$USER" /dev/null /etc/tokiwa/agent.env && "${EDITOR:-vi}" /etc/tokiwa/agent.env
 docker run -d --name tokiwa-agent --pid host --network host -e TOKIWA_HEALTHCHECK_URL=none \
-  -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run --token tkw_...
+  --env-file /etc/tokiwa/agent.env -v /var/log/nginx:/var/log/nginx:ro tokiwa:local agent run
 
 # ラボ用シミュレータ（送信先はラボ内に制限される）
 docker run --rm --network <lab-net> -e TOKIWA_HEALTHCHECK_URL=none tokiwa:local sim run --profile ai_agent --target http://gate:8080
@@ -93,6 +101,12 @@ docker run --rm --network <lab-net> -e TOKIWA_HEALTHCHECK_URL=none tokiwa:local 
 
 - HEALTHCHECK は既定で `:8788/api/v1/health` を見る。HTTP を持たないロールは `TOKIWA_HEALTHCHECK_URL=none`、
   Gate は上記の URL に向ける（compose の gate プロファイルは設定済み）。
+- **API トークンをコマンドライン引数（`--token tkw_...`）で渡さない**（監査 #143）。引数は同じホストの全ユーザーに `ps` /
+  `/proc/<pid>/cmdline` で、Docker の管理者には `docker inspect`（`Args`）で見える。Gate と Agent は待ち受け・常駐プロセスなので、
+  TOKIWA 自身のホストセンサーが待ち受けプロセスのコマンドラインを集めると、`ingest` + `gate` スコープのトークンがイベント・UI・
+  コパイロット（LLM）に流れ得る。`--token-file`（Gate のみ。変更時に読み直す）か環境変数 `TOKIWA_GATE__INGEST_TOKEN` /
+  `TOKIWA_AGENT__INGEST_TOKEN`（compose は `.env`、単体は `--env-file`）を使う。環境変数も `docker inspect` には見えるが、
+  そこが見える人は Docker の管理者（実質 root）に限られる。`tokiwa gate run --token` は警告を出す。
 - `gate` / `agent` / `sim` サブコマンドは各モジュール（gate / sensors / lab-eval）が提供する。オプション名・
   Gate の `/__tokiwa/health` はタスク仕様に基づく記述。TODO(verify): 各モジュールのマージ後に実機確認。
 - agent は他ユーザーのプロセス情報を読むのに root 相当の権限が要る場合がある（イメージは非 root）。

@@ -97,3 +97,15 @@ def test_gate_run_starts_uvicorn(settings: Settings, monkeypatch: pytest.MonkeyP
     assert gate.settings.capture_body_bytes == 1024
     assert gate.token == "tkw_cli"
     assert "tkw_cli" not in result.output  # never echo the token
+    assert "warning: --token" not in result.output  # --token-file: no warning
+
+
+def test_gate_run_warns_about_token_on_the_command_line(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#143: argv is visible in ps / docker inspect and to TOKIWA's own host sensor."""
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: None)
+    result = CliRunner().invoke(cli.app, ["gate", "run", "--token", "tkw_argv_secret"])
+    assert result.exit_code == 0, result.output
+    assert "warning: --token puts the API token on the command line" in result.output
+    assert "tkw_argv_secret" not in result.output

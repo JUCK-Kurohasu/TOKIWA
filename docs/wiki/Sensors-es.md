@@ -69,7 +69,7 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | upstream | `--upstream` | `http://127.0.0.1:3000` | Destino del reenvío. También admite un prefijo de ruta (`http://app/base`) |
 | listen | `--listen host:port` | `0.0.0.0:8080` | Dirección de escucha |
 | server_url | `--server` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
-| ingest_token | `--token` / `--token-file` | Ninguno | Requiere los ámbitos `ingest` y `gate` |
+| ingest_token | `--token-file` (evite `--token`: se ve en `ps`) | Ninguno | Requiere los ámbitos `ingest` y `gate`. También sirve la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo de la solicitud que se capturan (0 = no capturar) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
 | trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |

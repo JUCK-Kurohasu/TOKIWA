@@ -19,7 +19,8 @@
 | #54 | 部分（推奨 (1)(2)(3) は完全。overlong UTF-8 は印のみ、(4) 上流タイプ別の正規化プロファイルは未着手） | `gate.policy.normalize_path` は **変えず**（サーバー側の検証・保存・`shadows_site` が使う。大文字小文字を保つ）、その上に照合キー `match_key()` を追加し `DecoyMatcher.build`（完全一致・前方一致の両方）と `match` に対称にかける: 2 回目のパーセントデコード、`\`→`/`、各セグメントの NUL・`;` 以降を除去（`..;` は `..` に）、ドットセグメント解決 **の後** に末尾ドット・空白と `::$DATA` を除去、小文字化、末尾 `/` なし。前方一致は `key + "/"` で比べるので `/admin` も `/admin/*` に当たる（`/administrator` は当たらない）。照合キーが `/` になる完全一致ルート（`/;x`・`/%2e`・`/ `）も拒否（サーバーの #65 の検証は `normalize_path` なので通ってしまう）。`gate:path_anomaly` + `gate.path_anomaly`（nul / semicolon / backslash / double_encoding / invalid_utf8 / trailing_dot_or_space / ntfs_stream）を全要求に。テスト `tests/gate/test_gate_decoy_variants.py`（L06-03 の再現ターゲット 20 種がデコイに当たる、`.env.bak` 等は当たらない、ルート化するルートの拒否、`normalize_path` 不変、Gate 経由で `/.env;x` がデコイ応答・上流に届かない・path は送ったまま記録） | 3e61719 |
 | #146 | 完全 | `gate.proxy.document_charset()`: UTF-8 BOM → `Content-Type` の charset → 先頭 1024 バイト内の `<meta charset>` / `http-equiv` の順で文字コードを決め（meta の UTF-16 は WHATWG どおり UTF-8、BOM なしの utf-16/32 コーデックは BOM を書かない LE に）、決まらない・未知の名前なら **ASCII のみ**（非 ASCII は `&#NNNN;`）でスニペットを符号化。`encode_snippet(snippet, content_type, html)` に展開後の HTML を渡す。テスト: `test_gate_proxy.py`（meta・http-equiv・BOM・1024 バイト超・未知名・ヘッダ優先）、`test_gate_app.py::test_html_injection_follows_meta_charset`（ヘッダ `text/html` + `<meta charset="Shift_JIS">` の上流ページで日本語の注記が Shift_JIS で正しく読める） | （このコミット） |
 | #148 | 完全（Vary / CDN-Cache-Control は付けない — 要判断） | Gate 生成の応答（`_respond`: 403/429/431/501・deceive の汎用 404・デコイ・502/504）すべてに `Cache-Control: no-store`。デコイ自身が `Cache-Control` を持つときはそれを使い二重にしない。docs/gate.md・wiki Sensors（4 言語）に CDN 配下での注意。テスト: 汎用 404・502/504 に `no-store` が 1 つ、デコイ指定の値が優先 | c8e90e6 |
-| #99 | 完全 | tarpit の保持数を `gate.tarpit_max_concurrent`（全体、既定 256）/ `gate.tarpit_max_per_client`（同じ送信元 IP、既定 8）で制限し、枠が無ければ待たせず 429 + `Retry-After`（`gate:tarpit_overflow`）。待つ間は `receive()` と sleep を競わせ、`http.disconnect` が来たら即やめて上流へ転送しない（`gate:client_disconnect`, 499）。監視中に読んだ本文チャンクは 64 KiB まで保持して後段（捕捉・上流）へ再生、超えたら監視をやめて待つだけ。枠は `finally` で返す。`tokiwa gate run --limit-concurrency`（uvicorn の `limit_concurrency`、既定は従来どおり無制限）。docs/response.md に「tarpit は防御側の資源も消費する」。テスト `tests/gate/test_gate_tarpit.py`（解除されない sleep で切断が勝つ・上流に届かない・枠が戻る、保持中に読んだ 2 チャンクの本文が上流と捕捉に届く、同じ IP 3 件目と全体 4 件目が 429・解除後は 200、上限 0 で無制限。実時間の待ちなし）と `test_gate_cli.py`（`--limit-concurrency` が uvicorn に渡る） | （このコミット） |
+| #99 | 完全 | tarpit の保持数を `gate.tarpit_max_concurrent`（全体、既定 256）/ `gate.tarpit_max_per_client`（同じ送信元 IP、既定 8）で制限し、枠が無ければ待たせず 429 + `Retry-After`（`gate:tarpit_overflow`）。待つ間は `receive()` と sleep を競わせ、`http.disconnect` が来たら即やめて上流へ転送しない（`gate:client_disconnect`, 499）。監視中に読んだ本文チャンクは 64 KiB まで保持して後段（捕捉・上流）へ再生、超えたら監視をやめて待つだけ。枠は `finally` で返す。`tokiwa gate run --limit-concurrency`（uvicorn の `limit_concurrency`、既定は従来どおり無制限）。docs/response.md に「tarpit は防御側の資源も消費する」。テスト `tests/gate/test_gate_tarpit.py`（解除されない sleep で切断が勝つ・上流に届かない・枠が戻る、保持中に読んだ 2 チャンクの本文が上流と捕捉に届く、同じ IP 3 件目と全体 4 件目が 429・解除後は 200、上限 0 で無制限。実時間の待ちなし）と `test_gate_cli.py`（`--limit-concurrency` が uvicorn に渡る） | ffca018 |
+| #143 | 部分（推奨 (1) は完全。(2) redact の `tkw_` 形式・空白区切り `--token` と (3) ホストセンサーが TOKIWA 自身の cmdline を送らない、は他レーンへ依頼） | docs/deploy.md §4 の `--token tkw_...` の例を置き換え: Gate は `/etc/tokiwa/gate/` をディレクトリごと読み取り専用マウントして `--token-file`（ファイルの置き換え＝ローテーションでも反映される。uid 10001 が読めるよう chown・400）、Agent は `--token-file` が無いので `--env-file`（docker を実行するユーザーだけが読める 600）。argv が `ps` / `/proc/<pid>/cmdline` / `docker inspect` に見え、TOKIWA 自身のホストセンサー経由でイベント・UI・LLM に流れ得る旨を明記。`tokiwa gate run --token` は起動時に stderr へ警告（トークン値は出さない）。wiki Installation（4 言語: agent の `-e TOKIWA_AGENT__INGEST_TOKEN=tkw_...` を `--env-file` に、注意書き）・Sensors（4 言語: ingest_token 行）、docs/gate.md の設定表、README の 2 行。テスト `test_gate_cli.py`（`--token` で警告・値は出ない、`--token-file` では警告なし） | （このコミット） |
 
 ## 未登録の指摘（このレーンで発見）
 
@@ -89,6 +90,8 @@
 - `docs/wiki/Data-Handling*.md`（4 言語）: Gate が集める項目の「リクエストヘッダ（先頭 64 個）」「65 個目以降のヘッダ」の記述を
   #140 の挙動に合わせて 1 行ずつ修正。
 - `docs/response.md`（respond レーンの文書）: §3 の検証表の直後に「tarpit は防御側の資源も消費する」段落を 1 つ追加（#99 推奨）。
+- `README.md`（共有）: センサー接続の例 2 行（`--token tkw_...`）を `--token-file` / 環境変数に（#143）。
+- `docs/deploy.md` §4（Gate 節以外の Agent の docker run 例も #143 の対象なので一緒に直した）。
 
 ## 他レーンへの依頼
 
@@ -102,6 +105,10 @@
 - **deception**: サーバー側の資産パス検証（`service._gate_safe_path` / `render.shadows_site`）を `gate.policy.match_key()` でも
   判定する（`/;x`・`/ ` 等は Gate の照合ではルートになり、Gate が拒否して WARN を出す）。`docs/deception.md` §6 の
   「デコイ照合」の記述に #54 の正規化（大文字小文字無視など）を反映。
+- **data-handling / llm（redact の担当）**: `llm/redact.py` に API トークン形式（`tkw_[A-Za-z0-9_-]{20,}`）と空白区切りの
+  `--token` / `--password` / `--api-key` の値のパターンを追加（#143 推奨 (2)、L12-02 と同時修正）。
+- **sensors**: ホストセンサーが TOKIWA 自身のプロセス（`tokiwa gate|agent|serve`）の cmdline を送らない（#143 推奨 (3)）。
+  `agent run` に `--token-file` を足せば、docs/deploy.md の Agent 例も env ファイルからトークンファイルに揃えられる。
 
 ## 未検証事項
 

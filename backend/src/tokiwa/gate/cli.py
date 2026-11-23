@@ -121,6 +121,14 @@ def run(
     s = get_settings()
     level = (log_level or s.log_level).upper()
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if token:
+        # The gate is a long-running listener: its command line is visible to every local user (ps, /proc) and
+        # to Docker admins, and TOKIWA's own host sensor reports listening processes' command lines (#143).
+        typer.echo(
+            "warning: --token puts the API token on the command line (visible in ps / docker inspect); "
+            "use --token-file or TOKIWA_GATE__INGEST_TOKEN instead",
+            err=True,
+        )
     gate_settings = resolve_settings(
         s.gate,
         upstream=upstream,
