@@ -1,5 +1,5 @@
 # TOKIWA lab victim: a deliberately NON-vulnerable demo shop (canned responses only). Lab use only.
-FROM python:3.12-slim
+FROM python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app

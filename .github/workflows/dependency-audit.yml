@@ -1,0 +1,87 @@
+# Known vulnerabilities in locked dependencies (audit #104): pip-audit on backend/uv.lock, npm audit on
+# frontend/package-lock.json.
+#
+# - Runtime dependencies (shipped in the image) fail the job; dev/test-only dependencies only annotate a warning.
+# - Runs when a lock file changes and weekly, so an advisory published after a merge is still noticed without
+#   turning unrelated pull requests red.
+# Third-party actions are pinned to commit SHAs (version in the trailing comment), as in ci.yml.
+name: Dependency audit
+
+on:
+  pull_request:
+    paths:
+      - backend/uv.lock
+      - backend/pyproject.toml
+      - frontend/package-lock.json
+      - frontend/package.json
+      - .github/workflows/dependency-audit.yml
+  push:
+    branches: [main]
+    paths:
+      - backend/uv.lock
+      - backend/pyproject.toml
+      - frontend/package-lock.json
+      - frontend/package.json
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    - cron: "17 4 * * 1" # Mondays 04:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: pip-audit (backend/uv.lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          working-directory: backend
+      - name: Runtime dependencies (all extras, as installed in the image)
+        run: |
+          uv export --frozen --no-dev --all-extras --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/requirements-runtime.txt" >/dev/null
+          uvx pip-audit@2.10.1 --strict --disable-pip --require-hashes -r "$RUNNER_TEMP/requirements-runtime.txt"
+      - name: Dev dependencies (warning only)
+        run: |
+          uv export --frozen --all-extras --no-emit-project --format requirements-txt \
+            -o "$RUNNER_TEMP/requirements-all.txt" >/dev/null
+          if ! uvx pip-audit@2.10.1 --strict --disable-pip --require-hashes -r "$RUNNER_TEMP/requirements-all.txt"; then
+            echo "::warning title=pip-audit (dev)::known vulnerabilities in backend dev dependencies (not in the image); see the log"
+          fi
+
+  node:
+    name: npm audit (frontend/package-lock.json)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Production dependencies (bundled into the UI)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Dev dependencies (warning only)
+        run: |
+          if ! npm audit --audit-level=high; then
+            echo "::warning title=npm audit (dev)::high/critical advisories in frontend dev dependencies (build/test only); see the log"
+          fi

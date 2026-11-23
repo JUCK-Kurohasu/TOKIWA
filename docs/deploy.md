@@ -293,18 +293,25 @@ tokiwa.example.internal {
 
 | build-arg | 既定 | 用途 |
 |---|---|---|
-| `NODE_IMAGE` | `node:22.23.4-trixie-slim` | フロントのビルド用 |
-| `PYTHON_IMAGE` | `python:3.12.15-slim-trixie` | backend ビルド + ランタイム |
-| `UV_IMAGE` | `ghcr.io/astral-sh/uv:0.11.32` | uv バイナリ |
+| `NODE_IMAGE` | `node:22.23.4-trixie-slim@sha256:…` | フロントのビルド用 |
+| `PYTHON_IMAGE` | `python:3.12.15-slim-trixie@sha256:…` | backend ビルド + ランタイム |
+| `UV_IMAGE` | `ghcr.io/astral-sh/uv:0.11.32@sha256:…` | uv バイナリ |
 | `TOKIWA_EXTRAS` | `postgres` | backend の optional extras（空にすると SQLite 専用、約 4 MB 小さい） |
 | `TOKIWA_UID` / `TOKIWA_GID` | `10001` | 実行ユーザー |
 
-- レジストリミラー: `--build-arg PYTHON_IMAGE=mirror.gcr.io/library/python:3.12.15-slim-trixie` など。
+- ベースイメージはタグと digest の両方で固定している（監査 #104。digest が優先されるので、同じタグが差し替えられても
+  ビルド内容は変わらない）。digest はマルチアーキのインデックス（manifest list）のもの。postgres（`deploy/compose.yaml`）・
+  ラボの nginx / victim・CI のツールイメージ（actionlint / hadolint / shellcheck）も同様。
+- レジストリミラー: `--build-arg PYTHON_IMAGE=mirror.gcr.io/library/python:3.12.15-slim-trixie` など（digest を外すか、
+  ミラーから取得して確かめた digest を付ける）。
 - TLS インスペクションのあるプロキシ配下: 自社 CA を信頼させたベースイメージを用意し（`update-ca-certificates` +
   `UV_SYSTEM_CERTS=1`、node は `NODE_EXTRA_CA_CERTS`）、`NODE_IMAGE` / `PYTHON_IMAGE` で差し替える。
 - ビルドコンテキストはリポジトリ直下。除外は `deploy/Dockerfile.dockerignore`（`.env`・`data/`・`node_modules`・`.venv` 等）。
-- ベースイメージ・uv の更新: タグを上げて `make docker docker-smoke`。uv は `backend/uv.lock` を作った版と揃える
-  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。
+- ベースイメージ・uv の更新: タグと digest を一緒に上げて `make docker docker-smoke`。digest は `docker pull <イメージ>:<タグ>`
+  の出力の `Digest: sha256:…`（インデックスの digest）を使う。uv は `backend/uv.lock` を作った版と揃える
+  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。Dependabot（`.github/dependabot.yml`）が docker / docker-compose /
+  github-actions / uv / npm の更新 PR を週次で出す。TODO(verify): Dockerfile の `ARG` 既定値にあるイメージを Dependabot が
+  更新するか（しなければ手動で上げる）。
 
 ## 11. 開発補助・CI
 
@@ -322,6 +329,11 @@ CI（`.github/workflows/ci.yml`）: すべてのブランチ push と PR で bac
 seed 検証、mypy は情報表示のみ）、frontend（npm ci → typecheck → lint → build → vitest）、docker（buildx + GHA
 キャッシュでビルド → スモークテスト）、infra-lint（actionlint / hadolint / shellcheck）。LLM は mock 固定で秘密は不要。
 Actions はコミット SHA で固定（更新時はタグと SHA を併記）。
+依存の脆弱性（監査 #104）は `.github/workflows/dependency-audit.yml`: `backend/uv.lock` の実行時依存（全 extras）を
+`pip-audit --strict`、`frontend/package-lock.json` の本番依存を `npm audit --omit=dev --audit-level=high` で検査し、既知の脆弱性が
+あれば失敗する（開発・テスト専用の依存は警告の注釈だけ）。ロックファイルの変更時と毎週月曜に実行。手元では:
+`cd backend && uv export --frozen --no-dev --all-extras --no-emit-project -o /tmp/req.txt && uvx pip-audit --strict --disable-pip --require-hashes -r /tmp/req.txt`、
+`cd frontend && npm audit --omit=dev --audit-level=high`（どちらも PyPI / npm レジストリへの通信が要る）。
 
 ## 12. トラブルシューティング
 

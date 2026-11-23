@@ -127,7 +127,7 @@ services:
   # Optional: nginx in front of the victim writing TOKIWA JSON access logs (format owned by sensors:
   # lab/nginx/tokiwa-json.conf), shipped by the host agent.
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     profiles: ["agent"]
     volumes:
       - ./nginx/tokiwa-json.conf:/etc/nginx/conf.d/tokiwa-json.conf:ro

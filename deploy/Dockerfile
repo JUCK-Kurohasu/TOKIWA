@@ -4,12 +4,13 @@
 #   docker run -p 8788:8788 -v tokiwa-data:/data tokiwa:local    # -> tokiwa serve
 #   docker run tokiwa:local gate run --upstream http://app:3000  # -> tokiwa gate run ...
 #
-# Requires BuildKit (Docker Engine 25+; default builder). Base images are pinned; override them with
-# --build-arg (e.g. a registry mirror) without editing this file. See docs/deploy.md.
+# Requires BuildKit (Docker Engine 25+; default builder). Base images are pinned by tag and digest (the digest wins:
+# a re-pushed tag cannot change what is built). Override them with --build-arg (e.g. a registry mirror) without
+# editing this file; bump tag and digest together (docs/deploy.md §10).
 
-ARG NODE_IMAGE=node:22.23.4-trixie-slim
-ARG PYTHON_IMAGE=python:3.12.15-slim-trixie
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.32
+ARG NODE_IMAGE=node:22.23.4-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6
+ARG PYTHON_IMAGE=python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c
 
 # uv binary only (COPY --from cannot expand build args, so it gets its own stage).
 FROM ${UV_IMAGE} AS uv

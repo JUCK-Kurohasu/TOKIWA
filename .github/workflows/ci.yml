@@ -1,6 +1,7 @@
 # TOKIWA CI: backend (ruff + pytest), frontend (typecheck + lint + build), Docker image (build + smoke test),
 # and infra lint (actionlint / hadolint / shellcheck). Needs no secrets: the LLM is always the mock provider.
-# Third-party actions are pinned to commit SHAs (version in the trailing comment).
+# Third-party actions are pinned to commit SHAs (version in the trailing comment), tool images to tag + digest.
+# Dependency vulnerability audit: dependency-audit.yml; version updates: .github/dependabot.yml.
 name: CI
 
 on:
@@ -105,10 +106,10 @@ jobs:
         with:
           persist-credentials: false
       - name: actionlint
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
       - name: hadolint
-        run: docker run --rm -i hadolint/hadolint:v2.15.1 hadolint - < deploy/Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint - < deploy/Dockerfile
       - name: shellcheck
-        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0 scripts/*.sh deploy/*.sh
+        run: docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d scripts/*.sh deploy/*.sh
       - name: wiki consistency (docs/wiki, all languages)
         run: python3 scripts/check_wiki.py docs/wiki
