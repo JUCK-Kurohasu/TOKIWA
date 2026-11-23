@@ -11,8 +11,8 @@
 | #70 cmdline マスキング | 完全 | `sensors/cmdline.py`（argv 単位の専用マスカー）をホストセンサーで `redact_text` の前に適用。`agent.send_cmdline`（既定 true）で cmdline 自体を送らない選択。Copilot の `event_brief` も同じマスカーを通す（旧エージェント・他経路で入った未マスク値対策） | 9e76359 |
 | #121 新規接続上限 | 部分 | 上限超過時は優先度順（ESTABLISHED > SYN_RECV、outbound > inbound > loopback、プロセス付き > 無し）に報告し、超過分は既知扱いにせず次周期へ持ち越す（seen = 既報告で継続中 ∪ 今回報告分）。PORT_SNAPSHOT に `connections_new` / `connections_truncated` と `degraded=connections_truncated`、新検知器 `sensor.connections_truncated`（medium、送信元 IP なし＝対処提案の対象にならない）。上限は既存の `agent.max_connections_per_cycle` | c053ad2 |
 | #123 Suricata to_client | 部分 | alert の source/destination を「攻撃側 / 被攻撃側」にする: (1) `alert.source`/`alert.target`（ルールの `target` キーワード）を優先、(2) `direction=to_client` かつ `metadata.attack_target` が `Client_Endpoint` ならパケット方向のまま（悪性サーバー → 自社クライアント。公式例）、(3) その他の `to_client` は入れ替え（フロー開始側＝クライアントを攻撃者に）、(4) それ以外はパケット方向。`labels` に `suricata.direction` / `suricata.attribution` / `suricata.swapped`、元の方向は raw に残る。公式例を含む fixture `suricata_eve_direction.json`。残り: 推奨 (2) net_ids の attacker/victim 分離、(3) 資産台帳の保護対象を protected_cidrs に — 他レーン | b82b27d |
-| #131 ログ書式・時刻 | 完全 | (1) 読めない行（不正 JSON・ヘッダ無し Zeek TSV）と解釈できない時刻を `ParseStats` で数え、`LogSource.health_event()` が警告ログ＋`agent.health` イベント（初回は即時、以降 `agent.health_report_seconds`=300 秒ごとに差分）。新検知器 `sensor.log_parse_failures`（読めない行 medium / 時刻のみ low、送信元 IP なし）。意図的なスキップ（Suricata stats、アクセスログでない JSON、Zeek ヘッダ）は数えない。(2) nginx `escape=default` の `\xHH`（nginx ソースで確認）を復号して取り込み（`recovered` として計数・初回警告）。(3) `agent.log_timezone`（IANA / `+09:00` / UTC。不正値は起動時に ValidationError）。未設定時はオフセット無し時刻を従来どおり UTC とみなしつつ計数・警告（アラートはしない）。Caddy の wall 時刻、µs/ns エポックも解釈。時刻の未来ずれのクランプはサーバー側 #19 の既存処理 | (#131) |
-| #132 withdrawn アドバイザリ | 未着手 | | |
+| #131 ログ書式・時刻 | 完全 | (1) 読めない行（不正 JSON・ヘッダ無し Zeek TSV）と解釈できない時刻を `ParseStats` で数え、`LogSource.health_event()` が警告ログ＋`agent.health` イベント（初回は即時、以降 `agent.health_report_seconds`=300 秒ごとに差分）。新検知器 `sensor.log_parse_failures`（読めない行 medium / 時刻のみ low、送信元 IP なし）。意図的なスキップ（Suricata stats、アクセスログでない JSON、Zeek ヘッダ）は数えない。(2) nginx `escape=default` の `\xHH`（nginx ソースで確認）を復号して取り込み（`recovered` として計数・初回警告）。(3) `agent.log_timezone`（IANA / `+09:00` / UTC。不正値は起動時に ValidationError）。未設定時はオフセット無し時刻を従来どおり UTC とみなしつつ計数・警告（アラートはしない）。Caddy の wall 時刻、µs/ns エポックも解釈。時刻の未来ずれのクランプはサーバー側 #19 の既存処理 | 7f7f1b5 |
+| #132 withdrawn アドバイザリ | 部分 | GHSA / OSV の取り下げを捨てずに `SourceResult.withdrawn` で渡し、`store.apply_withdrawals` が既存行に `data.withdrawn`（アドバイザリ ID → 日時）を記録。取り下げたアドバイザリがその feed のデータ提供元で、他の package feed が裏付けていなければ ecosystem 付きの affected を削除（NVD の CPE は残す）。他のソースが無い行（GHSA だけの行など）は affected を空にし `data.withdrawn_at`。更新理由 `withdrawn` で `intel.vuln_updated` を発行 → matcher が再照合し open の露出を `[auto-closed]` で mitigated に。未知 ID の取り下げは行を作らない。取り下げ解除（再公開）で印を消す。残り: UI の「取り下げ済み」バッジ（frontend）、OSV の取り下げが querybatch で返らない場合の扱い（未確認） | (#132) |
 | 未登録 Zeek username（Refs #169） | 未着手 | | |
 
 ## 要判断
@@ -43,6 +43,9 @@
 
 ## 他レーンへの依頼
 
+- （#132 残り）frontend: 脆弱性詳細・露出一覧で `vuln.data.withdrawn_at`（行全体が取り下げ）/ `vuln.data.withdrawn`（個別アドバイザリの取り下げ）を
+  「取り下げ済み」バッジで表示。matcher の自動クローズ理由は従来の文言（"no longer matches current asset software / vulnerability data"）のまま。
+
 - （#123 残り）detect / respond レーン: `net_ids` の entities に attacker_ip / victim_ip を分けて持ち、対処提案を attacker 側だけにする（推奨 (2)）。
   既定の `protected_cidrs` に資産台帳の保護対象サーバー IP を含める（推奨 (3)）。本レーンの修正で Event.source が攻撃側になったので、
   現状の `source_ip` ベースでも to_client の主要ケースは正しくなった。
@@ -56,6 +59,13 @@
   `tokiwa.sensors.cmdline.mask_argv` を `process.cmdline` / `network.process.cmdline` / `port.listeners[].process.cmdline` に掛ければ旧エージェントも救える。
 
 ## 未検証事項
+
+- #132: GitHub の `GET /advisories`（`updated>=` で取得）が取り下げ済みアドバイザリを返し、取り下げ時に `updated_at` が更新されるかは
+  一次情報で未確認（TODO(verify)。fixture には `withdrawn_at` 付きの例がある）。OSV は既知 ID の詳細を `modified` が新しいときだけ再取得する。
+  OSV スキーマ上 withdrawn の設定は modified の更新を伴うはずだが、`/v1/querybatch` が取り下げ済みエントリを返すかは未確認 —
+  返さない場合、OSV 由来の取り下げはこの経路では届かない（その OSV エントリの affected は残る）。
+- #132: affected は出所なしの和集合なので、同じ CVE 行に複数の GHSA が畳み込まれ、データ提供元でない方が取り下げられた場合は印だけ付けて
+  affected は変えない（重複 GHSA の取り下げで本物の露出を閉じないための保守的な選択）。
 
 - 利用者向け文書（`docs/wiki/Sensors*.md`・`Configuration*.md`）は最後にまとめて更新する（この行が残っていたら未更新）。
 - #131: nginx の `escape=default` の挙動は nginx の `src/http/modules/ngx_http_log_module.c`（`ngx_http_log_escape`: 0x00-0x1F, `"`, `\`,

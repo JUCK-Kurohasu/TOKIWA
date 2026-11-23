@@ -32,7 +32,7 @@ from tokiwa.config import Settings, get_settings
 from tokiwa.db.session import session_scope
 from tokiwa.intel.base import IntelSource, SourceResult, registered_sources
 from tokiwa.intel.sources._common import USER_AGENT, is_cve, parse_dt
-from tokiwa.intel.store import publish_updates, upsert_items, upsert_vulns
+from tokiwa.intel.store import apply_withdrawals, publish_updates, upsert_items, upsert_vulns
 from tokiwa.plugins import import_submodules
 from tokiwa.runtime import periodic
 from tokiwa.settings_store import get_setting, set_setting
@@ -158,8 +158,9 @@ async def _run_source(
         result: SourceResult = await source.fetch(client, since)
         async with ls.store, session_scope() as session:
             vres = await upsert_vulns(session, result.vulns)
+            wres = await apply_withdrawals(session, result.withdrawn)  # audit #132
             ires = await upsert_items(session, result.items)
-        await publish_updates(vres.updates)
+        await publish_updates([*vres.updates, *wres.updates])
         collected.update(v for v in vres.ids if is_cve(v))
         errors = result.errors
         entry.update(
@@ -167,6 +168,7 @@ async def _run_source(
             records=len(result.vulns) + len(result.items),
             vulns_created=vres.created,
             vulns_updated=vres.updated,
+            vulns_withdrawn=wres.updated,
             items_created=ires.created,
         )
         if not errors:

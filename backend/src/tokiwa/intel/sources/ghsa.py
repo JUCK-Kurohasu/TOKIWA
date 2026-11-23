@@ -48,6 +48,7 @@ from tokiwa.intel.sources._common import (
     to_float,
     unique,
     unique_software,
+    withdrawn_at,
 )
 from tokiwa.schemas.intel import SoftwareItem, VulnRecord
 from tokiwa.util import utcnow
@@ -110,8 +111,9 @@ def _first_patched(value: Any) -> str | None:
     return str(value) if value else None
 
 
-def parse_ghsa_advisory(adv: dict[str, Any]) -> VulnRecord | None:
-    if adv.get("withdrawn_at"):
+def parse_ghsa_advisory(adv: dict[str, Any], *, include_withdrawn: bool = False) -> VulnRecord | None:
+    """Map one advisory. A withdrawn one is None unless ``include_withdrawn`` (then ``data.ghsa.withdrawn_at``)."""
+    if adv.get("withdrawn_at") and not include_withdrawn:
         return None
     ghsa_id = normalize_vuln_id(str(adv["ghsa_id"]))
     cve_id = normalize_vuln_id(adv["cve_id"]) if adv.get("cve_id") else None
@@ -160,6 +162,7 @@ def parse_ghsa_advisory(adv: dict[str, Any]) -> VulnRecord | None:
                 "type": adv.get("type"),
                 "severity": adv.get("severity"),
                 "vulnerabilities": vulns_data,
+                **({"withdrawn_at": str(adv["withdrawn_at"])} if adv.get("withdrawn_at") else {}),
             }
         },
     )
@@ -208,12 +211,13 @@ class GhsaSource(IntelSource):
                 return result
             for adv in advisories:
                 try:
-                    rec = parse_ghsa_advisory(adv)
+                    rec = parse_ghsa_advisory(adv, include_withdrawn=True)
                 except (KeyError, TypeError, ValueError) as exc:
                     result.errors.append(f"ghsa: skipped malformed advisory: {exc}")
                     continue
                 if rec is not None:
-                    result.vulns.append(rec)
+                    # Withdrawn (audit #132): not stored as new, but closes what an earlier fetch stored.
+                    (result.withdrawn if withdrawn_at(rec) else result.vulns).append(rec)
             url = resp.links.get("next", {}).get("url")
             params = None  # the next link already carries the cursor and filters
         if url:

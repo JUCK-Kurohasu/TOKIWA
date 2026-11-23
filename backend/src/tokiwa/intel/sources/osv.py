@@ -45,6 +45,7 @@ from tokiwa.intel.sources._common import (
     severity_from_text,
     unique,
     unique_software,
+    withdrawn_at,
 )
 from tokiwa.schemas.intel import SoftwareItem, VulnRecord
 
@@ -73,8 +74,11 @@ def osv_queries(packages: list[SoftwareItem]) -> list[dict[str, Any]]:
     return out
 
 
-def parse_osv_vuln(vuln: dict[str, Any], matched: list[dict[str, Any]] | None = None) -> VulnRecord | None:
-    if vuln.get("withdrawn"):
+def parse_osv_vuln(
+    vuln: dict[str, Any], matched: list[dict[str, Any]] | None = None, *, include_withdrawn: bool = False
+) -> VulnRecord | None:
+    """Map one OSV entry. A withdrawn one is None unless ``include_withdrawn`` (then ``data.osv.withdrawn_at``)."""
+    if vuln.get("withdrawn") and not include_withdrawn:
         return None
     osv_id = normalize_vuln_id(str(vuln["id"]))
     aliases = [normalize_vuln_id(str(a)) for a in vuln.get("aliases") or []]
@@ -116,7 +120,14 @@ def parse_osv_vuln(vuln: dict[str, Any], matched: list[dict[str, Any]] | None = 
         cwe=unique(str(c).upper() for c in db.get("cwe_ids") or []),
         affected=unique_software(affected),
         references=unique(str(r.get("url")) for r in vuln.get("references") or [] if r.get("url")),
-        data={"osv": {"id": osv_id, "affected": affected_data, "matched_packages": matched or []}},
+        data={
+            "osv": {
+                "id": osv_id,
+                "affected": affected_data,
+                "matched_packages": matched or [],
+                **({"withdrawn_at": str(vuln["withdrawn"])} if vuln.get("withdrawn") else {}),
+            }
+        },
     )
 
 
@@ -204,12 +215,12 @@ class OsvSource(IntelSource):
                     resp = await fetch(
                         client, "GET", f"{self.api}/vulns/{quote(vid, safe='')}", sleep=self.sleep
                     )
-                    rec = parse_osv_vuln(resp.json(), hits[vid][1])
+                    rec = parse_osv_vuln(resp.json(), hits[vid][1], include_withdrawn=True)
                 except (FetchError, KeyError, TypeError, ValueError) as exc:
                     result.errors.append(f"osv: {vid}: {exc}")
                     return
                 if rec is not None:
-                    result.vulns.append(rec)
+                    (result.withdrawn if withdrawn_at(rec) else result.vulns).append(rec)  # audit #132
 
         await asyncio.gather(*(one(v) for v in todo))
         log.info("osv: %d packages, %d vulns matched, %d fetched", len(queries), len(hits), len(result.vulns))
