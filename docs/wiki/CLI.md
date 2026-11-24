@@ -80,6 +80,14 @@ tokiwa token rotate <id|name> [--grace-hours 24] [--expires-in-days N]   # 新�
 `--grace-hours`（既定 24 時間、0 で即時失効）だけ有効のまま残します。Gate はトークンファイルの変更を自動で読み直すので、
 新しいトークンをファイルに書けば再起動なしで切り替わります。名前が複数の有効なトークンに当たるときは id を指定します。
 
+## tokiwa config show
+
+```bash
+tokiwa config show [--changed] [-s SECTION] [--db] [--json] [--check]
+```
+
+効いている設定を出所つきで表示します（秘密は `<set>`）。詳しくは [設定リファレンス](Configuration)。
+
 ## tokiwa data purge / export
 
 ```bash

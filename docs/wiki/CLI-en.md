@@ -80,6 +80,14 @@ in the audit log with actor `cli`. `rotate` issues a new token with the same nam
 one valid for `--grace-hours` (default 24 hours; 0 revokes it now). The Gate re-reads its token file when it changes, so
 writing the new token to the file switches over without a restart. If a name matches several active tokens, pass the id.
 
+## tokiwa config show
+
+```bash
+tokiwa config show [--changed] [-s SECTION] [--db] [--json] [--check]
+```
+
+Prints the effective settings with their source (secrets shown as `<set>`). Details: [Configuration reference](Configuration-en).
+
 ## tokiwa data purge / export
 
 ```bash

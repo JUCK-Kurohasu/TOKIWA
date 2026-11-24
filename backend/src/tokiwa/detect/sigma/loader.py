@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,6 +96,11 @@ class SigmaRuleStore:
         self.db_loaded = False
         # Configured rule directories that do not exist (as configured). Health checks / eval read this (#177).
         self.missing_dirs: list[str] = []
+        # Valid / invalid rule files found in the directories by the last load, before the rules table's status
+        # (a builtin rule an operator disabled still counts as found). None until files were read (#177).
+        self.file_rules_found: int | None = None
+        self.file_rules_invalid = 0
+        self._reported_empty = False
         _STORES.add(self)
 
     @property
@@ -128,7 +133,9 @@ class SigmaRuleStore:
     def load_file_rules(self, errors: dict[str, list[str]] | None = None) -> list[LoadedRule]:
         out: list[LoadedRule] = []
         seen: dict[str, str] = {}
-        for d in self.rule_dirs():
+        invalid = 0
+        dirs = self.rule_dirs()
+        for d in dirs:
             files = sorted({*d.rglob("*.yml"), *d.rglob("*.yaml")})
             for f in files:
                 rel = f.relative_to(d).as_posix()
@@ -145,6 +152,7 @@ class SigmaRuleStore:
                     log.warning("invalid sigma rule %s skipped: %s", f, "; ".join(exc.errors))
                     if errors is not None:
                         errors[f"file:{rel}"] = list(exc.errors)
+                    invalid += 1
                     continue
                 key = rule.id or f"file:{rel.rsplit('.', 1)[0]}"
                 if key in seen:
@@ -152,9 +160,49 @@ class SigmaRuleStore:
                     log.warning("sigma rule %s: %s", f, msg)
                     if errors is not None:
                         errors[f"file:{rel}"] = [msg]
+                    invalid += 1
                     continue
                 seen[key] = rel
                 out.append(LoadedRule(key=key, rule=rule, origin="file", content=content, path=rel))
+        self.file_rules_found, self.file_rules_invalid = len(out), invalid
+        if dirs and not out and not self._reported_empty:  # missing directories were reported by rule_dirs()
+            self._reported_empty = True
+            log.error(
+                "sigma: no valid rule file in %s (%d invalid): Sigma file rules are not evaluated",
+                ", ".join(str(d) for d in dirs),
+                invalid,
+            )
+        return out
+
+    def health(self, *, detector_enabled: bool = True, include_paths: bool = False) -> dict[str, Any]:
+        """State of the Sigma rule set for ``/health`` (#177). Reads attributes only (no file or DB access).
+
+        ``degraded`` when a configured rule directory is missing or the directories hold no valid rule: Sigma then
+        detects nothing while everything else looks healthy. A builtin rule an operator disabled is not counted
+        as missing (``file_rules_found`` is taken before the rules table's status).
+        """
+        if not detector_enabled:
+            return {"status": "disabled", "reason": "detector disabled (detection.disabled_detectors)"}
+        configured = list(self.settings.detection.sigma_rule_dirs)
+        if not configured:
+            return {
+                "status": "disabled",
+                "reason": "no rule directory configured (detection.sigma_rule_dirs)",
+            }
+        if not self.loaded or self.file_rules_found is None:
+            return {"status": "starting"}
+        rules = self._rules
+        out: dict[str, Any] = {
+            "status": "degraded" if self.missing_dirs or self.file_rules_found == 0 else "ok",
+            "rule_dirs": len(configured),
+            "missing_dirs": len(self.missing_dirs),
+            "file_rules_found": self.file_rules_found,
+            "file_rules_invalid": self.file_rules_invalid,
+            "rules_active": len(rules),
+            "file_rules_active": sum(1 for lr in rules if lr.origin == "file"),
+        }
+        if include_paths and self.missing_dirs:
+            out["missing_dir_paths"] = list(self.missing_dirs)
         return out
 
     def reload_files(self) -> None:

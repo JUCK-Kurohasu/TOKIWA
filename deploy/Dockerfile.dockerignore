@@ -14,6 +14,8 @@
 .env.*
 !.env.example
 **/secret.key
+secrets
+deploy/compose.secrets.yaml
 **/tokiwa.yaml
 data
 backend/data

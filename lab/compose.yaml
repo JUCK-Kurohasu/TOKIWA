@@ -8,9 +8,15 @@
 #
 # UI/API: http://localhost:8788   Gate (in front of the victim): http://localhost:8080
 # The TOKIWA image is built from deploy/Dockerfile (owned by devops). See lab/README.md.
+#
+# Sensors see only their own token (audit #71): each mounts one subdirectory of the data volume
+# (volume subpath: Docker Engine 26+), never the database, secret.key or the other components' tokens.
 
 name: tokiwa-lab
 
+# Same hardening as deploy/compose.yaml (audit #105): the lab is where real AI attack tools are pointed at the
+# victim and the gate, so a compromised container must not be able to write its image, gain privileges or fork-bomb
+# the host. Writes go to /data (volume) and /tmp (tmpfs) only.
 x-tokiwa: &tokiwa
   image: tokiwa:lab
   build:
@@ -18,6 +24,14 @@ x-tokiwa: &tokiwa
     dockerfile: deploy/Dockerfile
   init: true
   networks: [labnet]
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 512
 
 services:
   # One-shot: create the DB and the per-component ingest tokens (idempotent) under the data volume.
@@ -36,7 +50,9 @@ services:
     command: ["serve"]
     environment:
       TOKIWA_LLM__PROVIDER: "${TOKIWA_LLM_PROVIDER:-mock}"   # set to auto + ANTHROPIC_API_KEY for a real LLM
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Taken from your shell when set, left out otherwise (no empty variable in `docker inspect`). A key in a file:
+      # ANTHROPIC_API_KEY_FILE + a Compose secret (deploy/compose.secrets.example.yaml).
+      ANTHROPIC_API_KEY:
       TOKIWA_LLM__DAILY_BUDGET_USD: "${TOKIWA_LLM_BUDGET_USD:-1.0}"
     volumes:
       - tokiwa-data:/data
@@ -53,15 +69,24 @@ services:
       LAB_AI_CANARY: "${LAB_AI_CANARY:-1}"
     networks: [labnet]
     expose: ["3000"]
+    # Non-root (uid 10001), no file writes (victim/app.py keeps everything in memory), port above 1024.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
 
   gate:
     <<: *tokiwa
     command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "gate", "run"]
     environment:
-      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/gate.token
+      TOKIWA_TOKEN_FILE: /run/tokiwa-token/token
       TOKIWA_TOKEN_ENV: TOKIWA_GATE__INGEST_TOKEN
       # Also watch the file: a rotated token written there is picked up without restarting the gate.
-      TOKIWA_GATE__TOKEN_FILE: /tokiwa-data/lab-tokens/gate.token
+      TOKIWA_GATE__TOKEN_FILE: /run/tokiwa-token/token
       TOKIWA_GATE__UPSTREAM: http://victim:3000
       TOKIWA_GATE__SERVER_URL: http://tokiwa:8788
       TOKIWA_GATE__LISTEN_HOST: 0.0.0.0
@@ -71,7 +96,12 @@ services:
       TOKIWA_GATE__TRUST_FORWARDED_FOR: "true"
       TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
     volumes:
-      - tokiwa-data:/tokiwa-data:ro
+      - type: volume
+        source: tokiwa-data
+        target: /run/tokiwa-token
+        read_only: true
+        volume:
+          subpath: lab-tokens/gate
       - ./scripts:/lab/scripts:ro
     ports:
       - "127.0.0.1:8080:8080"
@@ -114,11 +144,16 @@ services:
     command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "sim", "ingest", "--server", "http://tokiwa:8788",
               "--profile", "${SIM_PROFILE:-mixed}", "--seed", "${SIM_SEED:-1}"]
     environment:
-      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/sim.token
+      TOKIWA_TOKEN_FILE: /run/tokiwa-token/token
       TOKIWA_TOKEN_ENV: TOKIWA_SIM_TOKEN
       TOKIWA_HEALTHCHECK_URL: "none"
     volumes:
-      - tokiwa-data:/tokiwa-data:ro
+      - type: volume
+        source: tokiwa-data
+        target: /run/tokiwa-token
+        read_only: true
+        volume:
+          subpath: lab-tokens/sim
       - ./scripts:/lab/scripts:ro
     depends_on:
       tokiwa:
@@ -127,8 +162,13 @@ services:
   # Optional: nginx in front of the victim writing TOKIWA JSON access logs (format owned by sensors:
   # lab/nginx/tokiwa-json.conf), shipped by the host agent.
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     profiles: ["agent"]
+    # The official image starts as root and drops to the nginx user for workers, which no-new-privileges allows.
+    # TODO(verify): read_only / cap_drop need the image's exact write paths and capabilities (not checked here).
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
     volumes:
       - ./nginx/tokiwa-json.conf:/etc/nginx/conf.d/tokiwa-json.conf:ro
       - ./proxy/nginx-site.conf:/etc/nginx/conf.d/default.conf:ro
@@ -143,14 +183,19 @@ services:
     profiles: ["agent"]
     command: ["sh", "/lab/scripts/with-token.sh", "tokiwa", "agent", "run"]
     environment:
-      TOKIWA_TOKEN_FILE: /tokiwa-data/lab-tokens/agent.token
+      TOKIWA_TOKEN_FILE: /run/tokiwa-token/token
       TOKIWA_TOKEN_ENV: TOKIWA_AGENT__INGEST_TOKEN
       TOKIWA_AGENT__SERVER_URL: http://tokiwa:8788
       TOKIWA_AGENT__SENSOR_ID: lab-agent
       TOKIWA_AGENT__NGINX_JSON_LOGS: '["/var/log/nginx/tokiwa-access.json"]'
       TOKIWA_HEALTHCHECK_URL: "none"
     volumes:
-      - tokiwa-data:/tokiwa-data:ro
+      - type: volume
+        source: tokiwa-data
+        target: /run/tokiwa-token
+        read_only: true
+        volume:
+          subpath: lab-tokens/agent
       - nginx-logs:/var/log/nginx:ro
       - ./scripts:/lab/scripts:ro
     depends_on:

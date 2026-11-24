@@ -7,7 +7,7 @@
 上にあるものほど優先されます。
 
 1. **環境変数** `TOKIWA_*`（ネストは `__` でつなぐ。例: `TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`）
-2. **YAML ファイル**: `TOKIWA_CONFIG` で指定したパス（既定はカレントディレクトリの `tokiwa.yaml`。無ければ無視）
+2. **YAML ファイル**: `TOKIWA_CONFIG` で指定したパス（既定はカレントディレクトリの `tokiwa.yaml`。既定のファイルは無くてもよいが、`TOKIWA_CONFIG` で指定したファイルが無い・ディレクトリのときは起動時に WARNING。`TOKIWA_CONFIG=`（空）なら YAML を読まない）
 3. **既定値**（`backend/src/tokiwa/config.py`）
 
 さらに、次の 2 つは **Web UI から実行時に上書き** でき、その値は DB に保存されます。
@@ -30,6 +30,29 @@ Docker Compose では `.env` が環境変数としてコンテナに渡されま
 - **リストや辞書は JSON で** 書きます: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **空の値で設定しないでください**（空文字は項目によって意味が変わります）。`TOKIWA_SERVER__SECRET_KEY=`（空）は未設定として扱われ、`data_dir/secret.key` の自動生成の鍵が使われます。設定する場合は 32 文字以上が必要で、短いとサーバーが起動しません。
 - 秘密（API キー・パスワード）は YAML ではなく環境変数で渡すことを勧めます。
+
+### 設定の確認（綴り誤り・効いている値）
+
+綴りを誤った設定は無視され、その項目は既定値のまま動きます。気づけるよう、起動時に次を **WARNING** でログに出します（値は出さず、名前とパスだけ）。
+
+- YAML の未知のキー（`llm.providr` → `did you mean llm.provider?`。キーは大文字小文字を区別します）
+- 設定項目に当たらない `TOKIWA_*` 環境変数（`TOKIWA_LLM__PROVIDR`、`__` を `_` 1 つにした `TOKIWA_LLM_PROVIDER` など）
+- `TOKIWA_CONFIG` で指定したファイルが存在しない・ディレクトリ（Docker の bind mount は元のファイルが無いとディレクトリを作ります）
+
+`TOKIWA_STRICT_CONFIG=1` にすると、これらがあるとき起動を拒否します（既定は警告のみ）。Compose・ヘルスチェック・ラボのスクリプトが使う
+設定以外の変数（`TOKIWA_BIND`・`TOKIWA_HEALTHCHECK_URL` など）とメール通知のパスワード変数は対象外です。`tokiwa serve` の起動ログには、
+読み込んだ設定ファイル・`data_dir`・DB（パスワードは伏字）・LLM プロバイダも INFO で 1 行出ます。
+
+効いている値とその出所（`env` / `file` / `default`、`--db` なら画面で保存した `ui`）は `tokiwa config show` で確認できます。
+秘密は `<set>` と表示し、URL のパスワード・クエリと Webhook URL のパスは伏せます。
+
+```bash
+tokiwa config show                       # 全項目と出所
+tokiwa config show --changed -s llm      # 既定から変わった llm.* だけ
+tokiwa config show --db                  # 画面で保存した LLM の上書き（ui）も反映
+tokiwa config show --check               # 問題があれば終了コード 1（デプロイ前の確認に）
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### YAML の例
 
@@ -98,6 +121,7 @@ deception:
 | `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Web 署名検知の検査上限。個数の上限を超えたパラメータ・ヘッダ・JSON の値・multipart のパートは捨てずにまとめて検査する。文字数の上限を超えた部分は検査しない。上限に達するとアラートの `details.inspection_truncated` とタグ `inspection-truncated` に残り、上限の手前が詰め物（同じ文字の繰り返し・空のダミー要素）なら `web.inspection_evasion`（low）が出る |
 | `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | アプリ固有のヘッダ（X-Tenant-Id など）も SQLi・XSS・トラバーサル・コマンド注入の検査対象にする。Accept・Sec-*・If-*・トレース系などのフレーミング系ヘッダは対象外で、`extra_framing_headers` に名前（末尾 `*` で前方一致）を足すと除外を増やせる。false で以前の挙動（User-Agent・Referer・X-Forwarded-* などだけ） |
 | `web.max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードを繰り返す最大回数（多重エンコード対策。値が変わらなくなった時点で止まる） |
+| `web.header_count_low` / `web.header_count_medium` | 40 / 64 | 1 リクエストのヘッダ行数がこれを超えたら `web.header_anomaly` を low / medium で出す（ヘッダを大量に足して検知に要るヘッダを捕捉から押し出す手口の検出）。ブラウザは 10〜25 行程度で、CDN やロードバランサが 1 段ごとに数行足す。正規のリクエストで鳴るなら上げる。0 でその段を無効 |
 
 ### トリアージ・相関（`triage.*`）
 

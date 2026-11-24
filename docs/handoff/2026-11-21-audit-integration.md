@@ -71,3 +71,13 @@ Issue 化はしていない（要判断: 監査 Issue として追加登録す�
 | 12 | flaky テストの修正 | 852caf6 | 同上 | `test_canary_header_with_unknown_value_is_an_attempt[typo]`: 末尾の `a`→`A` は #30 の大文字小文字無視で一致してしまう（テストの不具合） |
 | 13 | gate-capture・sensors（完了） | eec4748 | backend 1956 passed / mypy 既知 4 件 / frontend 緑 | 衝突なし |
 | 14 | web-detect（完了） | 4fc2046 | backend 2007 passed（193 秒）/ mypy 既知 4 件 / frontend 緑 / wiki OK | 衝突なし |
+
+## 第 4 弾（2026-11-23〜24、PR JUCK-Kurohasu/TOKIWA#180）
+
+PR JUCK-Kurohasu/TOKIWA#179 がマージされたため、ブランチを main（6498ee8）に早送りしてから統合。Closes にした 37 件が自動で閉じたことを確認。
+
+| 順 | レーン | マージ | 全チェック | 備考 |
+|---|---|---|---|---|
+| 15 | frontend-followups | 0418aa7 | backend 2015 passed / frontend 緑 | 衝突なし |
+| 16 | detect-followups | 31a48a7（mypy 修正込み） | backend 2042 passed / CI 緑 | 新規 mypy エラー 1 件（`web_anomaly.py` の型注釈）を修正 |
+| 17 | ops | 4d47440 | backend 2077 passed（175 秒）/ mypy 既知 4 件 / frontend 緑 / wiki OK | `docs/api-contract.md` の stream / health 節が衝突 → ops の stream 認証の説明と detect の `/health`（checks 付き）を両方残した |

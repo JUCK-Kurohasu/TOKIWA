@@ -20,7 +20,7 @@
 
 ```
 TOKIWA_ENV=prod
-TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml          # 無ければ無視
+TOKIWA_CONFIG=/etc/tokiwa/tokiwa.yaml          # イメージには中身が空（コメントのみ）のファイルを同梱。自分の YAML をマウントして置き換える
 TOKIWA_SERVER__STATIC_DIR=/app/frontend/dist
 TOKIWA_SERVER__DATA_DIR=/data
 TOKIWA_DATABASE__URL=sqlite+aiosqlite:////data/tokiwa.db
@@ -63,7 +63,17 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 ### コンテナのハードニング（compose 既定）
 
 `read_only: true`（書き込みは `/data` と tmpfs `/tmp` のみ）、`cap_drop: [ALL]`、`no-new-privileges`、
-`init: true`、ログローテーション（json-file 10 MB × 5）。
+`pids_limit: 512`（スレッドも数える。サーバー・Gate の通常の使用量より十分大きい）、`init: true`、ログローテーション（json-file 10 MB × 5）。
+
+- postgres（監査 #109）: `cap_drop: [ALL]` のうえで公式 entrypoint が root で行う処理に要るものだけ `cap_add`（CHOWN・DAC_OVERRIDE・
+  FOWNER = データ / ソケットのディレクトリ作成・chmod・chown、SETUID・SETGID = gosu で postgres ユーザーへ切替）と `no-new-privileges`。
+  一覧は `docker-entrypoint.sh`（docker-library/postgres の 18/trixie）を読んで決めた。TODO(verify): この構成での起動は未確認
+  （CI のスモークテストは postgres プロファイルを動かさない）。起動しない場合は `cap_drop` / `cap_add` を外して報告してほしい。
+  `read_only` はソケット用の tmpfs などイメージの書き込み先を確かめていないので付けていない。
+- メモリ上限（`mem_limit`）は付けていない: 低すぎると攻撃を受けている最中に SIEM 自身が OOM で落ち、検知が黙って止まる。
+  ホストの規模に合わせて運用側で設定する（目安は §2 のメモリ）。
+- ラボ（`lab/compose.yaml`、監査 #105）も同じ: TOKIWA の各サービスと victim は `read_only`・tmpfs `/tmp`・`cap_drop: [ALL]`・
+  `no-new-privileges`・`pids_limit`。nginx は `no-new-privileges` と `pids_limit` のみ（公式イメージの書き込み先・必要な権限を未確認）。
 
 ## 4. センサー・他ロールを同じイメージで動かす
 
@@ -118,10 +128,47 @@ docker run --rm --network <lab-net> -e TOKIWA_HEALTHCHECK_URL=none tokiwa:local 
 
 - **空文字で有効化しない**: `TOKIWA_SERVER__SECRET_KEY=`（空）は空文字の JWT 鍵として使われてしまう。
   未設定なら初回起動時に `/data/secret.key` が生成・永続化される。
-- `tokiwa.yaml` を使う場合は compose の `./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro` のコメントを外す
-  （`deploy/` からの相対パス）。秘密は YAML ではなく環境変数で渡す方がよい。
-- `.env` は compose の変数展開（`--env-file .env`）とコンテナへの環境変数（`env_file: ../.env`）の両方に使う。
-  `.env` 内で `${POSTGRES_PASSWORD}` のような参照が使える。
+- `tokiwa.yaml` を使う場合は compose の `volumes:` にある `tokiwa.yaml` のマウント（long syntax・`create_host_path: false`）の
+  コメントを外す（`deploy/` からの相対パス）。short syntax（`./tokiwa.yaml:/etc/tokiwa/tokiwa.yaml:ro`）は、ホスト側のファイルが
+  無いと Docker がディレクトリを作ってしまう。秘密は YAML ではなく環境変数で渡す方がよい。
+- **設定ミスは警告される**（監査 #161）: YAML の未知のキー、設定項目に当たらない `TOKIWA_*` 環境変数（`TOKIWA_LLM__PROVIDR`、
+  `TOKIWA_LLM_PROVIDER` のような `_` 1 つ）、`TOKIWA_CONFIG` のファイルが無い・ディレクトリ — を起動時に `config:` で始まる
+  WARNING で出す（名前とパスのみ。値は出さない）。`TOKIWA_STRICT_CONFIG=1` で起動拒否にできる（既定は警告のみ）。
+  `TOKIWA_CONFIG=`（空）は「YAML を読まない」の明示。起動ログには読み込んだ設定ファイル・`data_dir`・DB（パスワード伏字）・
+  LLM プロバイダが INFO で 1 行出る。
+- 効いている値と出所は `docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show`（`--changed` で既定から変わった項目、
+  `--db` で画面からの LLM 上書き、`--check` で問題があれば終了コード 1）。秘密は `<set>` と表示する。
+- `.env` は compose の変数展開（`--env-file .env`）と、**tokiwa サーバーのコンテナ**への環境変数（`env_file: ../.env`）に使う。
+  `.env` 内で `${POSTGRES_PASSWORD}` のような参照が使える。**Gate のコンテナには `.env` 全体を渡さない**（監査 #71。攻撃トラフィックを
+  直接受けるので、JWT 署名鍵・LLM / インテルの API キー・DB パスワードを持たせない）。Gate に渡るのは `deploy/compose.yaml` の
+  `gate.environment` に列挙した変数（`TOKIWA_GATE__*`、`TOKIWA_LLM__REDACTION__*`、`TOKIWA_DECEPTION__CANARY_HEADER`、
+  `TOKIWA_ENV`、`TOKIWA_LOG_LEVEL`）のうち `.env` で設定したものだけ。
+
+### 秘密をファイルで渡す（任意。監査 #108 / #110）
+
+環境変数は `docker inspect`・`docker compose config`・`/proc/<pid>/environ` で見える。`TOKIWA_<設定>_FILE=<パス>` で
+文字列の設定（API キー・トークン・DB URL など）をファイルから読める（例 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`、
+`TOKIWA_DATABASE__URL_FILE`、`TOKIWA_SERVER__SECRET_KEY_FILE`。`ANTHROPIC_API_KEY_FILE` も可）。同じ設定を環境変数と `_FILE` の
+両方で指定すると起動を拒否する（環境変数が空なら `_FILE` が使われる）。末尾の改行は除く。数値・リストの設定は対象外（WARNING）。
+`gate.token_file` のように名前が `_file` で終わる本来の設定はそのまま設定として扱う。
+
+Compose secrets と組み合わせる例が `deploy/compose.secrets.example.yaml`（LLM キー・DB URL・postgres のパスワード・Gate のトークン）:
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml      # 使うブロックだけ残す
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key                         # コンテナの uid が読めるように
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
+- Compose はファイルの secret を `/run/secrets/<名前>` に読み取り専用で bind mount し、所有者・モードを変えられない
+  （Compose 仕様: file ソースでは `uid` / `gid` / `mode` は未実装）。ホスト側でコンテナのユーザーが読めるようにする
+  （TOKIWA は uid 10001。postgres の公式イメージは root で起動して `POSTGRES_PASSWORD_FILE` を読み、`postgres`（uid 999）に切り替える）。
+- `.env` から同じ値（`ANTHROPIC_API_KEY`・`TOKIWA_DATABASE__URL`・`POSTGRES_PASSWORD`・`TOKIWA_GATE__INGEST_TOKEN`）を消す。
+  イメージ自体が `TOKIWA_DATABASE__URL`（SQLite）を設定しているので、`TOKIWA_DATABASE__URL_FILE` を使うときは例のとおり
+  `TOKIWA_DATABASE__URL: ""` で空にする（空でないと「両方設定」で起動しない。`environment:` は `env_file` より優先される）。
+  postgres サービスの `POSTGRES_PASSWORD` は空になり、公式イメージは空の変数を未設定とみなして `POSTGRES_PASSWORD_FILE` を使う。
+- アプリ用の DB ロールを PostgreSQL の管理ユーザー（`POSTGRES_USER`）と分けるのが望ましい（未対応。手順は運用側で）。
 
 ## 6. アップグレード
 
@@ -219,6 +266,9 @@ PostgreSQL はホストに公開しない（compose ネットワーク内のみ�
 - `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` を設定（通知リンク等）。UI と API が同一オリジンなら
   CORS 設定は不要。
 - SSE（`/api/v1/stream`）はバッファリングを切り、タイムアウトを長くする。
+- SSE の URL には 1 回限り・60 秒の券（`?ticket=`）が載る（監査 #100。以前は 12 時間有効な JWT が `?access_token=` で載り、
+  プロキシのアクセスログに残った）。券は使用済みなら無価値だが、念のため stream の location はアクセスログを切る（下の nginx 例）か
+  クエリを伏せる（下の Caddy 例の `format filter` + `request>uri query`。構文は Caddy 公式ドキュメントの `log` ディレクティブ）。旧形式 `?access_token=` を使うクライアントが残っていると、TOKIWA が WARNING を出す。
 - プロキシが別ホスト/別コンテナの場合、uvicorn に `X-Forwarded-*` を信頼させる: `FORWARDED_ALLOW_IPS=<proxy の IP/CIDR>`。
 - TOKIWA 自体は `127.0.0.1:8788`（compose 既定）に置き、TLS はプロキシで終端する。
 - セキュリティヘッダ（CSP・`X-Frame-Options: DENY`・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`、
@@ -240,6 +290,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;   # CSP 等は TOKIWA が付ける
 
     location /api/v1/stream {
+        access_log off;                       # URL に単回使用の券（?ticket=）が載る。残すなら $uri だけの log_format に
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -270,6 +321,15 @@ tokiwa.example.internal {
     reverse_proxy 127.0.0.1:8788 {
         flush_interval -1        # SSE をそのまま流す
     }
+    # アクセスログ（log を書いたときだけ出る）を残すなら SSE の券をクエリから伏せる（監査 #100）
+    log {
+        format filter {
+            request>uri query {
+                replace ticket REDACTED
+                replace access_token REDACTED
+            }
+        }
+    }
 }
 ```
 
@@ -281,18 +341,27 @@ tokiwa.example.internal {
 
 | build-arg | 既定 | 用途 |
 |---|---|---|
-| `NODE_IMAGE` | `node:22.23.4-trixie-slim` | フロントのビルド用 |
-| `PYTHON_IMAGE` | `python:3.12.15-slim-trixie` | backend ビルド + ランタイム |
-| `UV_IMAGE` | `ghcr.io/astral-sh/uv:0.11.32` | uv バイナリ |
+| `NODE_IMAGE` | `node:22.23.4-trixie-slim@sha256:…` | フロントのビルド用 |
+| `PYTHON_IMAGE` | `python:3.12.15-slim-trixie@sha256:…` | backend ビルド + ランタイム |
+| `UV_IMAGE` | `ghcr.io/astral-sh/uv:0.11.32@sha256:…` | uv バイナリ |
 | `TOKIWA_EXTRAS` | `postgres` | backend の optional extras（空にすると SQLite 専用、約 4 MB 小さい） |
 | `TOKIWA_UID` / `TOKIWA_GID` | `10001` | 実行ユーザー |
 
-- レジストリミラー: `--build-arg PYTHON_IMAGE=mirror.gcr.io/library/python:3.12.15-slim-trixie` など。
+- ベースイメージはタグと digest の両方で固定している（監査 #104。digest が優先されるので、同じタグが差し替えられても
+  ビルド内容は変わらない）。digest はマルチアーキのインデックス（manifest list）のもの。postgres（`deploy/compose.yaml`）・
+  ラボの nginx / victim・CI のツールイメージ（actionlint / hadolint / shellcheck）も同様。
+- レジストリミラー: `--build-arg PYTHON_IMAGE=mirror.gcr.io/library/python:3.12.15-slim-trixie` など（digest を外すか、
+  ミラーから取得して確かめた digest を付ける）。
 - TLS インスペクションのあるプロキシ配下: 自社 CA を信頼させたベースイメージを用意し（`update-ca-certificates` +
   `UV_SYSTEM_CERTS=1`、node は `NODE_EXTRA_CA_CERTS`）、`NODE_IMAGE` / `PYTHON_IMAGE` で差し替える。
 - ビルドコンテキストはリポジトリ直下。除外は `deploy/Dockerfile.dockerignore`（`.env`・`data/`・`node_modules`・`.venv` 等）。
-- ベースイメージ・uv の更新: タグを上げて `make docker docker-smoke`。uv は `backend/uv.lock` を作った版と揃える
-  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。
+- ベースイメージ・uv の更新: タグと digest を一緒に上げて `make docker docker-smoke`。digest は `docker pull <イメージ>:<タグ>`
+  の出力の `Digest: sha256:…`（インデックスの digest）を使う。uv は `backend/uv.lock` を作った版と揃える
+  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。このリポジトリでは Dependabot を止めている（エラーになるため）ので、
+  依存とイメージの更新は手動で行い、脆弱性は CI の `dependency-audit.yml`（pip-audit / npm audit）で検出する。
+  有効にする場合の設定は `deploy/ci/dependabot.yml.disabled`（`.github/dependabot.yml` に置けば有効。docker / docker-compose /
+  github-actions / uv / npm を週次・7 日の cooldown）。TODO(verify): Dockerfile の `ARG` 既定値にあるイメージを
+  Dependabot が更新するか。
 
 ## 11. 開発補助・CI
 
@@ -310,6 +379,11 @@ CI（`.github/workflows/ci.yml`）: すべてのブランチ push と PR で bac
 seed 検証、mypy は情報表示のみ）、frontend（npm ci → typecheck → lint → build → vitest）、docker（buildx + GHA
 キャッシュでビルド → スモークテスト）、infra-lint（actionlint / hadolint / shellcheck）。LLM は mock 固定で秘密は不要。
 Actions はコミット SHA で固定（更新時はタグと SHA を併記）。
+依存の脆弱性（監査 #104）は `.github/workflows/dependency-audit.yml`: `backend/uv.lock` の実行時依存（全 extras）を
+`pip-audit --strict`、`frontend/package-lock.json` の本番依存を `npm audit --omit=dev --audit-level=high` で検査し、既知の脆弱性が
+あれば失敗する（開発・テスト専用の依存は警告の注釈だけ）。ロックファイルの変更時と毎週月曜に実行。手元では:
+`cd backend && uv export --frozen --no-dev --all-extras --no-emit-project -o /tmp/req.txt && uvx pip-audit --strict --disable-pip --require-hashes -r /tmp/req.txt`、
+`cd frontend && npm audit --omit=dev --audit-level=high`（どちらも PyPI / npm レジストリへの通信が要る）。
 
 ## 12. トラブルシューティング
 
@@ -321,3 +395,4 @@ Actions はコミット SHA で固定（更新時はタグと SHA を併記）�
 | tokiwa が postgres を待ち続ける | `POSTGRES_PASSWORD` 未設定だと postgres が起動しない（`docker compose logs postgres`） |
 | ログイン後すぐ 401 | `secret.key`/`TOKIWA_SERVER__SECRET_KEY` が変わった。バックアップから戻すか再ログイン |
 | SSE が途切れる/遅れる | リバースプロキシのバッファリング・タイムアウト（§9） |
+| 設定が効かない（既定値のまま） | 起動ログの `config:` WARNING と `tokiwa config show --changed`（§5） |

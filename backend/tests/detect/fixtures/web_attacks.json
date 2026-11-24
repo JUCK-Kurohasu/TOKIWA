@@ -142,6 +142,10 @@
     {"detector": "web.rare_method", "method": "PROPFIND", "severity": "low"},
     {"detector": "web.rare_method", "method": "DEBUG", "severity": "medium"},
     {"detector": "web.rare_method", "method": "FOOBAR", "severity": "low"},
-    {"detector": "web.rare_method", "method": "GET", "headers": {"x-http-method-override": "TRACE"}, "severity": "medium"}
+    {"detector": "web.rare_method", "method": "GET", "headers": {"x-http-method-override": "TRACE"}, "severity": "medium"},
+
+    {"detector": "web.route_override", "sig": "route_override.different_path", "severity": "medium", "path": "/static/app.js", "headers": {"x-original-url": "/admin"}},
+    {"detector": "web.route_override", "sig": "route_override.different_path", "severity": "medium", "path": "/", "headers": {"x-rewrite-url": "/%61dmin/users"}},
+    {"detector": "web.sensitive_file_probe", "sig": "file.secrets", "path": "/static/app.js", "headers": {"x-override-url": "/.env"}}
   ]
 }

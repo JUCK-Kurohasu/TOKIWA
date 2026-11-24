@@ -12,6 +12,10 @@ import type { Advisory, Asset, Page, Severity, VulnMatch, VulnRecord } from "./t
 /** GET /intel/matches returns matches with the asset name joined in. */
 export interface VulnMatchWithAsset extends VulnMatch {
   asset_name?: string | null;
+  /** Audit #132: every advisory behind the vulnerability was withdrawn by its feed (GET /intel/matches only). */
+  vuln_withdrawn_at?: string | null;
+  /** Audit #132: withdrawn advisory id -> timestamp (may be partial). */
+  vuln_withdrawn?: Record<string, string>;
 }
 
 /** GET /intel/vulns/{id} */

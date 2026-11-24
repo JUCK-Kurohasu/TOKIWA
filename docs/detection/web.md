@@ -116,6 +116,23 @@ Content-Type のパラメータを `;` 区切りの `name=value` として解析
 `sensitive_file_probe` は応答も見る: **2xx かつ非 HTML** なら露出の疑い（secrets/vcs/debug/webshell → critical,
 backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で Content-Type 不明なら最大 high、
 2xx で HTML なら SPA のフォールバックとみなし昇格しない（`details.exposure` に理由）。
+`X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL` の値のパスも同じ署名で検査する（#147。`location=header_custom`、
+`param` にヘッダ名、タグ `route_override`）。応答は要求行のパスに対するものなので、ヘッダ由来のヒットでは 2xx による昇格をしない。
+
+### 2.1 リクエスト形状の異常（`detect/detectors/web_anomaly.py`）
+
+署名では見えない「検査から隠す・見た目を偽る」形のリクエスト。Gate が捕捉しきれなかったときに付けるタグ・ラベル
+（`gate/capture.py`・`gate/app.py`）を入力に使うので、ヘッダ全体を見られない他のセンサー（アクセスログ等）では大半が鳴らない。
+アラートの `details.signatures` に指標 ID が入るので、誤検知マーク（§5.1）は指標単位で効く。fingerprint は `rule|ip|最も重い指標`。
+**どれも low / medium で、単独では送信元 IP の遮断提案の根拠にならない**（ルールベースのトリアージが対処を提案するのは high 以上。
+medium は LLM トリアージ（`triage.min_severity_for_llm` 既定 medium）に乗り、low はインシデントの起点にはなりうる）。
+
+| id | 意図 | MITRE | 重大度 | 指標（`details.signatures`） |
+|---|---|---|---|---|
+| `web.header_anomaly` | ヘッダ数の異常・非リストヘッダの重複（#140） | T1190 | low / medium | `header_anomaly.count`（ヘッダ行数が `header_count_low`（既定 40）超で low、`header_count_medium`（既定 64）超で medium）, `header_anomaly.capture_dropped`(medium: Gate が 64 名に収まらず記録しなかったヘッダがある = `gate.headers_dropped`), `header_anomaly.rejected`(medium: `gate.max_request_headers` 超で 431 = `gate:too_many_headers`), `header_anomaly.duplicate_framing`(medium: Host / Content-Length / Transfer-Encoding の重複), `header_anomaly.duplicate`(low: User-Agent・Referer・X-Real-IP 等の重複 = `gate.duplicate_headers`)。ヘッダ数は Gate が捕捉を打ち切ったときの `gate.header_count`（実数）、それ以外は記録したヘッダ名の数（同名の繰り返しは畳まれるので過小になりうる）。Cookie の連結が 8192 文字を超えただけ（`gate.headers_clipped`）では鳴らない |
+| `web.uninspectable_body` | Gate が展開できない `Content-Encoding` の要求ボディ（#141） | T1190 | low / medium | `body.encoding_unknown`（br・zstd・compress・3 段以上 = `gate:req_encoding_unknown`。**本文はイベントに残らない**。上流が受け付けた（status 200〜399）なら medium、それ以外は low）, `body.decode_failed`(low: gzip / deflate と宣言して壊れている = `gate:req_decode_failed`。Gate は生の先頭をテキストとして記録するので、`Content-Encoding` を無視して生のまま読むアプリへの平文ペイロードは他の `web.*` が検査する)。gzip / deflate は Gate が展開して検査済み（`gate:req_encoded`）なので鳴らない |
+| `web.route_override` | ルーティング上書きヘッダ `X-Original-URL` / `X-Rewrite-URL` / `X-Override-URL`（#147） | T1190 | medium | `route_override.different_path`(medium: 値のパス（絶対 URL はパス部分、クエリ・フラグメントは除く、デコード・小文字化・`path_clean` と同じ正規化）が要求行のパスと違う), `route_override.empty`(low: 値が空)。要求行と同じパス（`X-Forwarded-Prefix` を前に付けて同じ場合も）は鳴らない: 前段のプロキシ（IIS ARR、nginx の `proxy_set_header X-Original-URL $request_uri` 等）が受けた URL をそのまま付ける形のため。Gate はこれらを上流へ渡さず（値がデコイならデコイを返す）`gate:route_override` を付ける。Gate がそのヘッダを **渡した**（`gate:route_override` があり、`gate.action=proxy` で `gate.stripped_headers` に名前が無い = `gate.forward_client_headers` で運用者が許可）ときは鳴らない。タグが無い（古い Gate・他のセンサー）ときはクライアント由来として扱う。値のパスは `web.sensitive_file_probe` でも検査する（下記）。値への注入（SQLi・トラバーサル等）は `header_custom` として既存の検知器が検査する |
+| `web.deceptive_unicode` | パス・User-Agent・ヘッダ値の双方向制御文字・ゼロ幅文字・タグ文字（#150、Trojan Source） | T1036.002 | low | `unicode.bidi_control`（U+202A〜U+202E・U+2066〜U+2069 は常に。LRM U+200E・RLM U+200F・ALM U+061C は ASCII の隣か値の端のときだけ）, `unicode.zero_width`（U+200B・U+2060・U+FEFF は常に。ZWNJ U+200C・ZWJ U+200D・U+180E・ハングルの埋め字は ASCII の隣か値の端のときだけ）, `unicode.tag_characters`（U+E0000〜U+E007F。U+1F3F4 に続く旗の絵文字は除く）, `unicode.excessive`（候補文字が 1 フィールド 512 / 1 イベント 2048 を超えた。検査コストの上限で、それ自体が異常）。パスはデコード後（アクセスログの `%E2%80%AE` と Gate のデコード済みパスで同じ判定）、ヘッダ値は受け取ったまま（Gate は latin-1 で記録するので UTF-8 として読み直す）。**クエリ・ボディは見ない**（右から左の文字列や絵文字の本文に普通に含まれる）。ペルシア語・インド系文字・絵文字の結合子（文字と文字の間の ZWNJ / ZWJ）は鳴らない。`details.code_points` に場所ごとの `U+XXXX 名前`、`details.excerpts` に該当箇所（`<U+202E>` 形式でエスケープ。普通の文字はそのまま）。タイトル・`matched` は ASCII のみ。UI 側の表示（`frontend/src/components/common/invisible.ts`）と並べ替え文字の集合を揃えてある |
 
 ## 3. レート / 振る舞い検知器（`ctx.window`, 送信元 IP ごと, イベント時刻基準）
 
@@ -139,6 +156,7 @@ backup/admin → high, info → medium, `exposure_suspected` タグ）。2xx で
 | `max_decode_rounds` | 8 | 1 つの値に対する URL / HTML / JS のデコードの最大ラウンド数（安定したら早く止まる。#89 で 3 → 8） |
 | `inspect_custom_headers` | true | アプリ固有ヘッダ（`header_custom`）を注入系の検知器でも検査する（#53）。false で従来の挙動（既知の反射ヘッダだけ） |
 | `extra_framing_headers` | `[]` | 注入系の検知器で検査しないヘッダ名の追加（小文字。末尾 `*` で前方一致、例 `x-internal-*`）。値が不透明・自動生成のヘッダで誤検知するときに使う。Log4Shell 等は引き続き検査する |
+| `header_count_low` / `header_count_medium` | 40 / 64 | `web.header_anomaly` のヘッダ行数のしきい値（超えたら low / medium。0 でその段を無効）。ブラウザは 10〜25 行程度（Client Hints を全部要求すると増える）、CDN・ロードバランサが 1 段ごとに数行足す |
 | `error_burst_window_seconds` / `_min_errors` / `_min_ratio` / `_min_unique_paths` | 60 / 30 / 0.6 / 15 | error_burst |
 | `login_path_regex` | login, signin, auth, session, token, wp-login.php, xmlrpc.php, j_security_check ... | ログイン系パス（大小無視）。不正/2000 文字超の正規表現は既定値にフォールバック |
 | `credential_window_seconds` / `_fail_statuses` / `_min_failures` / `_min_unique_users` | 300 / [401, 403] / 10 / 4 | credential_stuffing |

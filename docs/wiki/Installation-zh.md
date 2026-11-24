@@ -40,6 +40,26 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 只读根文件系统（仅 `/data` 和 `/tmp` 可写）、删除全部 capabilities、
 `no-new-privileges`、非 root 用户（uid/gid 10001）、日志轮转（10 MB × 5）。
+另外还设置了进程数上限（`pids_limit: 512`）。PostgreSQL 只保留启动过程所需的 capabilities（CHOWN、DAC_OVERRIDE、FOWNER、SETUID、SETGID），
+并启用 `no-new-privileges`。未设置内存上限（过低会导致 TOKIWA 在遭受攻击时崩溃，请根据主机自行设置）。
+实验环境（`lab/compose.yaml`）中的 TOKIWA 各服务和 victim 也采用相同的加固。
+
+### 密钥的传递方式
+
+`.env` 的内容只传给 tokiwa 服务器容器。接收攻击流量的 Gate 容器只获得它所用的 `TOKIWA_GATE__*` 等变量
+（不持有 JWT 签名密钥、LLM API 密钥或数据库密码）。
+
+环境变量可以通过 `docker inspect` 看到，因此 API 密钥等也可以通过文件传递。`TOKIWA_<设置>_FILE=<路径>`
+（例如 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`、`TOKIWA_DATABASE__URL_FILE`，或 `ANTHROPIC_API_KEY_FILE`）会从文件读取值。
+使用 Compose secrets 的示例见 `deploy/compose.secrets.example.yaml`。请让容器用户（uid 10001）能读取这些文件，
+并从 `.env` 中删除相同的值（两者同时设置时服务器不会启动）。详见 `docs/deploy.md` §5。
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
 
 ## 用同一镜像运行其他角色
 
@@ -85,6 +105,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - 请 **在域名（或子域名）的根路径下公开**。尚不支持在 `/tokiwa/` 这类子路径下提供服务。
 - 设置 `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal`（用于通知中的链接等）。
 - 实时更新（SSE：`/api/v1/stream`）需要 **关闭缓冲并延长超时**。
+  界面连接时在 URL 中携带的是 60 秒内有效、仅能使用一次的票据（`?ticket=`），而不是登录令牌（JWT）。为稳妥起见，不要在代理的访问日志中记录此路径（见下例中的 `access_log off;`）。
 - 如果代理位于其他主机 / 其他容器，请设置 `FORWARDED_ALLOW_IPS=<代理的 IP/CIDR>`。
 
 nginx 示例：
@@ -94,9 +115,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # 用于传感器发来的摄取批次
+    client_max_body_size 32m;                  # 用于传感器发来的摄取批次（与 server.max_ingest_body_bytes 一致）
 
     location /api/v1/stream {
+        access_log off;                        # URL 中带有一次性票据（?ticket=）
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

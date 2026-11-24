@@ -7,7 +7,7 @@
 Items higher in the list take precedence.
 
 1. **Environment variables** `TOKIWA_*` (nesting levels are joined with `__`; for example, `TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`)
-2. **YAML file**: the path given in `TOKIWA_CONFIG` (default: `tokiwa.yaml` in the current directory; ignored if it doesn't exist)
+2. **YAML file**: the path given in `TOKIWA_CONFIG` (default: `tokiwa.yaml` in the current directory, optional. A file named in `TOKIWA_CONFIG` that is missing or a directory is logged as a WARNING at startup. `TOKIWA_CONFIG=` (empty) reads no YAML file)
 3. **Defaults** (`backend/src/tokiwa/config.py`)
 
 In addition, the following two can be **overridden at runtime from the Web UI**, and those values are stored in the DB.
@@ -31,6 +31,31 @@ With Docker Compose, `.env` is passed to the container as environment variables.
 - **Write lists and dictionaries as JSON**: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **Do not set a value to empty** (what an empty string means differs per setting). An empty `TOKIWA_SERVER__SECRET_KEY=` is treated as unset, so the generated key in `data_dir/secret.key` is used. A key you set must have at least 32 characters; a shorter one stops the server from starting.
 - We recommend passing secrets (API keys, passwords) in environment variables rather than in YAML.
+
+### Checking the configuration (typos, effective values)
+
+A misspelt setting is ignored and that setting keeps its default. So that you notice, the following are logged as a **WARNING** at
+startup (names and paths only, never values):
+
+- Unknown keys in the YAML file (`llm.providr` → `did you mean llm.provider?`; keys are case-sensitive)
+- `TOKIWA_*` environment variables that name no setting (`TOKIWA_LLM__PROVIDR`, or `TOKIWA_LLM_PROVIDER` with one underscore instead of two)
+- A file named in `TOKIWA_CONFIG` that does not exist or is a directory (a Docker bind mount creates a directory when the source file is missing)
+
+With `TOKIWA_STRICT_CONFIG=1` the server refuses to start when any of these is found (the default only warns). Variables used by
+Compose, the healthcheck and the lab scripts rather than by the settings (`TOKIWA_BIND`, `TOKIWA_HEALTHCHECK_URL`, ...) and e-mail
+password variables are not reported. The `tokiwa serve` startup log also has one INFO line with the config file that was read,
+`data_dir`, the database (password masked) and the LLM provider.
+
+`tokiwa config show` prints the effective values and where each came from (`env` / `file` / `default`, and `ui` for values saved in
+the UI with `--db`). Secrets are shown as `<set>`; passwords and queries in URLs and the path of webhook URLs are hidden.
+
+```bash
+tokiwa config show                       # every setting and its source
+tokiwa config show --changed -s llm      # only llm.* values changed from the default
+tokiwa config show --db                  # include LLM overrides saved in the UI (ui)
+tokiwa config show --check               # exit code 1 if problems are found (pre-deploy check)
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### YAML example
 
@@ -99,6 +124,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | `web.max_inspect_chars` / `web.max_params` / `web.max_headers` / `web.max_json_leaves` / `web.max_json_depth` / `web.max_multipart_parts` | 8192 / 64 / 64 / 128 / 16 / 32 | Inspection limits of the web signature detections. Parameters, headers, JSON values and multipart parts past a count limit are not dropped but inspected together; text past the character limit is not inspected. Reaching a limit is recorded in the alert's `details.inspection_truncated` and the tag `inspection-truncated`; if what comes before the limit looks like padding (one repeated character, empty dummy items), `web.inspection_evasion` (low) fires |
 | `web.inspect_custom_headers` / `web.extra_framing_headers` | true / `[]` | Application-specific headers (X-Tenant-Id and the like) are also checked for SQLi, XSS, path traversal and command injection. Framing headers (Accept, Sec-*, If-*, trace context and so on) are skipped; add names to `extra_framing_headers` (a trailing `*` matches a prefix) to skip more. false restores the previous behaviour (only User-Agent, Referer, X-Forwarded-* and similar) |
 | `web.max_decode_rounds` | 8 | Maximum number of URL / HTML / JS decoding passes per value (against nested encodings; decoding stops as soon as the value no longer changes) |
+| `web.header_count_low` / `web.header_count_medium` | 40 / 64 | A request with more header lines than this raises `web.header_anomaly` at low / medium (padding a request with headers to push the ones detection needs out of the capture). Browsers send about 10 to 25 lines and each CDN or load balancer adds a few. Raise it if legitimate requests trigger it; 0 turns that level off |
 
 ### Triage and correlation (`triage.*`)
 

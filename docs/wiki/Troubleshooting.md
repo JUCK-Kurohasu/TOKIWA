@@ -42,6 +42,11 @@ curl -s http://localhost:8788/api/v1/auth/status
 **再起動したらログアウトされた**
 署名鍵（`data/secret.key`）が失われた可能性があります。データディレクトリが永続化されているか確認してください。
 
+**設定を変えたのに効かない（既定値のまま動いている）**
+起動ログの `config:` で始まる WARNING を確認します（未知のキー・綴り誤りの環境変数・見つからない設定ファイルを名前で示します）。
+`tokiwa config show --changed` で、効いている値と出所（環境変数 / 設定ファイル / 既定値）を確認できます（[設定リファレンス](Configuration)）。
+Docker で `tokiwa.yaml` をマウントしているのに `config: ...: is a directory` と出る場合は、ホスト側のファイルのパスが誤っています。
+
 ## センサー・取り込み
 
 **Gate を経由しているのにイベントが届かない**
@@ -62,6 +67,9 @@ Gate がロードバランサの背後にある場合は、`--trust-forwarded-fo
 
 **WebSocket が使えなくなった**
 Gate v0.1 は WebSocket に対応していません（501 を返します）。WebSocket のパスは Gate を通さずにルーティングしてください。
+
+**Sigma ルールのアラートが 1 件も出ない**
+起動ログに `sigma rule dir ... not found` または `sigma: no valid rule file` の ERROR が無いか確認します。ログイン中の UI は 30 秒ごとに `/api/v1/health` を呼んでいるので、ブラウザの開発者ツール（ネットワーク）でその応答を見ます（curl なら `/api/v1/auth/login` で得た `access_token` を `Authorization: Bearer` に付けて呼びます）。`checks.sigma.status` が `degraded` になっていれば、ルールディレクトリが見つからないか、有効なルールが 1 件も読めていません（管理者には探したパスも表示されます）。`detection.sigma_rule_dirs`（`TOKIWA_DETECTION__SIGMA_RULE_DIRS`）を絶対パスで設定してください。ログインしていない `/health` は、監視や攻撃者に内部の状態を見せないよう、常に `{"status": "ok"}` を返します。
 
 ## 対処
 

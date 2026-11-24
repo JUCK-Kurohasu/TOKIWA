@@ -81,6 +81,14 @@ y vinculación y mantiene válido el anterior durante `--grace-hours` (24 horas 
 leer su archivo de token cuando cambia, así que basta con escribir el token nuevo en el archivo, sin reiniciar. Si un nombre
 coincide con varios tokens activos, indique el id.
 
+## tokiwa config show
+
+```bash
+tokiwa config show [--changed] [-s SECTION] [--db] [--json] [--check]
+```
+
+Muestra los ajustes efectivos con su origen (los secretos como `<set>`). Detalles: [Referencia de configuración](Configuration-es).
+
 ## tokiwa data purge / export
 
 ```bash

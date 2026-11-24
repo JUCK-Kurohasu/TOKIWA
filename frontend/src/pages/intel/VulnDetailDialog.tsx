@@ -7,7 +7,15 @@ import { api } from "@/api/client";
 import type { Advisory } from "@/api/types";
 import type { VulnDetailResponse } from "@/api/types-intel";
 import { SeverityBadge } from "@/components/common";
-import { CvssScore, EpssBar, KevBadge, PriorityBadge, SafeLink } from "@/components/common/IntelBadges";
+import {
+  CvssScore,
+  EpssBar,
+  KevBadge,
+  PriorityBadge,
+  SafeLink,
+  vulnWithdrawal,
+  WithdrawnBadge,
+} from "@/components/common/IntelBadges";
 import { ApiErrorState, LoadingRows } from "@/components/common/QueryView";
 import { useCan } from "@/components/common/RoleGate";
 import { Time } from "@/components/common/Time";
@@ -113,6 +121,7 @@ export function VulnDetailDialog({ id, onClose }: { id: string | null; onClose: 
   };
 
   const v = q.data?.vuln;
+  const withdrawn = vulnWithdrawal(v?.data);
   return (
     <Dialog
       open={!!id}
@@ -122,6 +131,7 @@ export function VulnDetailDialog({ id, onClose }: { id: string | null; onClose: 
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono">{id}</span>
           {v?.kev && <KevBadge ransomware={v.kev_ransomware} />}
+          <WithdrawnBadge withdrawal={vulnWithdrawal(v?.data)} />
           {v?.severity && <SeverityBadge severity={v.severity} />}
         </span>
       }
@@ -294,9 +304,12 @@ export function VulnDetailDialog({ id, onClose }: { id: string | null; onClose: 
                         <TD className="text-xs text-muted">{m.reason}</TD>
                         <TD className="tabular-nums text-xs">{pct(m.confidence)}</TD>
                         <TD>
-                          <Badge tone={m.status === "open" ? "danger" : "neutral"}>
-                            {matchLabel(m.status)}
-                          </Badge>
+                          <span className="flex flex-wrap items-center gap-1">
+                            <Badge tone={m.status === "open" ? "danger" : "neutral"}>
+                              {matchLabel(m.status)}
+                            </Badge>
+                            {m.status !== "open" && <WithdrawnBadge withdrawal={withdrawn} />}
+                          </span>
                         </TD>
                       </TR>
                     ))}

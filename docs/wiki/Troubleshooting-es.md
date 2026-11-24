@@ -42,6 +42,11 @@ Se cierran las sesiones existentes de ese usuario. Si los inicios de sesión se 
 **La sesión se cerró al reiniciar**
 Es posible que se haya perdido la clave de firma (`data/secret.key`). Compruebe que el directorio de datos sea persistente.
 
+**Un ajuste que cambié no tiene efecto (se sigue usando el valor por defecto)**
+Busque en el registro de arranque las líneas WARNING que empiezan por `config:` (nombran claves desconocidas, variables de entorno mal escritas y un archivo de configuración que no se encuentra).
+`tokiwa config show --changed` muestra los valores efectivos y su origen (entorno / archivo de configuración / valor por defecto) ([Referencia de configuración](Configuration-es)).
+Si monta `tokiwa.yaml` en Docker y aparece `config: ...: is a directory`, la ruta del archivo en el host es incorrecta.
+
 ## Sensores e ingesta
 
 **Los eventos no llegan aunque el tráfico pasa por Gate**
@@ -62,6 +67,9 @@ Si Gate está detrás de un balanceador de carga, configure `--trust-forwarded-f
 
 **WebSocket ha dejado de funcionar**
 Gate v0.1 no admite WebSocket (devuelve 501). Enrute las rutas de WebSocket sin pasar por Gate.
+
+**Ninguna regla Sigma genera alertas**
+Busque en el registro de arranque un ERROR `sigma rule dir ... not found` o `sigma: no valid rule file`. Con la sesión iniciada, la interfaz llama a `/api/v1/health` cada 30 segundos: mire esa respuesta en las herramientas de desarrollo del navegador (pestaña Red); con curl, envíe el `access_token` de `/api/v1/auth/login` como `Authorization: Bearer`. Si `checks.sigma.status` es `degraded`, falta el directorio de reglas o no se pudo leer ninguna regla válida (los administradores ven además las rutas probadas). Configure `detection.sigma_rule_dirs` (`TOKIWA_DETECTION__SIGMA_RULE_DIRS`) con una ruta absoluta. Sin iniciar sesión, `/health` siempre devuelve `{"status": "ok"}`, para no mostrar el estado interno a monitores ni a atacantes.
 
 ## Acciones de respuesta
 

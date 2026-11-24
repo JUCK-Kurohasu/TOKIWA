@@ -3,9 +3,10 @@
  * the numeric value, CVSS is a score with its severity band, advisory priority P1..P4. Colour never carries the
  * meaning alone.
  */
-import { ExternalLink, Flame, Skull, Sparkles } from "lucide-react";
+import { ExternalLink, Flame, Skull, Sparkles, Undo2 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Priority, Severity } from "@/api/types";
+import { formatDateTime } from "@/lib/format";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -223,6 +224,74 @@ export function AiGeneratedBadge({ className }: { className?: string }) {
     >
       <Sparkles className="h-3 w-3" aria-hidden />
       {lang === "ja" ? "AI生成" : "AI-generated"}
+    </span>
+  );
+}
+
+/**
+ * Withdrawal of a vulnerability's advisories by their feed (audit #132; backend `tokiwa.intel.store`):
+ * `data.withdrawn_at` = every source behind the row was withdrawn (its package data is gone, exposures based on it
+ * were auto-closed); `data.withdrawn` = advisory id -> timestamp, possibly partial (a CVE keeps NVD's data when only
+ * its GHSA was withdrawn).
+ */
+export interface Withdrawal {
+  kind: "full" | "partial";
+  at: string | null;
+  advisories: [string, string][];
+}
+
+export function withdrawalOf(withdrawnAt: unknown, marks: unknown): Withdrawal | null {
+  const advisories: [string, string][] =
+    marks && typeof marks === "object" && !Array.isArray(marks)
+      ? Object.entries(marks as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")])
+      : [];
+  const at = typeof withdrawnAt === "string" && withdrawnAt ? withdrawnAt : null;
+  if (at) return { kind: "full", at, advisories };
+  if (advisories.length) return { kind: "partial", at: null, advisories };
+  return null;
+}
+
+/** From a VulnRecord's `data` (GET /intel/vulns, /intel/vulns/{id}). */
+export function vulnWithdrawal(data: Record<string, unknown> | null | undefined): Withdrawal | null {
+  return data ? withdrawalOf(data.withdrawn_at, data.withdrawn) : null;
+}
+
+/**
+ * "Withdrawn" (the whole vulnerability) / "Partly withdrawn" (some advisories); ids and dates in the tooltip.
+ * It states the vulnerability's state; on an auto-closed exposure it is the likely, not a proven, reason.
+ */
+export function WithdrawnBadge({
+  withdrawal,
+  className,
+}: {
+  withdrawal: Withdrawal | null;
+  className?: string;
+}) {
+  const { lang } = useLang();
+  if (!withdrawal) return null;
+  const ja = lang === "ja";
+  const full = withdrawal.kind === "full";
+  const lines = withdrawal.advisories.map(([id, at]) => `${id}: ${at ? formatDateTime(at) : "-"}`);
+  const head = full
+    ? ja
+      ? "提供元がこの脆弱性情報を取り下げました（誤報・重複など）。これに基づく露出は自動でクローズされます。"
+      : "The feed withdrew this vulnerability (invalid or duplicate report). Exposures based on it are auto-closed."
+    : ja
+      ? "一部のアドバイザリが取り下げられました。他の提供元（NVD など）のデータは残っています。"
+      : "Some advisories were withdrawn; data from other sources (such as NVD) remains.";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none",
+        full
+          ? "border-sev-medium/50 bg-sev-medium/15 text-sev-medium"
+          : "border-line bg-surface-2 text-muted",
+        className,
+      )}
+      title={[head, ...lines].join("\n")}
+    >
+      <Undo2 className="h-3 w-3" aria-hidden />
+      {full ? (ja ? "取り下げ済み" : "Withdrawn") : ja ? "一部取り下げ" : "Partly withdrawn"}
     </span>
   );
 }

@@ -197,6 +197,12 @@ export interface PortBaselineIn {
 }
 
 // ---------- live stream (routes/stream.py) ----------
+/** POST /stream/ticket (schemas/stream.py): single-use credential for GET /stream?ticket=... */
+export interface StreamTicket {
+  ticket: string;
+  expires_in: number;
+}
+
 /** Topics relayed by GET /stream (see backend/src/tokiwa/bus.py). */
 export type StreamTopic =
   | "event.ingested"

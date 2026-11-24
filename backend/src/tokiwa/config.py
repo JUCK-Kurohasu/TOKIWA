@@ -3,8 +3,14 @@
 Static configuration is loaded from (highest priority first):
 
 1. Environment variables prefixed with ``TOKIWA_`` (nested with ``__``, e.g. ``TOKIWA_LLM__DAILY_BUDGET_USD=5``)
-2. A YAML file pointed to by ``TOKIWA_CONFIG`` (default: ``./tokiwa.yaml`` if it exists)
+2. A YAML file pointed to by ``TOKIWA_CONFIG`` (default: ``./tokiwa.yaml`` if it exists; an empty value or
+   ``/dev/null`` reads no file)
 3. The defaults below
+
+Mistakes do not fall back to the defaults silently (audit #161): unknown keys in the YAML file, ``TOKIWA_*``
+variables that name no setting and a ``TOKIWA_CONFIG`` file that is missing or a directory are logged as WARNING
+when the settings are first read (:mod:`tokiwa.config_diagnostics`), and refuse startup with
+``TOKIWA_STRICT_CONFIG=1``. ``tokiwa config show`` prints the effective values (secrets masked) and their source.
 
 Runtime-editable settings (changed from the UI) are stored in the ``settings_kv`` table and overlaid by the
 service that owns them (e.g. ``tokiwa.llm.settings``). Each module owns exactly one section class below;
@@ -13,6 +19,7 @@ add fields to *your own* section only, so parallel work does not conflict.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from functools import lru_cache
@@ -159,6 +166,11 @@ class WebDetectionSettings(BaseModel):
     inspect_custom_headers: bool = True
     # More header names those detectors skip (framing / opaque values); a trailing "*" matches a prefix.
     extra_framing_headers: list[str] = Field(default_factory=list)
+    # web.header_anomaly (audit #140): header lines per request. Browsers send about 10-25 (more with every client
+    # hint requested), each CDN / load balancer hop adds a few. Over ``header_count_low`` = low alert, over
+    # ``header_count_medium`` (the Gate records 64 names) = medium. 0 turns that tier off.
+    header_count_low: int = Field(default=40, ge=0, le=4096)
+    header_count_medium: int = Field(default=64, ge=0, le=4096)
     # web.error_burst: 4xx storm from one source (directory brute force)
     error_burst_window_seconds: float = 60.0
     error_burst_min_errors: int = 30
@@ -523,29 +535,130 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (init_settings, env_settings, dotenv_settings, _YamlSource(settings_cls), file_secret_settings)
+        # _FILE variables come first so that an empty direct variable (Compose "${X:-}") does not hide the file.
+        return (
+            init_settings,
+            _FileEnvSource(settings_cls),
+            env_settings,
+            dotenv_settings,
+            _YamlSource(settings_cls),
+            file_secret_settings,
+        )
+
+
+CONFIG_ENV = "TOKIWA_CONFIG"
+DEFAULT_CONFIG_FILE = "tokiwa.yaml"
+STRICT_CONFIG_ENV = "TOKIWA_STRICT_CONFIG"
+_TRUE = {"1", "true", "yes", "on"}
+
+log = logging.getLogger(__name__)
+
+
+class ConfigError(ValueError):
+    """Raised by :func:`get_settings` under ``TOKIWA_STRICT_CONFIG=1`` when the configuration has problems.
+
+    The message names keys and paths only, never values (a misspelt API-key variable must not reach a log).
+    """
+
+
+def config_file_path() -> tuple[Path | None, bool]:
+    """The YAML file to read and whether ``TOKIWA_CONFIG`` named it explicitly.
+
+    Unset: ``./tokiwa.yaml``, optional. Empty or ``/dev/null``: no file on purpose (tests, benchmarks).
+    """
+    raw = os.environ.get(CONFIG_ENV)
+    if raw is None:
+        return Path(DEFAULT_CONFIG_FILE), False
+    raw = raw.strip()
+    if not raw or raw == os.devnull:
+        return None, True
+    return Path(raw).expanduser(), True
+
+
+def load_config_file() -> dict[str, Any]:
+    """Contents of the YAML file, ``{}`` when there is none (a missing explicit file is reported, not raised)."""
+    path, _ = config_file_path()
+    if path is None or not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: top-level YAML must be a mapping")
+    return data
+
+
+def strict_config_enabled() -> bool:
+    return os.environ.get(STRICT_CONFIG_ENV, "").strip().lower() in _TRUE
 
 
 class _YamlSource(PydanticBaseSettingsSource):
-    def _load(self) -> dict[str, Any]:
-        path = Path(os.environ.get("TOKIWA_CONFIG", "tokiwa.yaml"))
-        if not path.is_file():
-            return {}
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if not isinstance(data, dict):
-            raise ValueError(f"{path}: top-level YAML must be a mapping")
-        return data
-
     def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:  # pragma: no cover
-        return self._load().get(field_name), field_name, False
+        return load_config_file().get(field_name), field_name, False
 
     def __call__(self) -> dict[str, Any]:
-        return self._load()
+        return load_config_file()
+
+
+def read_secret_file(variable: str, raw_path: str) -> str:
+    """Contents of the file named by a ``*_FILE`` variable, without the trailing newline.
+
+    Errors name the variable and the path, never the contents.
+    """
+    path = Path(raw_path.strip()).expanduser()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+        raise ValueError(f"{variable}: cannot read {path} ({reason})") from None
+    return text.rstrip("\r\n")
+
+
+class _FileEnvSource(PydanticBaseSettingsSource):
+    """``TOKIWA_<SETTING>_FILE=/run/secrets/name`` reads a string setting from a file (audit #108).
+
+    Lets keys, tokens and database URLs come from Docker / Compose secrets instead of environment variables, which
+    ``docker inspect`` and ``/proc/<pid>/environ`` show. Setting both the variable and its ``_FILE`` form is an error
+    (the official postgres image behaves the same), unless the direct one is empty.
+    """
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:  # pragma: no cover
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        from tokiwa.config_diagnostics import FILE_SUFFIX, resolve_file_env  # imports this module
+
+        out: dict[str, Any] = {}
+        direct = {k.upper(): v for k, v in os.environ.items()}
+        for name, raw in os.environ.items():
+            if not raw.strip():
+                continue
+            path = resolve_file_env(name)
+            if path is None:
+                continue
+            plain = name[: -len(FILE_SUFFIX)]
+            if direct.get(plain.upper(), "") != "":
+                raise ValueError(f"both {plain} and {name} are set: use one of them")
+            node = out
+            for part in path[:-1]:
+                node = node.setdefault(part, {})
+            node[path[-1]] = read_secret_file(name, raw)
+        return out
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    from tokiwa.config_diagnostics import config_issues  # imports this module
+
+    issues = config_issues(settings)
+    for issue in issues:
+        log.warning("config: %s", issue)
+    if issues and strict_config_enabled():
+        raise ConfigError(
+            f"{len(issues)} configuration problem(s) and {STRICT_CONFIG_ENV} is set: "
+            + "; ".join(str(i) for i in issues)
+            + " (inspect with `tokiwa config show`)"
+        )
+    return settings
 
 
 def reset_settings_cache() -> None:
@@ -553,8 +666,24 @@ def reset_settings_cache() -> None:
     get_settings.cache_clear()
 
 
+_unreadable_key_files: set[str] = set()
+
+
 def anthropic_api_key(settings: Settings | None = None) -> str | None:
+    """``llm.anthropic_api_key``, else ``ANTHROPIC_API_KEY``, else the file named by ``ANTHROPIC_API_KEY_FILE``."""
     s = settings or get_settings()
     if s.llm.anthropic_api_key is not None:
         return s.llm.anthropic_api_key.get_secret_value() or None
-    return os.environ.get("ANTHROPIC_API_KEY") or None
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    key_file = os.environ.get("ANTHROPIC_API_KEY_FILE", "").strip()
+    if not key_file:
+        return None
+    try:
+        return read_secret_file("ANTHROPIC_API_KEY_FILE", key_file) or None
+    except ValueError as exc:
+        if key_file not in _unreadable_key_files:  # checked on every LLM call: warn once per path
+            _unreadable_key_files.add(key_file)
+            log.warning("%s", exc)
+        return None

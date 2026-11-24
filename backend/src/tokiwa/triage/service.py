@@ -9,7 +9,10 @@ Pipeline for one alert / incident:
 3. Evidence validation: ids that were not shown are removed and recorded in ``rejected_evidence_ids``. With no
    valid id left, retry once with an explicit reminder; still nothing -> rule verdict.
 4. Budget exceeded / refusal / invalid output -> rule verdict (detection never stops).
-5. Store a :class:`TriageRecord` on the row (alerts -> ``status=triaged``), publish ``*.updated``.
+5. Store a :class:`TriageRecord` on the row (alerts -> ``status=triaged``), publish ``*.updated``. Alert status
+   writes are conditional UPDATEs (``new -> triaging``, ``new|triaging -> triaged``): a status a human set while
+   triage was running (false_positive, acknowledged, resolved) is never overwritten (lost update found with
+   audit #166).
 6. ``recommended_actions`` -> ``respond.service.propose_action`` only for targets that are source IPs seen in
    the evidence. Proposals always go through the human approval workflow (respond module).
 
@@ -28,7 +31,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 
 from tokiwa.bus import bus
 from tokiwa.config import TriageSettings, get_settings
@@ -63,6 +66,15 @@ from tokiwa.triage.fallback import RULES_PROMPT_VERSION, rule_based_triage
 from tokiwa.triage.prompts import TRIAGE_ALERT, TRIAGE_INCIDENT, build_user_prompt, system_prompt
 
 log = logging.getLogger(__name__)
+
+# Alert statuses triage itself sets; anything else was set by a human and is left alone.
+_TRIAGE_OWNED = (AlertStatus.NEW, AlertStatus.TRIAGING)
+
+
+def _rowcount(result: Any) -> int:
+    """Rows matched by an UPDATE (``Result`` is typed without ``rowcount``; the cursor result has it)."""
+    return int(getattr(result, "rowcount", 0) or 0)
+
 
 TIER_RULES = "rules"
 _SIGNATURE_TAGS = frozenset({scoring.TAG_KEV, scoring.TAG_AI_AGENT, scoring.TAG_PORT_REQUEST})
@@ -229,15 +241,28 @@ class TriageService:
             row = await session.get(AlertRow, alert_id)
             if row is None:
                 return None
-            if auto and (row.triage is not None or row.status not in (AlertStatus.NEW, AlertStatus.TRIAGING)):
+            if auto and (row.triage is not None or row.status not in _TRIAGE_OWNED):
                 return Alert.model_validate(row)
+            status_at_start = AlertStatus(row.status)
             subject = alert_subject(row)
             ctx = await load_context(
                 session, subject, select_alert_evidence(row.evidence_event_ids or [], cfg.max_evidence_events)
             )
             use_llm = force or wants_llm(subject.severity, cfg)
-            if use_llm and ctx.evidence_ids and row.status == AlertStatus.NEW:
-                row.status = AlertStatus.TRIAGING
+            if use_llm and ctx.evidence_ids and status_at_start == AlertStatus.NEW:
+                # Never ``row.status = ...``: that UPDATE is unconditional and would overwrite a status an analyst
+                # committed since the read above (the lost update).
+                moved = await session.execute(
+                    update(AlertRow)
+                    .where(AlertRow.id == alert_id, AlertRow.status == AlertStatus.NEW.value)
+                    .values(status=AlertStatus.TRIAGING.value)
+                    .execution_options(synchronize_session=False)
+                )
+                if auto and _rowcount(moved) == 0:
+                    # Someone changed the status meanwhile (e.g. marked it false_positive): the automatic run
+                    # yields to the human and spends no LLM call on it.
+                    await session.refresh(row)
+                    return Alert.model_validate(row)
 
         record = await self._verdict(
             subject,
@@ -250,15 +275,32 @@ class TriageService:
         )
 
         async with session_scope() as session:
-            row = await session.get(AlertRow, alert_id)
+            # One statement: the verdict is always stored; the status moves to triaged only if triage still owns
+            # it (new / triaging), so a human decision made during the LLM call stays as it is.
+            done = await session.execute(
+                update(AlertRow)
+                .where(AlertRow.id == alert_id)
+                .values(
+                    triage=record.model_dump(mode="json"),
+                    status=case(
+                        (AlertRow.status.in_([s.value for s in _TRIAGE_OWNED]), AlertStatus.TRIAGED.value),
+                        else_=AlertRow.status,
+                    ),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if _rowcount(done) == 0:
+                return None
+            row = await session.get(AlertRow, alert_id, populate_existing=True)
             if row is None:
                 return None
-            row.triage = record.model_dump(mode="json")
-            if row.status in (AlertStatus.NEW, AlertStatus.TRIAGING):
-                row.status = AlertStatus.TRIAGED
-            await session.flush()
             alert = Alert.model_validate(row)
         await bus.publish("alert.updated", alert)
+        if alert.status == AlertStatus.FALSE_POSITIVE and status_at_start != AlertStatus.FALSE_POSITIVE:
+            # Marked a false positive while this run was in flight: do not put a block / rate limit on the source
+            # the analyst just cleared. (A forced re-triage of an alert that already was one proposes as before.)
+            log.info("triage: alert %s marked false_positive during triage; proposals withheld", alert_id)
+            return alert
         await self._propose_actions(record, ctx, alert_id=alert.id, incident_id=alert.incident_id)
         return alert
 
