@@ -63,6 +63,9 @@ Gate がロードバランサの背後にある場合は、`--trust-forwarded-fo
 **WebSocket が使えなくなった**
 Gate v0.1 は WebSocket に対応していません（501 を返します）。WebSocket のパスは Gate を通さずにルーティングしてください。
 
+**Sigma ルールのアラートが 1 件も出ない**
+起動ログに `sigma rule dir ... not found` または `sigma: no valid rule file` の ERROR が無いか確認します。ログイン中の UI は 30 秒ごとに `/api/v1/health` を呼んでいるので、ブラウザの開発者ツール（ネットワーク）でその応答を見ます（curl なら `/api/v1/auth/login` で得た `access_token` を `Authorization: Bearer` に付けて呼びます）。`checks.sigma.status` が `degraded` になっていれば、ルールディレクトリが見つからないか、有効なルールが 1 件も読めていません（管理者には探したパスも表示されます）。`detection.sigma_rule_dirs`（`TOKIWA_DETECTION__SIGMA_RULE_DIRS`）を絶対パスで設定してください。ログインしていない `/health` は、監視や攻撃者に内部の状態を見せないよう、常に `{"status": "ok"}` を返します。
+
 ## 対処
 
 **承認したのに遮断されない**

@@ -63,6 +63,9 @@ curl -s http://localhost:8788/api/v1/auth/status
 **WebSocket 无法使用了**
 Gate v0.1 不支持 WebSocket（返回 501）。请让 WebSocket 的路径不经过 Gate 进行路由。
 
+**Sigma 规则从不产生告警**
+检查启动日志中是否有 `sigma rule dir ... not found` 或 `sigma: no valid rule file` 的 ERROR。登录后的 UI 每 30 秒调用一次 `/api/v1/health`，可以在浏览器开发者工具（网络）中查看其响应（使用 curl 时，把 `/api/v1/auth/login` 返回的 `access_token` 作为 `Authorization: Bearer` 发送）。如果 `checks.sigma.status` 为 `degraded`，说明找不到规则目录，或一条有效规则也没有读到（管理员还能看到查找过的路径）。请用绝对路径设置 `detection.sigma_rule_dirs`（`TOKIWA_DETECTION__SIGMA_RULE_DIRS`）。未登录时 `/health` 始终返回 `{"status": "ok"}`，以免向监控或攻击者暴露内部状态。
+
 ## 处置
 
 **已批准但没有封禁**

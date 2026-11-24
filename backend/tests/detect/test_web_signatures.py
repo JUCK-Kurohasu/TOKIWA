@@ -38,6 +38,10 @@ EXPECTED_IDS = {
     "web.credential_stuffing",
     "web.request_flood",
     "web.inspection_evasion",
+    "web.header_anomaly",
+    "web.uninspectable_body",
+    "web.route_override",
+    "web.deceptive_unicode",
 }
 
 
@@ -84,7 +88,10 @@ def test_every_signature_detector_has_positive_cases() -> None:
     stateful = {"web.error_burst", "web.credential_stuffing", "web.request_flood"}
     # needs >8 KiB / >128-leaf bodies: covered by tests/detect/test_web_limits.py
     long_inputs = {"web.inspection_evasion"}
-    assert covered == EXPECTED_IDS - stateful - long_inputs
+    # read what the Gate records (tags / labels / raw header block), or need code points a JSON fixture would
+    # carry as invisible characters: tests/detect/test_web_anomaly.py
+    gate_recorded = {"web.header_anomaly", "web.uninspectable_body", "web.deceptive_unicode"}
+    assert covered == EXPECTED_IDS - stateful - long_inputs - gate_recorded
 
 
 @pytest.mark.parametrize(
