@@ -3,11 +3,31 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-11-23（監査の系統 G / I / K と、A・B・C・D・E・F・H の工数 S を修正。ブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#179（ドラフト、未マージ））
+最終更新: 2026-11-24（監査修正 第 1〜3 弾は PR JUCK-Kurohasu/TOKIWA#179 でマージ済み。第 4 弾はブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#180（ドラフト））
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
+
+## 監査修正 第 4 弾（2026-11-23〜24）— 系統 J 運用 / 第 1〜3 弾の残り（検知シグナル・UI）
+
+- **何をしたか**: PR JUCK-Kurohasu/TOKIWA#179（第 1〜3 弾）マージ後、PR JUCK-Kurohasu/TOKIWA#180 で 3 レーン（ops / detect-followups / frontend-followups）。
+  詳細は `docs/handoff/2026-11-23-audit-<レーン>.md`。
+- **完全（8）**: #100（SSE は 60 秒・1 回限りのチケット）、#71、#108（`*_FILE` で秘密をファイルから）、#132（取り下げ済みバッジ）、
+  #141 #147 #150 #177（第 3 弾で残った検知シグナル: `web.uninspectable_body` / `web.route_override` / `web.deceptive_unicode` / Sigma 0 件で `/health` degraded）。
+- **部分（9）**: #161（`/api/v1/system` の設定ハッシュ）、#104（gitleaks・mem_limit）、#110（サーバーには `.env` 全体のまま。ファイル渡しは opt-in の例）、
+  #105 / #109（nginx・postgres の read_only、**起動未検証**）、#140（`web.header_anomaly` の閾値が推奨と違う — 要判断）、#166 / #173（FP 率の集計・良性コーパスの CI 化）、
+  #40（低信頼の証拠だけからは提案しない・トークン単位の自己監視）。
+- **Issue 未登録の修正**: 自動トリアージ中に誤検知へ変えると状態が戻る lost update（条件付き UPDATE で修正、旧コードで 3/3 再現）。
+  依存監査で見つかった opentelemetry-api の ReDoS（GHSA-mf5v-w3w3-f6cg）→ 1.45.2 に更新。
+- **既定動作の変更**: UI の SSE はチケット方式（旧 `?access_token=` は警告付きで受け付ける）、未知の設定キー・存在しない `TOKIWA_CONFIG` を警告
+  （`TOKIWA_STRICT_CONFIG=1` で起動拒否。`tokiwa config show`）、本番 compose の Gate は自分の変数だけ、ラボは Docker Engine 26 以上（volume subpath）、
+  イメージに空の `/etc/tokiwa/tokiwa.yaml`、`pids_limit`、ベースイメージ・CI ツールを digest 固定（レジストリから取得した値）+ Dependabot、
+  誤検知の一括変更もダイアログを経由、トリアージは人間が設定した状態を上書きしない。
+- **要判断（ユーザー）**: (1) #140 の閾値（41〜64 行は low。推奨は >40 で medium）。(2) 旧 `?access_token=` をいつ廃止するか。
+  (3) postgres の cap_drop 構成は公式 entrypoint から導いたが起動未検証（このクラウド環境では `docker run` が拒否された）。(4) Dependabot が Dockerfile の `ARG` 既定値の digest を更新するか未確認。
+- **チェック**: backend 2077 passed（約 175 秒）、ruff・format 緑、mypy 既知 4 件のみ、frontend 緑、`check_wiki.py` OK。
+- **新しい約束**: 設定ではない `TOKIWA_*` 環境変数を足したら `OPERATIONAL_ENV_VARS` に登録する（しないと全環境で警告が出る）。
 
 ## 監査修正 第 3 弾（2026-11-22〜23）— 系統 A Gate / B Web 検知 / H センサー・インテル（工数 S）
 
@@ -50,7 +70,7 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
   (2) `notify.include_summary=false` は人間が書いた理由も通知から落とす。(3) #30 を Closes にするか。(4) `<img src=/.env>` の誘発で `web.sensitive_file_probe`（high）が立ち
   rate_limit が提案される件は未対応（detect-web 側で `deception.provenance.induced_by` を使えば下げられる）。(5) Sec-Fetch を送らないリンクプレビュー等のトリップは critical のまま。
 - **チェック**: 下の第 1 弾と同じ項目をすべて通した（件数は PR 本文）。実 LLM・実 ARTEX・実 Slack/Discord の表示は未検証（`TODO(verify)`）。
-- **次の一手（案）**: 第 3 弾で A・B・H の工数 S を実施済み（上の節）。残りは系統 J 運用（#71 #161 #100 #104〜#111。compose / Dockerfile の硬化は Docker で検証が要る。#161 は全モジュールの設定読込に影響）と、各系統の工数 M / L、部分対応の残り。
+- **次の一手（案）**: 監査の工数 S はほぼ一巡した（第 4 弾で J と残りの検知シグナル・UI も実施）。残りは各系統の工数 M / L（#18 #46 #47 のセッション単位、#174 の評価設計、#162 の移行機構 等）と、各弾の「部分」の残り・要判断。セッション単位（IP + UA）系は C・E・B・F・A をまたぐので、先に設計を決めてから分担する。
 
 ## 監査修正 第 1 弾（2026-11-21〜22）— 系統 G API・認証 / I フロントエンド / K 評価・文書
 
