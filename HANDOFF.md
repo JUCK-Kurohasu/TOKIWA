@@ -22,10 +22,11 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
   依存監査で見つかった opentelemetry-api の ReDoS（GHSA-mf5v-w3w3-f6cg）→ 1.45.2 に更新。
 - **既定動作の変更**: UI の SSE はチケット方式（旧 `?access_token=` は警告付きで受け付ける）、未知の設定キー・存在しない `TOKIWA_CONFIG` を警告
   （`TOKIWA_STRICT_CONFIG=1` で起動拒否。`tokiwa config show`）、本番 compose の Gate は自分の変数だけ、ラボは Docker Engine 26 以上（volume subpath）、
-  イメージに空の `/etc/tokiwa/tokiwa.yaml`、`pids_limit`、ベースイメージ・CI ツールを digest 固定（レジストリから取得した値）+ Dependabot、
+  イメージに空の `/etc/tokiwa/tokiwa.yaml`、`pids_limit`、ベースイメージ・CI ツールを digest 固定（レジストリから取得した値）。**Dependabot はリポジトリで停止中（エラーになるため）**なので `.github/dependabot.yml` は入れず、
+  `deploy/ci/dependabot.yml.disabled` に設定を残した（依存の脆弱性は CI の `dependency-audit.yml` で検出）、
   誤検知の一括変更もダイアログを経由、トリアージは人間が設定した状態を上書きしない。
 - **要判断（ユーザー）**: (1) #140 の閾値（41〜64 行は low。推奨は >40 で medium）。(2) 旧 `?access_token=` をいつ廃止するか。
-  (3) postgres の cap_drop 構成は公式 entrypoint から導いたが起動未検証（このクラウド環境では `docker run` が拒否された）。(4) Dependabot が Dockerfile の `ARG` 既定値の digest を更新するか未確認。
+  (3) postgres の cap_drop 構成は公式 entrypoint から導いたが起動未検証（このクラウド環境では `docker run` が拒否された）。(4) Dependabot を再開するか（再開するなら `deploy/ci/dependabot.yml.disabled` を `.github/dependabot.yml` へ。`ARG` 既定値の digest を更新するかは未確認）。
 - **チェック**: backend 2077 passed（約 175 秒）、ruff・format 緑、mypy 既知 4 件のみ、frontend 緑、`check_wiki.py` OK。
 - **新しい約束**: 設定ではない `TOKIWA_*` 環境変数を足したら `OPERATIONAL_ENV_VARS` に登録する（しないと全環境で警告が出る）。
 

@@ -357,9 +357,11 @@ tokiwa.example.internal {
 - ビルドコンテキストはリポジトリ直下。除外は `deploy/Dockerfile.dockerignore`（`.env`・`data/`・`node_modules`・`.venv` 等）。
 - ベースイメージ・uv の更新: タグと digest を一緒に上げて `make docker docker-smoke`。digest は `docker pull <イメージ>:<タグ>`
   の出力の `Digest: sha256:…`（インデックスの digest）を使う。uv は `backend/uv.lock` を作った版と揃える
-  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。Dependabot（`.github/dependabot.yml`）が docker / docker-compose /
-  github-actions / uv / npm の更新 PR を週次で出す。TODO(verify): Dockerfile の `ARG` 既定値にあるイメージを Dependabot が
-  更新するか（しなければ手動で上げる）。
+  （CI の `astral-sh/setup-uv` の `version` も同じ値に）。このリポジトリでは Dependabot を止めている（エラーになるため）ので、
+  依存とイメージの更新は手動で行い、脆弱性は CI の `dependency-audit.yml`（pip-audit / npm audit）で検出する。
+  有効にする場合の設定は `deploy/ci/dependabot.yml.disabled`（`.github/dependabot.yml` に置けば有効。docker / docker-compose /
+  github-actions / uv / npm を週次・7 日の cooldown）。TODO(verify): Dockerfile の `ARG` 既定値にあるイメージを
+  Dependabot が更新するか。
 
 ## 11. 開発補助・CI
 

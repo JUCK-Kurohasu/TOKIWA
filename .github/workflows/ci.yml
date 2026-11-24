@@ -1,7 +1,8 @@
 # TOKIWA CI: backend (ruff + pytest), frontend (typecheck + lint + build), Docker image (build + smoke test),
 # and infra lint (actionlint / hadolint / shellcheck). Needs no secrets: the LLM is always the mock provider.
 # Third-party actions are pinned to commit SHAs (version in the trailing comment), tool images to tag + digest.
-# Dependency vulnerability audit: dependency-audit.yml; version updates: .github/dependabot.yml.
+# Dependency vulnerability audit: dependency-audit.yml. Dependabot is off for this repository; a ready-made config is
+# kept at deploy/ci/dependabot.yml.disabled.
 name: CI
 
 on:

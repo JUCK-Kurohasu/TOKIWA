@@ -1,3 +1,5 @@
+# DISABLED: the repository owner has Dependabot turned off (it was failing). This file is kept so it can be
+# re-enabled by copying it to .github/dependabot.yml. Not read by GitHub at this path.
 # Dependabot version updates (audit #104). Security updates are enabled in the repository settings and are not
 # delayed by the cooldown below. Ecosystem names and options: GitHub docs "Dependabot options reference".
 #
