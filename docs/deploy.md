@@ -63,7 +63,17 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 ### コンテナのハードニング（compose 既定）
 
 `read_only: true`（書き込みは `/data` と tmpfs `/tmp` のみ）、`cap_drop: [ALL]`、`no-new-privileges`、
-`init: true`、ログローテーション（json-file 10 MB × 5）。
+`pids_limit: 512`（スレッドも数える。サーバー・Gate の通常の使用量より十分大きい）、`init: true`、ログローテーション（json-file 10 MB × 5）。
+
+- postgres（監査 #109）: `cap_drop: [ALL]` のうえで公式 entrypoint が root で行う処理に要るものだけ `cap_add`（CHOWN・DAC_OVERRIDE・
+  FOWNER = データ / ソケットのディレクトリ作成・chmod・chown、SETUID・SETGID = gosu で postgres ユーザーへ切替）と `no-new-privileges`。
+  一覧は `docker-entrypoint.sh`（docker-library/postgres の 18/trixie）を読んで決めた。TODO(verify): この構成での起動は未確認
+  （CI のスモークテストは postgres プロファイルを動かさない）。起動しない場合は `cap_drop` / `cap_add` を外して報告してほしい。
+  `read_only` はソケット用の tmpfs などイメージの書き込み先を確かめていないので付けていない。
+- メモリ上限（`mem_limit`）は付けていない: 低すぎると攻撃を受けている最中に SIEM 自身が OOM で落ち、検知が黙って止まる。
+  ホストの規模に合わせて運用側で設定する（目安は §2 のメモリ）。
+- ラボ（`lab/compose.yaml`、監査 #105）も同じ: TOKIWA の各サービスと victim は `read_only`・tmpfs `/tmp`・`cap_drop: [ALL]`・
+  `no-new-privileges`・`pids_limit`。nginx は `no-new-privileges` と `pids_limit` のみ（公式イメージの書き込み先・必要な権限を未確認）。
 
 ## 4. センサー・他ロールを同じイメージで動かす
 

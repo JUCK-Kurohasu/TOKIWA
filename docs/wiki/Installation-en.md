@@ -40,6 +40,9 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 Read-only root filesystem (writes go only to `/data` and `/tmp`), all capabilities dropped,
 `no-new-privileges`, a non-root user (uid/gid 10001), and log rotation (10 MB × 5).
+There is also a process limit (`pids_limit: 512`). PostgreSQL keeps only the capabilities its start-up needs (CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID)
+and runs with `no-new-privileges`. No memory limit is set (one that is too low would make TOKIWA crash while under attack; set it for your host).
+The TOKIWA services and the victim in the lab (`lab/compose.yaml`) have the same hardening.
 
 ### Passing secrets
 

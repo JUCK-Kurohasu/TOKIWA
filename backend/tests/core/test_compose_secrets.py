@@ -65,3 +65,20 @@ def test_secrets_example_uses_file_variables() -> None:
     }
     assert doc["services"]["gate"]["environment"] == {"TOKIWA_GATE__TOKEN_FILE": "/run/secrets/gate_token"}
     assert set(doc["secrets"]) == {"anthropic_api_key", "database_url", "postgres_password", "gate_token"}
+
+
+def test_lab_and_postgres_hardening() -> None:
+    """Audits #105 / #109: the lab gets deploy/compose.yaml's hardening; postgres drops capabilities."""
+    lab = _compose("lab/compose.yaml")
+    services = lab["services"]
+    for name in ("tokiwa-init", "tokiwa", "gate", "sim", "sim-ingest", "agent", "victim"):
+        svc = services[name] if name == "victim" else {**lab["x-tokiwa"], **services[name]}
+        assert svc["read_only"] is True, name
+        assert svc["cap_drop"] == ["ALL"], name
+        assert "no-new-privileges:true" in svc["security_opt"], name
+        assert svc["pids_limit"] > 0, name
+    assert "no-new-privileges:true" in services["nginx"]["security_opt"]
+    postgres = _compose("deploy/compose.yaml")["services"]["postgres"]
+    assert postgres["cap_drop"] == ["ALL"]
+    assert set(postgres["cap_add"]) == {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
+    assert "no-new-privileges:true" in postgres["security_opt"]

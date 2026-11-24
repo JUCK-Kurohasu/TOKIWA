@@ -40,6 +40,9 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 只读根文件系统（仅 `/data` 和 `/tmp` 可写）、删除全部 capabilities、
 `no-new-privileges`、非 root 用户（uid/gid 10001）、日志轮转（10 MB × 5）。
+另外还设置了进程数上限（`pids_limit: 512`）。PostgreSQL 只保留启动过程所需的 capabilities（CHOWN、DAC_OVERRIDE、FOWNER、SETUID、SETGID），
+并启用 `no-new-privileges`。未设置内存上限（过低会导致 TOKIWA 在遭受攻击时崩溃，请根据主机自行设置）。
+实验环境（`lab/compose.yaml`）中的 TOKIWA 各服务和 victim 也采用相同的加固。
 
 ### 密钥的传递方式
 

@@ -40,6 +40,9 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 読み取り専用ルートファイルシステム（書き込みは `/data` と `/tmp` のみ）、全ケーパビリティの削除、
 `no-new-privileges`、非 root ユーザー（uid/gid 10001）、ログローテーション（10 MB × 5）。
+プロセス数の上限（`pids_limit: 512`）も付けています。PostgreSQL は起動処理に要る権限（CHOWN・DAC_OVERRIDE・FOWNER・SETUID・SETGID）だけを残し、
+`no-new-privileges` を付けています。メモリ上限は付けていません（低すぎると攻撃を受けている最中に TOKIWA が落ちるため、ホストに合わせて設定してください）。
+ラボ（`lab/compose.yaml`）の TOKIWA と victim にも同じハードニングを付けています。
 
 ### 秘密の渡し方
 

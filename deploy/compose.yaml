@@ -25,6 +25,7 @@ x-tokiwa-image: &tokiwa-image
     - ALL
   security_opt:
     - no-new-privileges:true
+  pids_limit: 512 # threads count too; far above what the server or the gate use
   logging:
     driver: json-file
     options:
@@ -66,6 +67,21 @@ services:
     image: postgres:18.6-trixie@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
     profiles: ["postgres"]
     restart: unless-stopped
+    # Hardening (audit #109). The official entrypoint starts as root, creates / chmods / chowns the data and socket
+    # directories (CHOWN, DAC_OVERRIDE, FOWNER) and switches to the postgres user with gosu (SETUID, SETGID); the
+    # server itself needs none. List taken from docker-entrypoint.sh (docker-library/postgres, 18/trixie).
+    # TODO(verify): start-up with these capabilities was not run here. read_only is left off: it needs tmpfs for
+    # the socket directory and whatever else the image writes, which was not verified.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tokiwa}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
