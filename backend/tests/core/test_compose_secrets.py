@@ -59,6 +59,7 @@ def test_secrets_example_uses_file_variables() -> None:
     assert doc["services"]["tokiwa"]["environment"] == {
         "TOKIWA_LLM__ANTHROPIC_API_KEY_FILE": "/run/secrets/anthropic_api_key",
         "TOKIWA_DATABASE__URL_FILE": "/run/secrets/database_url",
+        "TOKIWA_DATABASE__URL": "",  # blanks the image's baked-in SQLite URL
     }
     assert doc["services"]["postgres"]["environment"] == {
         "POSTGRES_PASSWORD_FILE": "/run/secrets/postgres_password"

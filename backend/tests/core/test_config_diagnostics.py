@@ -340,6 +340,20 @@ def test_file_suffix_errors_never_show_contents(
     assert code == 2 and "TOKIWA_LLM__ANTHROPIC_API_KEY_FILE: cannot read" in out
 
 
+def test_file_suffix_with_the_images_baked_in_database_url(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """deploy/Dockerfile sets TOKIWA_DATABASE__URL; compose.secrets.example.yaml must blank it for *_URL_FILE."""
+    url = tmp_path / "database_url"
+    url.write_text("postgresql+asyncpg://tokiwa:pw@postgres:5432/tokiwa\n", encoding="utf-8")
+    monkeypatch.setenv("TOKIWA_DATABASE__URL", "sqlite+aiosqlite:////data/tokiwa.db")  # as in the image
+    monkeypatch.setenv("TOKIWA_DATABASE__URL_FILE", str(url))
+    with pytest.raises(ValueError, match="both TOKIWA_DATABASE__URL and TOKIWA_DATABASE__URL_FILE"):
+        Settings()
+    monkeypatch.setenv("TOKIWA_DATABASE__URL", "")  # what the example override sets
+    assert Settings().database.url == "postgresql+asyncpg://tokiwa:pw@postgres:5432/tokiwa"
+
+
 def test_file_suffix_only_for_string_settings_and_real_fields_win() -> None:
     issues = env_issues(environ={"TOKIWA_SERVER__PORT_FILE": "/x", "TOKIWA_GATE__TOKEN_FILE": "/run/t"})
     assert [i.key for i in issues] == ["TOKIWA_SERVER__PORT_FILE"]  # gate.token_file is a setting of its own

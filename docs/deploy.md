@@ -165,6 +165,8 @@ docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file 
   （Compose 仕様: file ソースでは `uid` / `gid` / `mode` は未実装）。ホスト側でコンテナのユーザーが読めるようにする
   （TOKIWA は uid 10001。postgres の公式イメージは root で起動して `POSTGRES_PASSWORD_FILE` を読み、`postgres`（uid 999）に切り替える）。
 - `.env` から同じ値（`ANTHROPIC_API_KEY`・`TOKIWA_DATABASE__URL`・`POSTGRES_PASSWORD`・`TOKIWA_GATE__INGEST_TOKEN`）を消す。
+  イメージ自体が `TOKIWA_DATABASE__URL`（SQLite）を設定しているので、`TOKIWA_DATABASE__URL_FILE` を使うときは例のとおり
+  `TOKIWA_DATABASE__URL: ""` で空にする（空でないと「両方設定」で起動しない。`environment:` は `env_file` より優先される）。
   postgres サービスの `POSTGRES_PASSWORD` は空になり、公式イメージは空の変数を未設定とみなして `POSTGRES_PASSWORD_FILE` を使う。
 - アプリ用の DB ロールを PostgreSQL の管理ユーザー（`POSTGRES_USER`）と分けるのが望ましい（未対応。手順は運用側で）。
 
@@ -266,7 +268,7 @@ PostgreSQL はホストに公開しない（compose ネットワーク内のみ�
 - SSE（`/api/v1/stream`）はバッファリングを切り、タイムアウトを長くする。
 - SSE の URL には 1 回限り・60 秒の券（`?ticket=`）が載る（監査 #100。以前は 12 時間有効な JWT が `?access_token=` で載り、
   プロキシのアクセスログに残った）。券は使用済みなら無価値だが、念のため stream の location はアクセスログを切る（下の nginx 例）か
-  クエリを記録しない書式にする。旧形式 `?access_token=` を使うクライアントが残っていると、TOKIWA が WARNING を出す。
+  クエリを伏せる（下の Caddy 例の `format filter` + `request>uri query`。構文は Caddy 公式ドキュメントの `log` ディレクティブ）。旧形式 `?access_token=` を使うクライアントが残っていると、TOKIWA が WARNING を出す。
 - プロキシが別ホスト/別コンテナの場合、uvicorn に `X-Forwarded-*` を信頼させる: `FORWARDED_ALLOW_IPS=<proxy の IP/CIDR>`。
 - TOKIWA 自体は `127.0.0.1:8788`（compose 既定）に置き、TLS はプロキシで終端する。
 - セキュリティヘッダ（CSP・`X-Frame-Options: DENY`・`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer`、
@@ -318,6 +320,15 @@ tokiwa.example.internal {
     }
     reverse_proxy 127.0.0.1:8788 {
         flush_interval -1        # SSE をそのまま流す
+    }
+    # アクセスログ（log を書いたときだけ出る）を残すなら SSE の券をクエリから伏せる（監査 #100）
+    log {
+        format filter {
+            request>uri query {
+                replace ticket REDACTED
+                replace access_token REDACTED
+            }
+        }
     }
 }
 ```

@@ -115,7 +115,7 @@ services:
       TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
       # From .env, only what the gate reads (a key without a value is taken from .env, and left out when unset there).
       # Prefer TOKIWA_GATE__TOKEN_FILE with a Compose secret over TOKIWA_GATE__INGEST_TOKEN (compose.secrets.example.yaml).
-      TOKIWA_ENV:
+      TOKIWA_ENV: ${TOKIWA_ENV:-prod} # the image's default; a value-less key might unset it
       TOKIWA_LOG_LEVEL:
       TOKIWA_GATE__INGEST_TOKEN:
       TOKIWA_GATE__TOKEN_FILE:
