@@ -466,6 +466,7 @@ class DeceptiveUnicodeDetector(Detector):
         for location, param, text in fields:
             if text.isascii():
                 continue
+            cps: list[int]
             if budget <= 0:  # earlier fields used up the event's budget: that alone is abnormal
                 kinds, cps = [EXCESSIVE], []
             else:
