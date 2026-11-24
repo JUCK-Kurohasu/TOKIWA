@@ -8,16 +8,16 @@
 #   postgres  PostgreSQL instead of the default SQLite file (also set TOKIWA_DATABASE__URL, see .env.example)
 #   gate      TOKIWA Gate reverse proxy in front of an upstream app (needs an ingest token)
 #
+# Secrets as files instead of environment variables: deploy/compose.secrets.example.yaml (docs/deploy.md §5).
 # The lab stack (victim app + simulator) lives in lab/compose.yaml. Details: docs/deploy.md.
 name: tokiwa
 
+# Shared by tokiwa and gate. No env_file here: the whole .env (JWT key, LLM / intel keys, DB password) goes to the
+# tokiwa server only; the gate, which faces attack traffic, gets the few variables it reads (audit #71).
 x-tokiwa-image: &tokiwa-image
   image: ${TOKIWA_IMAGE:-tokiwa:local}
   init: true
   restart: unless-stopped
-  env_file:
-    - path: ../.env
-      required: false
   read_only: true
   tmpfs:
     - /tmp
@@ -38,6 +38,11 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     command: ["serve"]
+    # Every TOKIWA_* setting (and ANTHROPIC_API_KEY) from .env. Keep secrets out of it where you can: *_FILE + Compose
+    # secrets (deploy/compose.secrets.example.yaml) keep them out of `docker inspect` (audit #108 / #110).
+    env_file:
+      - path: ../.env
+        required: false
     ports:
       # Bound to loopback by default: put a TLS reverse proxy in front (docs/deploy.md) or set TOKIWA_BIND.
       - "${TOKIWA_BIND:-127.0.0.1}:${TOKIWA_PORT:-8788}:8788"
@@ -92,6 +97,28 @@ services:
       TOKIWA_GATE__LISTEN_PORT: "8080"
       TOKIWA_GATE__UPSTREAM: ${TOKIWA_GATE__UPSTREAM:-http://host.docker.internal:3000}
       TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
+      # From .env, only what the gate reads (a key without a value is taken from .env, and left out when unset there).
+      # Prefer TOKIWA_GATE__TOKEN_FILE with a Compose secret over TOKIWA_GATE__INGEST_TOKEN (compose.secrets.example.yaml).
+      TOKIWA_ENV:
+      TOKIWA_LOG_LEVEL:
+      TOKIWA_GATE__INGEST_TOKEN:
+      TOKIWA_GATE__TOKEN_FILE:
+      TOKIWA_GATE__SENSOR_ID:
+      TOKIWA_GATE__CAPTURE_BODY_BYTES:
+      TOKIWA_GATE__BATCH_SIZE:
+      TOKIWA_GATE__FLUSH_INTERVAL_SECONDS:
+      TOKIWA_GATE__POLICY_REFRESH_SECONDS:
+      TOKIWA_GATE__TRUST_FORWARDED_FOR:
+      TOKIWA_GATE__MAX_REQUEST_HEADERS:
+      TOKIWA_GATE__FORWARD_CLIENT_HEADERS:
+      TOKIWA_GATE__TARPIT_MAX_CONCURRENT:
+      TOKIWA_GATE__TARPIT_MAX_PER_CLIENT:
+      TOKIWA_LLM__REDACTION__ENABLED: # the gate masks captured headers / bodies with these
+      TOKIWA_LLM__REDACTION__SENSITIVE_HEADERS:
+      TOKIWA_LLM__REDACTION__MASK_EMAILS:
+      TOKIWA_LLM__REDACTION__MASK_IPS:
+      TOKIWA_LLM__REDACTION__MAX_FIELD_CHARS:
+      TOKIWA_DECEPTION__CANARY_HEADER:
     tmpfs:
       - /tmp
       - /data # the gate keeps no state; avoids an anonymous volume for the image's VOLUME

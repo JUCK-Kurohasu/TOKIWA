@@ -166,6 +166,38 @@ def _resolve_env(name: str) -> _Resolved:
     return _Resolved(path)  # pragma: no cover - loop always returns
 
 
+FILE_SUFFIX = "_FILE"
+
+
+def _leaf_annotation(path: tuple[str, ...]) -> Any:
+    model: type[BaseModel] = Settings
+    for part in path[:-1]:
+        sub = section_model(model.model_fields[part].annotation)
+        assert sub is not None
+        model = sub
+    return model.model_fields[path[-1]].annotation
+
+
+def _is_string_leaf(annotation: Any) -> bool:
+    return _unwrap(annotation) in (str, SecretStr)
+
+
+def resolve_file_env(name: str) -> tuple[str, ...] | None:
+    """``TOKIWA_<SETTING>_FILE`` -> path of the string setting whose value it reads from a file (audit #108).
+
+    A name that is a setting itself (``TOKIWA_GATE__TOKEN_FILE`` = ``gate.token_file``) is never a file reference.
+    Only string settings qualify (keys, tokens, URLs): lists and numbers keep their JSON / text forms.
+    """
+    if not name.upper().startswith(ENV_PREFIX) or not name.upper().endswith(FILE_SUFFIX):
+        return None
+    if _resolve_env(name).error is None:
+        return None
+    base = _resolve_env(name[: -len(FILE_SUFFIX)])
+    if base.error is not None or not base.path or not _is_string_leaf(_leaf_annotation(base.path)):
+        return None
+    return base.path
+
+
 def _single_underscore_hint(part: str) -> str | None:
     """``TOKIWA_LLM_PROVIDER`` -> ``did you mean TOKIWA_LLM__PROVIDER?`` (one underscore instead of two)."""
     for section, info in Settings.model_fields.items():
@@ -204,8 +236,21 @@ def env_issues(
         if _is_operational(name, settings):
             continue
         res = _resolve_env(name)
-        if res.error is not None:
-            issues.append(ConfigIssue("env", name, res.error, res.hint))
+        if res.error is None or resolve_file_env(name) is not None:
+            continue
+        if name.upper().endswith(FILE_SUFFIX):
+            base = _resolve_env(name[: -len(FILE_SUFFIX)])
+            if base.error is None and base.path:
+                issues.append(
+                    ConfigIssue(
+                        "env",
+                        name,
+                        f"{'.'.join(base.path)} cannot be read from a file: ignored",
+                        "only string settings (keys, tokens, URLs) support the _FILE suffix",
+                    )
+                )
+                continue
+        issues.append(ConfigIssue("env", name, res.error, res.hint))
     return issues
 
 
@@ -354,6 +399,10 @@ def _env_paths(environ: Mapping[str, str]) -> dict[tuple[str, ...], str]:
     """Leaf path -> the variable that sets it (a whole-section JSON variable covers the keys it contains)."""
     out: dict[tuple[str, ...], str] = {}
     for name in _tokiwa_env(environ):
+        file_path = resolve_file_env(name)
+        if file_path is not None and environ[name].strip():
+            out[file_path] = name  # read from a file: wins over an empty direct variable
+            continue
         res = _resolve_env(name)
         if res.error is not None or not res.path:
             continue

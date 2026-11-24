@@ -530,7 +530,15 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (init_settings, env_settings, dotenv_settings, _YamlSource(settings_cls), file_secret_settings)
+        # _FILE variables come first so that an empty direct variable (Compose "${X:-}") does not hide the file.
+        return (
+            init_settings,
+            _FileEnvSource(settings_cls),
+            env_settings,
+            dotenv_settings,
+            _YamlSource(settings_cls),
+            file_secret_settings,
+        )
 
 
 CONFIG_ENV = "TOKIWA_CONFIG"
@@ -585,6 +593,52 @@ class _YamlSource(PydanticBaseSettingsSource):
         return load_config_file()
 
 
+def read_secret_file(variable: str, raw_path: str) -> str:
+    """Contents of the file named by a ``*_FILE`` variable, without the trailing newline.
+
+    Errors name the variable and the path, never the contents.
+    """
+    path = Path(raw_path.strip()).expanduser()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+        raise ValueError(f"{variable}: cannot read {path} ({reason})") from None
+    return text.rstrip("\r\n")
+
+
+class _FileEnvSource(PydanticBaseSettingsSource):
+    """``TOKIWA_<SETTING>_FILE=/run/secrets/name`` reads a string setting from a file (audit #108).
+
+    Lets keys, tokens and database URLs come from Docker / Compose secrets instead of environment variables, which
+    ``docker inspect`` and ``/proc/<pid>/environ`` show. Setting both the variable and its ``_FILE`` form is an error
+    (the official postgres image behaves the same), unless the direct one is empty.
+    """
+
+    def get_field_value(self, field: Any, field_name: str) -> tuple[Any, str, bool]:  # pragma: no cover
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        from tokiwa.config_diagnostics import FILE_SUFFIX, resolve_file_env  # imports this module
+
+        out: dict[str, Any] = {}
+        direct = {k.upper(): v for k, v in os.environ.items()}
+        for name, raw in os.environ.items():
+            if not raw.strip():
+                continue
+            path = resolve_file_env(name)
+            if path is None:
+                continue
+            plain = name[: -len(FILE_SUFFIX)]
+            if direct.get(plain.upper(), "") != "":
+                raise ValueError(f"both {plain} and {name} are set: use one of them")
+            node = out
+            for part in path[:-1]:
+                node = node.setdefault(part, {})
+            node[path[-1]] = read_secret_file(name, raw)
+        return out
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
@@ -607,8 +661,24 @@ def reset_settings_cache() -> None:
     get_settings.cache_clear()
 
 
+_unreadable_key_files: set[str] = set()
+
+
 def anthropic_api_key(settings: Settings | None = None) -> str | None:
+    """``llm.anthropic_api_key``, else ``ANTHROPIC_API_KEY``, else the file named by ``ANTHROPIC_API_KEY_FILE``."""
     s = settings or get_settings()
     if s.llm.anthropic_api_key is not None:
         return s.llm.anthropic_api_key.get_secret_value() or None
-    return os.environ.get("ANTHROPIC_API_KEY") or None
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    key_file = os.environ.get("ANTHROPIC_API_KEY_FILE", "").strip()
+    if not key_file:
+        return None
+    try:
+        return read_secret_file("ANTHROPIC_API_KEY_FILE", key_file) or None
+    except ValueError as exc:
+        if key_file not in _unreadable_key_files:  # checked on every LLM call: warn once per path
+            _unreadable_key_files.add(key_file)
+            log.warning("%s", exc)
+        return None

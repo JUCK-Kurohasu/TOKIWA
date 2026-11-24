@@ -294,3 +294,69 @@ def test_effective_config_whole_section_json_counts_as_env(settings: Settings) -
     s = Settings.model_validate({**settings.model_dump(), "gate": {"sensor_id": "g-9"}})
     entry = next(e for e in effective_config(s, environ=env) if e.path == "gate.sensor_id")
     assert (entry.value, entry.source, entry.origin) == ("g-9", "env", "TOKIWA_GATE")
+
+
+# ----------------------------------------------------------------------------------------------- *_FILE (#108)
+def test_file_suffix_reads_string_settings_from_files(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = tmp_path / "anthropic_api_key"
+    key.write_text(SECRET + "\n", encoding="utf-8")
+    url = tmp_path / "database_url"
+    url.write_text("postgresql+asyncpg://tokiwa:pw-FILE@postgres:5432/tokiwa\n", encoding="utf-8")
+    monkeypatch.setenv("TOKIWA_LLM__ANTHROPIC_API_KEY_FILE", str(key))
+    monkeypatch.setenv("TOKIWA_LLM__ANTHROPIC_API_KEY", "")  # Compose "${X:-}" must not hide the file
+    monkeypatch.delenv("TOKIWA_DATABASE__URL")
+    monkeypatch.setenv("TOKIWA_DATABASE__URL_FILE", str(url))
+    s = Settings()
+    assert s.llm.anthropic_api_key is not None and s.llm.anthropic_api_key.get_secret_value() == SECRET
+    assert s.database.url.endswith("@postgres:5432/tokiwa")
+    assert env_issues(s) == []
+    entries = {e.path: e for e in effective_config(s)}
+    assert (entries["llm.anthropic_api_key"].value, entries["llm.anthropic_api_key"].origin) == (
+        "<set>",
+        "TOKIWA_LLM__ANTHROPIC_API_KEY_FILE",
+    )
+    assert "pw-FILE" not in json.dumps([e.value for e in entries.values()])
+
+
+def test_file_suffix_errors_never_show_contents(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = tmp_path / "k"
+    key.write_text(SECRET, encoding="utf-8")
+    monkeypatch.setenv("TOKIWA_LLM__ANTHROPIC_API_KEY_FILE", str(key))
+    monkeypatch.setenv("TOKIWA_LLM__ANTHROPIC_API_KEY", "other-value")
+    with pytest.raises(
+        ValueError, match="both TOKIWA_LLM__ANTHROPIC_API_KEY and TOKIWA_LLM__ANTHROPIC_API_KEY_FILE"
+    ):
+        Settings()
+    monkeypatch.delenv("TOKIWA_LLM__ANTHROPIC_API_KEY")
+    monkeypatch.setenv("TOKIWA_LLM__ANTHROPIC_API_KEY_FILE", str(tmp_path / "missing"))
+    with pytest.raises(ValueError, match="cannot read") as exc:
+        Settings()
+    assert SECRET not in str(exc.value)
+    code, out = _cli()
+    assert code == 2 and "TOKIWA_LLM__ANTHROPIC_API_KEY_FILE: cannot read" in out
+
+
+def test_file_suffix_only_for_string_settings_and_real_fields_win() -> None:
+    issues = env_issues(environ={"TOKIWA_SERVER__PORT_FILE": "/x", "TOKIWA_GATE__TOKEN_FILE": "/run/t"})
+    assert [i.key for i in issues] == ["TOKIWA_SERVER__PORT_FILE"]  # gate.token_file is a setting of its own
+    assert "cannot be read from a file" in issues[0].problem
+
+
+def test_anthropic_api_key_file_fallback(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tokiwa.config import anthropic_api_key
+
+    key = tmp_path / "key"
+    key.write_text(SECRET + "\n", encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_FILE", str(key))
+    assert anthropic_api_key(settings) == SECRET
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "direct")
+    assert anthropic_api_key(settings) == "direct"
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("ANTHROPIC_API_KEY_FILE", str(tmp_path / "missing"))
+    assert anthropic_api_key(settings) is None

@@ -41,6 +41,23 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 読み取り専用ルートファイルシステム（書き込みは `/data` と `/tmp` のみ）、全ケーパビリティの削除、
 `no-new-privileges`、非 root ユーザー（uid/gid 10001）、ログローテーション（10 MB × 5）。
 
+### 秘密の渡し方
+
+`.env` の内容は tokiwa サーバーのコンテナにだけ渡ります。攻撃トラフィックを受ける Gate のコンテナには、Gate が使う
+`TOKIWA_GATE__*` などの変数だけが渡ります（JWT 署名鍵・LLM の API キー・DB のパスワードは持たせません）。
+
+環境変数は `docker inspect` で見えるため、API キーなどはファイルで渡すこともできます。`TOKIWA_<設定>_FILE=<パス>`
+（例 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`・`TOKIWA_DATABASE__URL_FILE`、`ANTHROPIC_API_KEY_FILE`）でファイルから読みます。
+Compose の secrets を使う例が `deploy/compose.secrets.example.yaml` です。ファイルはコンテナのユーザー（uid 10001）が読めるようにし、
+`.env` からは同じ値を消します（両方あると起動しません）。詳しくは `docs/deploy.md` §5。
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
 ## 同じイメージで他のロールを動かす
 
 コンテナの第 1 引数が `serve gate agent sim eval intel user token version` のいずれかなら `tokiwa` コマンドとして実行されます。

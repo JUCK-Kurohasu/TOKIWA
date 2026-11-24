@@ -17,6 +17,8 @@ backend/data/
 *.db-shm
 secret.key
 tokiwa.yaml
+/secrets/
+/deploy/compose.secrets.yaml
 .env
 .env.*
 !.env.example

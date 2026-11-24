@@ -41,6 +41,24 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 Sistema de archivos raíz de solo lectura (solo se escribe en `/data` y `/tmp`), eliminación de todas las capabilities,
 `no-new-privileges`, usuario no root (uid/gid 10001) y rotación de logs (10 MB × 5).
 
+### Cómo pasar los secretos
+
+El contenido de `.env` solo llega al contenedor del servidor tokiwa. El contenedor del Gate, que recibe el tráfico de ataque, solo recibe
+las variables que usa, como `TOKIWA_GATE__*` (no tiene la clave de firma JWT, la clave de la API del LLM ni la contraseña de la base de datos).
+
+Las variables de entorno se ven con `docker inspect`, así que las claves de API y similares también pueden pasarse como archivos.
+`TOKIWA_<AJUSTE>_FILE=<ruta>` (por ejemplo `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`, `TOKIWA_DATABASE__URL_FILE` o `ANTHROPIC_API_KEY_FILE`)
+lee el valor de un archivo. `deploy/compose.secrets.example.yaml` muestra cómo hacerlo con los secrets de Compose. Haga que el usuario del
+contenedor (uid 10001) pueda leer los archivos y elimine los mismos valores de `.env` (si están los dos, el servidor no arranca).
+Detalles: `docs/deploy.md` §5.
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
 ## Ejecutar otros roles con la misma imagen
 
 Si el primer argumento del contenedor es uno de `serve gate agent sim eval intel user token version`, se ejecuta como comando `tokiwa`.

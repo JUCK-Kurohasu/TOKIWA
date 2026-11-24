@@ -41,6 +41,23 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 Read-only root filesystem (writes go only to `/data` and `/tmp`), all capabilities dropped,
 `no-new-privileges`, a non-root user (uid/gid 10001), and log rotation (10 MB × 5).
 
+### Passing secrets
+
+The contents of `.env` go to the tokiwa server container only. The Gate container, which receives attack traffic, gets only the
+variables it uses, such as `TOKIWA_GATE__*` (it holds no JWT signing key, LLM API key or database password).
+
+Environment variables are visible in `docker inspect`, so API keys and the like can also be passed as files. `TOKIWA_<SETTING>_FILE=<path>`
+(for example `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`, `TOKIWA_DATABASE__URL_FILE`, or `ANTHROPIC_API_KEY_FILE`) reads the value from a file.
+`deploy/compose.secrets.example.yaml` shows how to do this with Compose secrets. Make the files readable by the container user (uid 10001)
+and remove the same values from `.env` (the server does not start when both are set). Details: `docs/deploy.md` §5.
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
 ## Running other roles with the same image
 
 If the first argument to the container is one of `serve gate agent sim eval intel user token version`, it runs as the `tokiwa` command.

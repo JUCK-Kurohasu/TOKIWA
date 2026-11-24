@@ -41,6 +41,11 @@ def _build_settings() -> Settings:
             loc = ".".join(str(p) for p in err["loc"])
             typer.echo(f"  {loc}: {err['msg']}", err=True)
         raise typer.Exit(2) from None
+    except (
+        ValueError
+    ) as exc:  # our own loader errors (unreadable *_FILE, both X and X_FILE): no values in them
+        typer.echo(f"configuration is invalid: {exc}", err=True)
+        raise typer.Exit(2) from None
 
 
 def _sqlite_file_missing(settings: Settings) -> bool:

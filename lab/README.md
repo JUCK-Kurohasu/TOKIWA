@@ -12,7 +12,7 @@
 
 | サービス | 役割 | 備考 |
 |---|---|---|
-| `tokiwa-init` | DB 作成 + コンポーネント別 ingest トークン発行（冪等） | トークンは `tokiwa-data` ボリュームの `lab-tokens/`（mode 600）。表示しない |
+| `tokiwa-init` | DB 作成 + コンポーネント別 ingest トークン発行（冪等） | トークンは `tokiwa-data` ボリュームの `lab-tokens/{gate,agent,sim}/token`（mode 600）。表示しない。各センサーは自分のディレクトリだけを volume subpath で読み取り専用マウントする（DB・`secret.key`・他のトークンは見えない。Docker Engine 26 以上） |
 | `tokiwa` | サーバー（API/UI） | `127.0.0.1:8788`。既定は mock LLM |
 | `victim` | デモショップ（`victim/app.py`） | 外部公開しない（gate 経由のみ） |
 | `gate` | リバースプロキシ・センサー | `127.0.0.1:8080`。ラボでは `X-Forwarded-For` を信頼（sim の `--spoof-xff` 用） |

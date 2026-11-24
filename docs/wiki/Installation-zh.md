@@ -41,6 +41,23 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 只读根文件系统（仅 `/data` 和 `/tmp` 可写）、删除全部 capabilities、
 `no-new-privileges`、非 root 用户（uid/gid 10001）、日志轮转（10 MB × 5）。
 
+### 密钥的传递方式
+
+`.env` 的内容只传给 tokiwa 服务器容器。接收攻击流量的 Gate 容器只获得它所用的 `TOKIWA_GATE__*` 等变量
+（不持有 JWT 签名密钥、LLM API 密钥或数据库密码）。
+
+环境变量可以通过 `docker inspect` 看到，因此 API 密钥等也可以通过文件传递。`TOKIWA_<设置>_FILE=<路径>`
+（例如 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`、`TOKIWA_DATABASE__URL_FILE`，或 `ANTHROPIC_API_KEY_FILE`）会从文件读取值。
+使用 Compose secrets 的示例见 `deploy/compose.secrets.example.yaml`。请让容器用户（uid 10001）能读取这些文件，
+并从 `.env` 中删除相同的值（两者同时设置时服务器不会启动）。详见 `docs/deploy.md` §5。
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
 ## 用同一镜像运行其他角色
 
 如果容器的第 1 个参数是 `serve gate agent sim eval intel user token version` 之一，就会作为 `tokiwa` 命令执行。

@@ -128,8 +128,35 @@ docker run --rm --network <lab-net> -e TOKIWA_HEALTHCHECK_URL=none tokiwa:local 
   LLM プロバイダが INFO で 1 行出る。
 - 効いている値と出所は `docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show`（`--changed` で既定から変わった項目、
   `--db` で画面からの LLM 上書き、`--check` で問題があれば終了コード 1）。秘密は `<set>` と表示する。
-- `.env` は compose の変数展開（`--env-file .env`）とコンテナへの環境変数（`env_file: ../.env`）の両方に使う。
-  `.env` 内で `${POSTGRES_PASSWORD}` のような参照が使える。
+- `.env` は compose の変数展開（`--env-file .env`）と、**tokiwa サーバーのコンテナ**への環境変数（`env_file: ../.env`）に使う。
+  `.env` 内で `${POSTGRES_PASSWORD}` のような参照が使える。**Gate のコンテナには `.env` 全体を渡さない**（監査 #71。攻撃トラフィックを
+  直接受けるので、JWT 署名鍵・LLM / インテルの API キー・DB パスワードを持たせない）。Gate に渡るのは `deploy/compose.yaml` の
+  `gate.environment` に列挙した変数（`TOKIWA_GATE__*`、`TOKIWA_LLM__REDACTION__*`、`TOKIWA_DECEPTION__CANARY_HEADER`、
+  `TOKIWA_ENV`、`TOKIWA_LOG_LEVEL`）のうち `.env` で設定したものだけ。
+
+### 秘密をファイルで渡す（任意。監査 #108 / #110）
+
+環境変数は `docker inspect`・`docker compose config`・`/proc/<pid>/environ` で見える。`TOKIWA_<設定>_FILE=<パス>` で
+文字列の設定（API キー・トークン・DB URL など）をファイルから読める（例 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`、
+`TOKIWA_DATABASE__URL_FILE`、`TOKIWA_SERVER__SECRET_KEY_FILE`。`ANTHROPIC_API_KEY_FILE` も可）。同じ設定を環境変数と `_FILE` の
+両方で指定すると起動を拒否する（環境変数が空なら `_FILE` が使われる）。末尾の改行は除く。数値・リストの設定は対象外（WARNING）。
+`gate.token_file` のように名前が `_file` で終わる本来の設定はそのまま設定として扱う。
+
+Compose secrets と組み合わせる例が `deploy/compose.secrets.example.yaml`（LLM キー・DB URL・postgres のパスワード・Gate のトークン）:
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml      # 使うブロックだけ残す
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key                         # コンテナの uid が読めるように
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
+
+- Compose はファイルの secret を `/run/secrets/<名前>` に読み取り専用で bind mount し、所有者・モードを変えられない
+  （Compose 仕様: file ソースでは `uid` / `gid` / `mode` は未実装）。ホスト側でコンテナのユーザーが読めるようにする
+  （TOKIWA は uid 10001。postgres の公式イメージは root で起動して `POSTGRES_PASSWORD_FILE` を読み、`postgres`（uid 999）に切り替える）。
+- `.env` から同じ値（`ANTHROPIC_API_KEY`・`TOKIWA_DATABASE__URL`・`POSTGRES_PASSWORD`・`TOKIWA_GATE__INGEST_TOKEN`）を消す。
+  postgres サービスの `POSTGRES_PASSWORD` は空になり、公式イメージは空の変数を未設定とみなして `POSTGRES_PASSWORD_FILE` を使う。
+- アプリ用の DB ロールを PostgreSQL の管理ユーザー（`POSTGRES_USER`）と分けるのが望ましい（未対応。手順は運用側で）。
 
 ## 6. アップグレード
 
