@@ -40,6 +40,26 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 Read-only root filesystem (writes go only to `/data` and `/tmp`), all capabilities dropped,
 `no-new-privileges`, a non-root user (uid/gid 10001), and log rotation (10 MB × 5).
+There is also a process limit (`pids_limit: 512`). PostgreSQL keeps only the capabilities its start-up needs (CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID)
+and runs with `no-new-privileges`. No memory limit is set (one that is too low would make TOKIWA crash while under attack; set it for your host).
+The TOKIWA services and the victim in the lab (`lab/compose.yaml`) have the same hardening.
+
+### Passing secrets
+
+The contents of `.env` go to the tokiwa server container only. The Gate container, which receives attack traffic, gets only the
+variables it uses, such as `TOKIWA_GATE__*` (it holds no JWT signing key, LLM API key or database password).
+
+Environment variables are visible in `docker inspect`, so API keys and the like can also be passed as files. `TOKIWA_<SETTING>_FILE=<path>`
+(for example `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`, `TOKIWA_DATABASE__URL_FILE`, or `ANTHROPIC_API_KEY_FILE`) reads the value from a file.
+`deploy/compose.secrets.example.yaml` shows how to do this with Compose secrets. Make the files readable by the container user (uid 10001)
+and remove the same values from `.env` (the server does not start when both are set). Details: `docs/deploy.md` §5.
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
 
 ## Running other roles with the same image
 
@@ -85,6 +105,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - **Serve it at the root of a domain (or subdomain)**. Serving it under a subpath such as `/tokiwa/` is not supported.
 - Set `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` (it is used for links in notifications, among other things).
 - For real-time updates (SSE: `/api/v1/stream`), **turn off buffering and set a long timeout**.
+  The UI connects with a single-use ticket valid for 60 seconds (`?ticket=`) in the URL, not with its login token (JWT). To be safe, keep this path out of the proxy's access log (`access_log off;` in the example below).
 - If the proxy runs on a different host / container, set `FORWARDED_ALLOW_IPS=<proxy IP/CIDR>`.
 
 nginx example:
@@ -94,9 +115,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # For ingest batches from sensors
+    client_max_body_size 32m;                  # For ingest batches from sensors (match server.max_ingest_body_bytes)
 
     location /api/v1/stream {
+        access_log off;                        # the URL carries a single-use ticket (?ticket=)
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

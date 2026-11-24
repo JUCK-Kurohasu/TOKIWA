@@ -18,7 +18,9 @@ def test_compose_structure() -> None:
         for dep in svc.get("depends_on") or {}:
             assert dep in services, f"{name} depends on unknown service {dep}"
         for vol in svc.get("volumes") or []:
-            src = vol.split(":", 1)[0]
+            src = (
+                vol["source"] if isinstance(vol, dict) else vol.split(":", 1)[0]
+            )  # long syntax (subpath mounts)
             if src.startswith("."):
                 # lab/nginx/tokiwa-json.conf is owned by the sensors module; it may land via another branch
                 if "nginx/" not in src:

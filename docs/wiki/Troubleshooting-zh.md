@@ -42,6 +42,11 @@ curl -s http://localhost:8788/api/v1/auth/status
 **重启后被登出**
 签名密钥（`data/secret.key`）可能已丢失。请检查数据目录是否已持久化。
 
+**修改的设置没有生效（仍在使用默认值）**
+查看启动日志中以 `config:` 开头的 WARNING（会按名称指出未知键、拼写错误的环境变量、找不到的配置文件）。
+`tokiwa config show --changed` 可显示实际生效的值及其来源（环境变量 / 配置文件 / 默认值）（[配置参考](Configuration-zh)）。
+在 Docker 中挂载了 `tokiwa.yaml` 却显示 `config: ...: is a directory` 时，说明主机上的文件路径有误。
+
 ## 传感器与摄取
 
 **已经经过 Gate，但事件没有到达**

@@ -40,6 +40,26 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 読み取り専用ルートファイルシステム（書き込みは `/data` と `/tmp` のみ）、全ケーパビリティの削除、
 `no-new-privileges`、非 root ユーザー（uid/gid 10001）、ログローテーション（10 MB × 5）。
+プロセス数の上限（`pids_limit: 512`）も付けています。PostgreSQL は起動処理に要る権限（CHOWN・DAC_OVERRIDE・FOWNER・SETUID・SETGID）だけを残し、
+`no-new-privileges` を付けています。メモリ上限は付けていません（低すぎると攻撃を受けている最中に TOKIWA が落ちるため、ホストに合わせて設定してください）。
+ラボ（`lab/compose.yaml`）の TOKIWA と victim にも同じハードニングを付けています。
+
+### 秘密の渡し方
+
+`.env` の内容は tokiwa サーバーのコンテナにだけ渡ります。攻撃トラフィックを受ける Gate のコンテナには、Gate が使う
+`TOKIWA_GATE__*` などの変数だけが渡ります（JWT 署名鍵・LLM の API キー・DB のパスワードは持たせません）。
+
+環境変数は `docker inspect` で見えるため、API キーなどはファイルで渡すこともできます。`TOKIWA_<設定>_FILE=<パス>`
+（例 `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`・`TOKIWA_DATABASE__URL_FILE`、`ANTHROPIC_API_KEY_FILE`）でファイルから読みます。
+Compose の secrets を使う例が `deploy/compose.secrets.example.yaml` です。ファイルはコンテナのユーザー（uid 10001）が読めるようにし、
+`.env` からは同じ値を消します（両方あると起動しません）。詳しくは `docs/deploy.md` §5。
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
 
 ## 同じイメージで他のロールを動かす
 
@@ -85,6 +105,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - **ドメイン（またはサブドメイン）のルートで公開** してください。`/tokiwa/` のようなサブパスでの配信は未対応です。
 - `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` を設定します（通知のリンクなどに使われます）。
 - リアルタイム更新（SSE: `/api/v1/stream`）は **バッファリングを切り、タイムアウトを長く** します。
+  UI はログイン用のトークン（JWT）ではなく、60 秒・1 回限りの券（`?ticket=`）を URL に載せて接続します。念のため、このパスはプロキシのアクセスログに残さない設定にします（下の例の `access_log off;`）。
 - プロキシが別ホスト／別コンテナなら `FORWARDED_ALLOW_IPS=<プロキシの IP/CIDR>` を設定します。
 
 nginx の例:
@@ -94,9 +115,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # センサーからの取り込みバッチ用
+    client_max_body_size 32m;                  # センサーからの取り込みバッチ用（server.max_ingest_body_bytes と揃える）
 
     location /api/v1/stream {
+        access_log off;                        # URL に 1 回限りの券（?ticket=）が載るため
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

@@ -40,6 +40,27 @@ docker run -d --name tokiwa --init -p 127.0.0.1:8788:8788 -v tokiwa-data:/data t
 
 Sistema de archivos raíz de solo lectura (solo se escribe en `/data` y `/tmp`), eliminación de todas las capabilities,
 `no-new-privileges`, usuario no root (uid/gid 10001) y rotación de logs (10 MB × 5).
+También hay un límite de procesos (`pids_limit: 512`). PostgreSQL conserva solo las capabilities que necesita al arrancar (CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID)
+y se ejecuta con `no-new-privileges`. No se fija un límite de memoria (uno demasiado bajo haría caer TOKIWA en pleno ataque; ajústelo a su host).
+Los servicios de TOKIWA y el victim del laboratorio (`lab/compose.yaml`) tienen el mismo endurecimiento.
+
+### Cómo pasar los secretos
+
+El contenido de `.env` solo llega al contenedor del servidor tokiwa. El contenedor del Gate, que recibe el tráfico de ataque, solo recibe
+las variables que usa, como `TOKIWA_GATE__*` (no tiene la clave de firma JWT, la clave de la API del LLM ni la contraseña de la base de datos).
+
+Las variables de entorno se ven con `docker inspect`, así que las claves de API y similares también pueden pasarse como archivos.
+`TOKIWA_<AJUSTE>_FILE=<ruta>` (por ejemplo `TOKIWA_LLM__ANTHROPIC_API_KEY_FILE`, `TOKIWA_DATABASE__URL_FILE` o `ANTHROPIC_API_KEY_FILE`)
+lee el valor de un archivo. `deploy/compose.secrets.example.yaml` muestra cómo hacerlo con los secrets de Compose. Haga que el usuario del
+contenedor (uid 10001) pueda leer los archivos y elimine los mismos valores de `.env` (si están los dos, el servidor no arranca).
+Detalles: `docs/deploy.md` §5.
+
+```bash
+cp deploy/compose.secrets.example.yaml deploy/compose.secrets.yaml
+install -d -m 700 secrets && (umask 077 && "${EDITOR:-vi}" secrets/anthropic_api_key)
+sudo chown 10001:10001 secrets/anthropic_api_key
+docker compose -f deploy/compose.yaml -f deploy/compose.secrets.yaml --env-file .env up -d
+```
 
 ## Ejecutar otros roles con la misma imagen
 
@@ -85,6 +106,7 @@ TOKIWA_DATABASE__URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@
 - **Publíquelo en la raíz de un dominio (o subdominio)**. La publicación en una subruta como `/tokiwa/` no está soportada.
 - Defina `TOKIWA_SERVER__BASE_URL=https://tokiwa.example.internal` (se usa, por ejemplo, en los enlaces de las notificaciones).
 - Para las actualizaciones en tiempo real (SSE: `/api/v1/stream`), **desactive el búfer y alargue el tiempo de espera**.
+  La interfaz se conecta con un ticket de un solo uso válido 60 segundos (`?ticket=`) en la URL, no con su token de sesión (JWT). Por precaución, excluya esta ruta del registro de acceso del proxy (`access_log off;` en el ejemplo siguiente).
 - Si el proxy está en otro host u otro contenedor, defina `FORWARDED_ALLOW_IPS=<IP/CIDR del proxy>`.
 
 Ejemplo de nginx:
@@ -94,9 +116,10 @@ server {
     listen 443 ssl;
     http2 on;
     server_name tokiwa.example.internal;
-    client_max_body_size 20m;                  # Para los lotes de ingesta de los sensores
+    client_max_body_size 32m;                  # Para los lotes de ingesta de los sensores (igual que server.max_ingest_body_bytes)
 
     location /api/v1/stream {
+        access_log off;                        # la URL lleva un ticket de un solo uso (?ticket=)
         proxy_pass http://127.0.0.1:8788;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

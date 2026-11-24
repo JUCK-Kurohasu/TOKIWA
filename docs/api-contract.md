@@ -5,7 +5,7 @@
 > 「担当」は初期実装の担当モジュール（ルートファイル名）。
 
 共通:
-- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `?access_token=`）。JWT はクレーム `ver` に `users.token_version` を持ち、パスワード・ロール変更／ログアウト／`revoke-sessions` で版数が上がると 401 `token revoked`（`ver` の無い旧 JWT は版数 0 として扱う）。センサーは `X-Tokiwa-Token: tkw_...`。
+- 認証: ユーザーは `Authorization: Bearer <JWT>`（SSE は `POST /stream/ticket` で得た 1 回限りの `?ticket=`。旧 `?access_token=` は非推奨）。JWT はクレーム `ver` に `users.token_version` を持ち、パスワード・ロール変更／ログアウト／`revoke-sessions` で版数が上がると 401 `token revoked`（`ver` の無い旧 JWT は版数 0 として扱う）。センサーは `X-Tokiwa-Token: tkw_...`。
 - 一覧は `Page[T]` = `{items, total, limit, offset}`。クエリ `limit`（既定 50, 最大 500）, `offset`（最大 1,000,000。超過は 422）。
   バックエンドは共通ヘルパ `tokiwa.api.pagination`（`page: PageParams` 依存性 + `await paginate(session, stmt, page, Schema.model_validate)`）を使う。
   独自に `offset` Query を宣言しているルートにも、全ルーターに付く `offset_guard` が同じ上限を課す。
@@ -202,11 +202,19 @@ top_* の count = アラートの重複排除カウント合計。テーブル�
 `llm.calls.get` / `copilot.tool.<name>` を記録。同じ actor(id)・route・target・filter の閲覧は 5 分窓で 1 行にまとめ
 （`hits` = 回数、`items` = 返した件数の合計）、窓の最初の 1 回だけ INSERT、以降はメモリ上で加算し窓の切替時と
 `GET /audit/access` の直前に書き戻す（ポーリングで行が増えず、GET が毎回書き込みにならない）。
-| GET | /stream | user(`?access_token`) | **SSE**: `data: {"topic": "...", "data": {...}}`（alert/incident/action/deception/llm.call） |
+| POST | /stream/ticket | user（ヘッダの JWT） | `{"ticket": "...", "expires_in": 60}`（`Cache-Control: no-store`）。`GET /stream?ticket=` 用の 1 回限りの券 |
+| GET | /stream | user(`?ticket` / `Authorization`) | **SSE**: `data: {"topic": "...", "data": {...}}`（alert/incident/action/deception/llm.call） |
 
 stream の詳細: 接続直後にコメント `: connected`、15 秒ごとに `: ping` コメント。中継トピックは `alert.*` / `incident.*` /
 `action.*` / `deception.tripped` / `intel.advisory` / `llm.call`（`request_redacted`・`response_text` は除外）/
-`event.ingested`（`{"count": n}` のみ）。`?access_token=` の値は uvicorn アクセスログでマスクされる。
+`event.ingested`（`{"count": n}` のみ）。
+
+stream の認証（監査 #100）: EventSource はヘッダを送れないので、UI は `POST /stream/ticket`（JWT はヘッダ）で券を得て
+`GET /stream?ticket=<券>` を開く。券は 60 秒・1 接続限り（使用済み・期限切れ・不明は 401 `invalid or expired ticket`）で、
+使うときに元の JWT を再検証する（間にログアウト・パスワード変更があれば 401）。サーバーのメモリ上に SHA-256 だけを保持し
+（ユーザーごと 16・全体 10,000 まで、古い順に捨てる）、プロセス再起動で消える。EventSource の自動再接続は同じ URL を使うので
+401 で閉じ、UI が新しい券で繋ぎ直す。旧 `?access_token=<JWT>` は互換のため受け付けるが非推奨（WARNING を最大 10 分に 1 回）—
+JWT がリバースプロキシのアクセスログに残るため。`access_token=` と `ticket=` の値は uvicorn のアクセスログでマスクされる。
 | GET | /health | public | 未認証（API トークンを含む）は常に `{"status": "ok"}`・200。有効なユーザー JWT 付きのときだけ `version` と `checks` も返し、`checks` のどれかが `degraded` なら `status` も `"degraded"`（HTTP は 200 のまま。DB 障害時も 200）。`checks.sigma`: `status`（`ok` / `degraded` = ルールディレクトリが無い・有効なルールファイルが 0 件 / `disabled` = 検知器を無効化・ディレクトリ未設定 / `starting` / `unknown`）, `rule_dirs`, `missing_dirs`（件数）, `file_rules_found`, `file_rules_invalid`, `rules_active`, `file_rules_active`、admin のみ `missing_dir_paths`（#177） |
 
 未定義の `/api/*` は SPA の index.html ではなく JSON の 404（`{"detail": "Not Found"}`）。`/api/docs`・`/api/openapi.json` は

@@ -42,6 +42,11 @@ Existing logins of that user end. If logins are being refused (429) after failed
 **I was logged out after a restart**
 The signing key (`data/secret.key`) may have been lost. Check that the data directory is persisted.
 
+**A setting I changed has no effect (the default is still used)**
+Look for WARNING lines starting with `config:` in the startup log (they name unknown keys, misspelt environment variables and a missing config file).
+`tokiwa config show --changed` shows the effective values and where they came from (environment / config file / default) ([Configuration reference](Configuration-en)).
+If you mount `tokiwa.yaml` in Docker and it says `config: ...: is a directory`, the path of the file on the host is wrong.
+
 ## Sensors and ingest
 
 **Events don't arrive even though traffic goes through the Gate**

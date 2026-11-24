@@ -7,7 +7,7 @@
 上にあるものほど優先されます。
 
 1. **環境変数** `TOKIWA_*`（ネストは `__` でつなぐ。例: `TOKIWA_LLM__DAILY_BUDGET_USD=10` → `llm.daily_budget_usd`）
-2. **YAML ファイル**: `TOKIWA_CONFIG` で指定したパス（既定はカレントディレクトリの `tokiwa.yaml`。無ければ無視）
+2. **YAML ファイル**: `TOKIWA_CONFIG` で指定したパス（既定はカレントディレクトリの `tokiwa.yaml`。既定のファイルは無くてもよいが、`TOKIWA_CONFIG` で指定したファイルが無い・ディレクトリのときは起動時に WARNING。`TOKIWA_CONFIG=`（空）なら YAML を読まない）
 3. **既定値**（`backend/src/tokiwa/config.py`）
 
 さらに、次の 2 つは **Web UI から実行時に上書き** でき、その値は DB に保存されます。
@@ -30,6 +30,29 @@ Docker Compose では `.env` が環境変数としてコンテナに渡されま
 - **リストや辞書は JSON で** 書きます: `TOKIWA_DETECTION__DISABLED_DETECTORS='["web.scanner_ua"]'`
 - **空の値で設定しないでください**（空文字は項目によって意味が変わります）。`TOKIWA_SERVER__SECRET_KEY=`（空）は未設定として扱われ、`data_dir/secret.key` の自動生成の鍵が使われます。設定する場合は 32 文字以上が必要で、短いとサーバーが起動しません。
 - 秘密（API キー・パスワード）は YAML ではなく環境変数で渡すことを勧めます。
+
+### 設定の確認（綴り誤り・効いている値）
+
+綴りを誤った設定は無視され、その項目は既定値のまま動きます。気づけるよう、起動時に次を **WARNING** でログに出します（値は出さず、名前とパスだけ）。
+
+- YAML の未知のキー（`llm.providr` → `did you mean llm.provider?`。キーは大文字小文字を区別します）
+- 設定項目に当たらない `TOKIWA_*` 環境変数（`TOKIWA_LLM__PROVIDR`、`__` を `_` 1 つにした `TOKIWA_LLM_PROVIDER` など）
+- `TOKIWA_CONFIG` で指定したファイルが存在しない・ディレクトリ（Docker の bind mount は元のファイルが無いとディレクトリを作ります）
+
+`TOKIWA_STRICT_CONFIG=1` にすると、これらがあるとき起動を拒否します（既定は警告のみ）。Compose・ヘルスチェック・ラボのスクリプトが使う
+設定以外の変数（`TOKIWA_BIND`・`TOKIWA_HEALTHCHECK_URL` など）とメール通知のパスワード変数は対象外です。`tokiwa serve` の起動ログには、
+読み込んだ設定ファイル・`data_dir`・DB（パスワードは伏字）・LLM プロバイダも INFO で 1 行出ます。
+
+効いている値とその出所（`env` / `file` / `default`、`--db` なら画面で保存した `ui`）は `tokiwa config show` で確認できます。
+秘密は `<set>` と表示し、URL のパスワード・クエリと Webhook URL のパスは伏せます。
+
+```bash
+tokiwa config show                       # 全項目と出所
+tokiwa config show --changed -s llm      # 既定から変わった llm.* だけ
+tokiwa config show --db                  # 画面で保存した LLM の上書き（ui）も反映
+tokiwa config show --check               # 問題があれば終了コード 1（デプロイ前の確認に）
+docker compose -f deploy/compose.yaml exec tokiwa tokiwa config show
+```
 
 ### YAML の例
 

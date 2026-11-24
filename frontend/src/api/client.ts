@@ -7,6 +7,7 @@
  * Use TanStack Query hooks in pages:  useQuery({ queryKey: ["alerts", params], queryFn: () => api.get(...) })
  */
 import { authStore } from "@/stores/auth";
+import type { StreamTicket } from "./types-core";
 
 export class ApiError extends Error {
   constructor(
@@ -74,20 +75,17 @@ export const api = {
   delete: <T>(path: string) => request<T>("DELETE", path),
 };
 
-/** Server-Sent Events with the JWT passed as ?access_token= (EventSource cannot set headers). */
-export function openEventStream(path: string, onMessage: (topic: string, data: unknown) => void): () => void {
-  const token = authStore.getToken();
-  const url = buildUrl(path, token ? { access_token: token } : undefined);
-  const es = new EventSource(url);
-  es.onmessage = (ev) => {
-    try {
-      const msg = JSON.parse(ev.data) as { topic: string; data: unknown };
-      onMessage(msg.topic, msg.data);
-    } catch {
-      /* ignore malformed */
-    }
-  };
-  return () => es.close();
+/**
+ * URL for the live stream (`EventSource`): `/api/v1/stream?ticket=<single-use ticket>` (audit #100).
+ *
+ * EventSource cannot send the Authorization header, and a JWT in the URL would end up in reverse-proxy access
+ * logs, so a ticket (valid 60 s, one connection) is fetched with the JWT first. A used ticket is refused (401),
+ * so after any disconnect the caller must fetch a new URL instead of letting EventSource retry the old one.
+ * Open the stream through `useLiveStream` (one shared connection per tab), not directly.
+ */
+export async function streamUrl(): Promise<string> {
+  const { ticket } = await api.post<StreamTicket>("/stream/ticket");
+  return buildUrl("/stream", { ticket });
 }
 
 /**
