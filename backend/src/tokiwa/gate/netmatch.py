@@ -176,3 +176,17 @@ def resolve_forwarded_client(
         if trusted is None or ip not in trusted:
             return current, True
     return current, True
+
+
+def client_bucket_key(client_ip: str | None) -> str:
+    """Key for per-client limits: the address for IPv4, its /64 for IPv6 (ADR-0008 step 3, audit #142).
+
+    One IPv6 subscriber normally gets a whole /64, so keying by the full address let a client rotate through 2^64
+    addresses past every per-client limit (rate limit, in-flight cap, tarpit slots).
+    """
+    ip = parse_ip(client_ip)
+    if ip is None:
+        return client_ip or "unknown"
+    if ip.version == 6:
+        return str(ipaddress.IPv6Network((int(ip) >> 64 << 64, 64)))
+    return str(ip)

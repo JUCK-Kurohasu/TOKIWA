@@ -39,7 +39,7 @@ from starlette.routing import Mount, Route
 
 from tokiwa.config import ConfigError, GateSettings, RedactionSettings, get_settings, strict_config_enabled
 from tokiwa.gate.capture import BodyCapture, EventBuilder, Exchange, mime_type
-from tokiwa.gate.netmatch import IpTable, parse_ip, resolve_forwarded_client
+from tokiwa.gate.netmatch import IpTable, client_bucket_key, parse_ip, resolve_forwarded_client
 from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager, path_anomalies
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
@@ -270,7 +270,7 @@ class Gate:
         if scope["type"] != "http":
             return
         ex = self._exchange(scope)
-        key = ex.client_ip or "unknown"
+        key = client_bucket_key(ex.client_ip)  # IPv6: the /64 (ADR-0008)
         cap = self.settings.max_requests_per_client
         try:
             if cap and self._inflight[key] >= cap:
@@ -355,7 +355,11 @@ class Gate:
 
         limited = policy.rate_limited.lookup(ip)
         if limited is not None:
-            allowed, retry_after = self.limiter.allow(ex.client_ip or "unknown", limited[1])
+            # A range entry is one budget for the whole range (audit #142: per-address buckets let a client rotate
+            # through the range without limit); a single-address entry keys by the client (IPv6: its /64).
+            network = limited[0]
+            bucket = network if _is_range(network) else client_bucket_key(ex.client_ip)
+            allowed, retry_after = self.limiter.allow(bucket, limited[1])
             if not allowed:
                 ex.tag("gate:rate_limited")
                 ex.labels["gate.action"] = "rate_limited"
@@ -384,7 +388,7 @@ class Gate:
             delay_ms = min(tarpit[1], TARPIT_MAX_MS)
             ex.tag("gate:tarpit")
             ex.labels["gate.tarpit_ms"] = str(delay_ms)
-            key = ex.client_ip or "unknown"
+            key = client_bucket_key(ex.client_ip)
             if not self._tarpit_acquire(key):
                 # Holding more of this client's requests would cost the Gate more than the client (#99).
                 ex.tag("gate:tarpit_overflow")
@@ -814,6 +818,14 @@ class Gate:
                 ex.status = 403
         finally:
             self._capture(ex)
+
+
+def _is_range(network: str) -> bool:
+    """True for a policy entry covering more than one address (``10.0.0.0/24``; not ``10.0.0.5/32``)."""
+    _, _, prefix = network.partition("/")
+    if not prefix.isdigit():
+        return False
+    return int(prefix) < (128 if ":" in network else 32)
 
 
 def _policy_cache_file(settings: GateSettings) -> Path | None:

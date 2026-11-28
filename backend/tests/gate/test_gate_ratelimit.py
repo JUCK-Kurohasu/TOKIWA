@@ -49,3 +49,77 @@ def test_lru_bound() -> None:
     assert len(limiter) == 100
     limiter.reset()
     assert len(limiter) == 0
+
+
+async def test_cidr_rate_limit_is_one_budget_for_the_range(make_gate, fake_server) -> None:  # type: ignore[no-untyped-def]
+    """Audit #142: rotating through addresses inside a rate-limited range no longer gives each a fresh bucket."""
+    from gate_helpers import client_for
+
+    fake_server.set_policy("v1", rate_limited={"198.51.100.0/24": 2})
+    app, _gate = await make_gate()
+    codes = []
+    for i in range(1, 5):
+        async with client_for(app, ip=f"198.51.100.{i}") as c:
+            codes.append((await c.get("/")).status_code)
+    assert codes == [200, 200, 429, 429]
+
+
+async def test_ipv6_clients_share_their_64(make_gate, fake_server) -> None:  # type: ignore[no-untyped-def]
+    """A single-address IPv6 limit applies per /64 (ADR-0008): a client cannot rotate inside its own /64."""
+    from gate_helpers import client_for
+
+    fake_server.set_policy("v1", rate_limited={"2001:db8:1:2::/64": 1})
+    app, gate = await make_gate()
+    async with client_for(app, ip="2001:db8:1:2::10") as c:
+        assert (await c.get("/")).status_code == 200
+    async with client_for(app, ip="2001:db8:1:2::abcd") as c:
+        assert (await c.get("/")).status_code == 429
+
+
+def test_client_bucket_key() -> None:
+    from tokiwa.gate.netmatch import client_bucket_key
+
+    assert client_bucket_key("203.0.113.5") == "203.0.113.5"
+    assert client_bucket_key("2001:db8:1:2:3:4:5:6") == "2001:db8:1:2::/64"
+    assert client_bucket_key("::ffff:203.0.113.5") == "203.0.113.5"
+    assert client_bucket_key(None) == "unknown"
+
+
+async def test_inflight_cap_counts_the_ipv6_64(make_gate) -> None:  # type: ignore[no-untyped-def]
+    import asyncio
+
+    from gate_helpers import http_scope
+
+    app, gate = await make_gate(max_requests_per_client=1, body_idle_timeout_seconds=0)
+    release = asyncio.Event()
+    sent: list[dict] = []
+
+    async def receive_hold() -> dict:
+        if not sent:
+            sent.append({})
+            return {"type": "http.request", "body": b"a", "more_body": True}
+        await release.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(_m: dict) -> None:
+        return None
+
+    scope = http_scope("/upload", b"/upload", ip="2001:db8:1:2::1", method="POST")
+    scope["headers"] = [*scope["headers"], (b"content-length", b"10")]
+    task = asyncio.create_task(app(scope, receive_hold, send))
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert gate._inflight["2001:db8:1:2::/64"] == 1
+    statuses: list[int] = []
+
+    async def capture(m: dict) -> None:
+        if m["type"] == "http.response.start":
+            statuses.append(m["status"])
+
+    async def receive_done() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    await app(http_scope("/", b"/", ip="2001:db8:1:2::ffff"), receive_done, capture)
+    assert statuses == [429]  # another address in the same /64
+    release.set()
+    await asyncio.wait_for(task, timeout=5)

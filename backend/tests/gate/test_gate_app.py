@@ -185,7 +185,7 @@ async def test_blocked_ip_gets_403_and_never_reaches_upstream(
     assert "gate:blocked" not in events[2]["tags"]
 
 
-async def test_rate_limit_429_per_ip_with_refill(
+async def test_rate_limit_429_per_range_with_refill(
     make_gate: GateFactory, upstream: Upstream, fake_server: FakeServer, fake_time: FakeTime
 ) -> None:
     fake_server.set_policy("v1", rate_limited={"203.0.113.0/24": 2})
@@ -195,15 +195,15 @@ async def test_rate_limit_429_per_ip_with_refill(
         limited = await c.get("/p3")
     assert codes == [200, 200, 429]
     assert limited.status_code == 429 and limited.headers["retry-after"] == "30"
-    async with client_for(app, ip="203.0.113.99") as c:  # same CIDR, separate bucket
-        assert (await c.get("/other")).status_code == 200
+    async with client_for(app, ip="203.0.113.99") as c:  # same CIDR, same budget (audit #142)
+        assert (await c.get("/other")).status_code == 429
     fake_time.advance(30)
     async with client_for(app) as c:
         assert (await c.get("/again")).status_code == 200
-    assert len(upstream.requests) == 4
+    assert len(upstream.requests) == 3
     events = await events_of(gate, fake_server)
     limited_events = [e for e in events if "gate:rate_limited" in e["tags"]]
-    assert len(limited_events) == 2
+    assert len(limited_events) == 3
     assert limited_events[0]["labels"]["gate.rule"] == "203.0.113.0/24"
 
 

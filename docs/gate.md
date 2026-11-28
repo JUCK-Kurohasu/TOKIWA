@@ -50,7 +50,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 1. `/__tokiwa/health` → ヘルス
 2. `blocked` に一致 → **403**（本文を読まずに即応答。タグ `gate:blocked`, label `gate.rule`）
-3. `rate_limited` に一致 → クライアント IP ごとのトークンバケット（容量 N、N/60 個/秒で補充）。空なら **429** + `Retry-After`
+3. `rate_limited` に一致 → トークンバケット（容量 N、N/60 個/秒で補充）。範囲のエントリ（`/24` など）は範囲全体で 1 つ、単一アドレスのエントリはクライアントごと（IPv6 は /64 ごと）。範囲内のアドレスを回しても予算は増えない（ADR-0008、監査 #142）。空なら **429** + `Retry-After`
 4. WebSocket（`Upgrade: websocket` / websocket scope）→ **501**（v1 は非対応。ログ + `gate:websocket_unsupported`）
 5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）。保持中の要求が `tarpit_max_concurrent`（全体）/
    `tarpit_max_per_client`（同じ IP）に達していれば待たせずに **429** + `Retry-After`（`gate:tarpit_overflow`）。待っている間に
