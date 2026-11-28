@@ -49,7 +49,7 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
   このセッションでは `/usr/lib/postgresql/16` の `initdb` / `pg_ctl` でポート 55432 に一時クラスタを立てた（`--extra postgres` で asyncpg）。
 - **性能**: 保存時サニタイザの追加コストは測定誤差内（1000 イベント・3 回の最良値で 2.43 秒 / 無効時 2.58 秒）。Event 検証の
   サロゲート置換（`raw` を毎回再構築）は未計測。
-- **チェック**: backend 2114 passed（約 229 秒。SQLite）、DB を触る 161 件（ingest・respond・correlate・gate health）は PostgreSQL 16 でも passed、ruff・format 緑、mypy 既知 4 件のみ、frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK（14 ページ × 4 言語）。**未検証**: Docker（lab の `trusted_proxies` でホストからのポート転送が 172.28.0.0/24 から届くか、deploy の `gate-state` ボリュームの権限）。
+- **チェック**: backend 2117 passed（約 217 秒。SQLite）、DB を触る 227 件（ingest・respond・correlate・triage・gate health）は PostgreSQL 16 でも passed、ruff・format 緑、mypy 既知 4 件のみ、frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK（14 ページ × 4 言語）。**未検証**: Docker（lab の `trusted_proxies` でホストからのポート転送が 172.28.0.0/24 から届くか、deploy の `gate-state` ボリュームの権限）。
 
 ## 監査修正 第 4 弾（2026-11-23〜24）— 系統 J 運用 / 第 1〜3 弾の残り（検知シグナル・UI）
 
