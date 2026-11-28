@@ -119,6 +119,27 @@ def protected_networks(settings: ResponseSettings) -> list[Network]:
     return nets
 
 
+def shared_network(target: str, settings: ResponseSettings) -> str | None:
+    """The ``response.shared_cidrs`` entry ``target`` overlaps, if any (audit #23).
+
+    An explicit list rather than ``is_private`` / ``is_global``: 100.64.0.0/10 (RFC 6598, carrier-grade NAT) is
+    neither "private" nor "global" and those properties changed between Python patch releases.
+    """
+    try:
+        net = parse_network(target)
+    except ActionValidationError:
+        return None
+    for cidr in settings.shared_cidrs:
+        try:
+            shared = ipaddress.ip_network(cidr.strip(), strict=False)
+        except ValueError:
+            log.error("ignoring invalid response.shared_cidrs entry %r", cidr)
+            continue
+        if shared.version == net.version and net.overlaps(shared):
+            return str(shared)
+    return None
+
+
 def format_network(net: Network) -> str:
     """Single hosts are rendered as a bare address, everything else as CIDR."""
     return str(net.network_address) if net.num_addresses == 1 else str(net)

@@ -314,6 +314,14 @@ class ResponseSettings(BaseModel):
     # Reject private / ULA / link-local targets (e.g. management networks). Off by default: lab attackers
     # usually live on private networks.
     block_private_targets: bool = False
+    # Audit #23: addresses that many people share (carrier-grade NAT, corporate NAT / internal proxies). A
+    # network action (block / rate_limit / tarpit / deceive / nftables) on an overlapping target is never
+    # auto-approved and carries a warning; a human can still approve it. Unlike protected_cidrs this does not
+    # refuse anything. Add your own LB / proxy / monitoring / CDN egress ranges here (none are bundled: such
+    # lists change and must come from the provider's current publication).
+    shared_cidrs: list[str] = Field(
+        default_factory=lambda: ["100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
+    )
     # Refuse targets broader than these prefixes (e.g. 0.0.0.0/0) for gate/nftables actions.
     min_prefix_v4: int = 16
     min_prefix_v6: int = 48

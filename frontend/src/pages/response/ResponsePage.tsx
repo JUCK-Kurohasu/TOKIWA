@@ -113,6 +113,9 @@ const strings = {
     alert: "ALT",
     retry: "再試行",
     resultDetail: "結果",
+    sharedAddress: "共有アドレスの可能性",
+    sharedAddressTitle:
+      "response.shared_cidrs に含まれます（CGNAT・社内 NAT・プロキシ等）。多数の正規利用者に影響しうるため自動承認されません",
     activeOrder: "期限が近い順",
   },
   en: {
@@ -146,6 +149,9 @@ const strings = {
     alert: "ALT",
     retry: "Retry",
     resultDetail: "Result",
+    sharedAddress: "Possibly shared address",
+    sharedAddressTitle:
+      "Inside response.shared_cidrs (carrier-grade NAT, corporate NAT, a proxy). May affect many legitimate users, so it is never auto-approved",
     activeOrder: "Soonest expiry first",
   },
 };
@@ -390,6 +396,14 @@ export function ResponsePage() {
                           <span className="line-clamp-2 break-words" title={a.reason}>
                             {a.reason}
                           </span>
+                          {typeof a.result?.shared_address === "string" && (
+                            <span
+                              className="mt-1 inline-block rounded bg-sev-medium/15 px-1.5 py-0.5 text-[11px] text-sev-medium"
+                              title={L.sharedAddressTitle}
+                            >
+                              {L.sharedAddress} ({a.result.shared_address})
+                            </span>
+                          )}
                         </TD>
                         <TD>
                           <ProposerBadge proposer={a.proposed_by} />
