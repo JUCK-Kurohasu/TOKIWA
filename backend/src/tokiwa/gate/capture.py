@@ -402,6 +402,8 @@ class Exchange:
     tags: list[str] = field(default_factory=list)
     labels: dict[str, str] = field(default_factory=dict)
     decoy: DecoyRoute | None = None
+    # The TCP peer is a trusted proxy, so its X-Forwarded-* values were used (#22). Decides what goes upstream too.
+    forwarded_trusted: bool = False
 
     def header(self, name: str) -> str | None:
         key = name.lower().encode("latin-1")

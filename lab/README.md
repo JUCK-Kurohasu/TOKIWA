@@ -15,7 +15,7 @@
 | `tokiwa-init` | DB 作成 + コンポーネント別 ingest トークン発行（冪等） | トークンは `tokiwa-data` ボリュームの `lab-tokens/{gate,agent,sim}/token`（mode 600）。表示しない。各センサーは自分のディレクトリだけを volume subpath で読み取り専用マウントする（DB・`secret.key`・他のトークンは見えない。Docker Engine 26 以上） |
 | `tokiwa` | サーバー（API/UI） | `127.0.0.1:8788`。既定は mock LLM |
 | `victim` | デモショップ（`victim/app.py`） | 外部公開しない（gate 経由のみ） |
-| `gate` | リバースプロキシ・センサー | `127.0.0.1:8080`。ラボでは `X-Forwarded-For` を信頼（sim の `--spoof-xff` 用） |
+| `gate` | リバースプロキシ・センサー | `127.0.0.1:8080`。ラボでは lab ネットワーク（172.28.0.0/24。ホストからのポート転送もここから届く想定 — 未検証）からの `X-Forwarded-For` だけを信頼（sim の `--spoof-xff` 用、`gate.trusted_proxies`） |
 | `sim` | トラフィックシミュレータ（profile `sim`） | 送信先は `http://gate:8080` 固定 |
 | `sim-ingest` | Gate なしで合成イベントを ingest API に直接投入（profile `ingest`） | |
 | `nginx` + `agent` | nginx JSON ログ → `tokiwa agent`（profile `agent`） | ログ形式は sensors の `nginx/tokiwa-json.conf` を参照（複製しない） |

@@ -35,9 +35,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from tokiwa.config import GateSettings, RedactionSettings, get_settings
+from tokiwa.config import ConfigError, GateSettings, RedactionSettings, get_settings, strict_config_enabled
 from tokiwa.gate.capture import BodyCapture, EventBuilder, Exchange, mime_type
-from tokiwa.gate.netmatch import parse_ip
+from tokiwa.gate.netmatch import IpTable, parse_ip, resolve_forwarded_client
 from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager, path_anomalies
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
@@ -167,6 +167,7 @@ class Gate:
         self._pass_through = frozenset(
             h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
+        self._trusted_proxies = _trusted_proxy_table(settings)
         self._sleep = sleep
         self._tarpit_active = 0  # requests currently held by the tarpit (#99)
         self._tarpit_per_client: Counter[str] = Counter()
@@ -282,14 +283,16 @@ class Gate:
         )
         if self.settings.trust_forwarded_for:
             xff = ", ".join(v.decode("latin-1") for k, v in headers if k.lower() == b"x-forwarded-for")
-            # Right-most entry = the address the trusted proxy in front of us saw (left-most is client-supplied).
-            for candidate in reversed([p.strip() for p in xff.split(",") if p.strip()]):
-                ip = parse_ip(candidate)
-                if ip is not None:
-                    if ex.client_ip:
-                        ex.labels["gate.peer_ip"] = ex.client_ip
-                    ex.client_ip = str(ip)
-                    break
+            client_ip, ex.forwarded_trusted = resolve_forwarded_client(ex.peer_ip, xff, self._trusted_proxies)
+            if not ex.forwarded_trusted:
+                if xff:
+                    # Trust is configured, yet this peer is not one of the proxies: someone reached the Gate
+                    # directly (bypassing the LB) and claimed an address. Their own address is kept (#22).
+                    ex.tag("gate:untrusted_forwarded_for")
+            elif client_ip and client_ip != ex.client_ip:
+                if ex.client_ip:
+                    ex.labels["gate.peer_ip"] = ex.client_ip
+                ex.client_ip = client_ip
         return ex
 
     async def _dispatch(
@@ -504,7 +507,7 @@ class Gate:
             ex.raw_headers,
             peer_ip=ex.peer_ip,
             scheme=ex.scheme,
-            trust_forwarded_for=self.settings.trust_forwarded_for,
+            trust_forwarded_for=ex.forwarded_trusted,
             preserve_host=self.options.preserve_host,
             upstream_host=self.target.host_header,
             restrict_encoding=policy.html_injection is not None,
@@ -739,6 +742,32 @@ class Gate:
                 ex.status = 403
         finally:
             self._capture(ex)
+
+
+def _trusted_proxy_table(settings: GateSettings) -> IpTable[bool] | None:
+    """``gate.trusted_proxies`` as a lookup table; None = legacy "trust any peer" mode (audit #22).
+
+    Only meaningful with ``trust_forwarded_for``. An unparsable entry or the legacy mode is a configuration
+    problem: warned about, and refused under ``TOKIWA_STRICT_CONFIG=1`` like other config issues.
+    """
+    if not settings.trust_forwarded_for:
+        return None
+    table, invalid = IpTable.build((p, True) for p in settings.trusted_proxies)
+    problems: list[str] = []
+    if invalid:
+        problems.append(f"gate.trusted_proxies has entries that are not IPs/CIDRs: {', '.join(invalid)}")
+    if not settings.trusted_proxies:
+        problems.append(
+            "gate.trust_forwarded_for is on but gate.trusted_proxies is empty: X-Forwarded-For is accepted from "
+            "any client that reaches the Gate, which can then claim any source address. List the proxy/LB "
+            "addresses in gate.trusted_proxies"
+        )
+    for problem in problems:
+        log.warning("gate config: %s", problem)
+    if problems and strict_config_enabled():
+        raise ConfigError("; ".join(problems) + " (TOKIWA_STRICT_CONFIG is set)")
+    # A list whose entries all failed to parse trusts no peer (not "any peer"): a typo must not widen trust.
+    return table if settings.trusted_proxies else None
 
 
 def _no_cookie_jar() -> CookieJar:

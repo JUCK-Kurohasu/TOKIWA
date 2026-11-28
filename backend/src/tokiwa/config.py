@@ -383,6 +383,12 @@ class GateSettings(BaseModel):
     flush_interval_seconds: float = 1.0
     policy_refresh_seconds: float = 5.0
     trust_forwarded_for: bool = False
+    # Audit #22: with trust_forwarded_for, X-Forwarded-For is honoured only when the TCP peer is one of these
+    # proxies (IPs / CIDRs, e.g. ["10.0.0.0/8"] for the LB subnet). The chain is walked from the right, skipping
+    # entries that are themselves trusted proxies, so CDN -> LB -> Gate works when both hops are listed. Empty
+    # keeps the legacy behaviour (any peer is trusted, one hop) with a startup warning; TOKIWA_STRICT_CONFIG=1
+    # refuses to start in that case.
+    trusted_proxies: list[str] = Field(default_factory=list)
     # Requests with more header lines than this are answered 431 instead of being forwarded (events keep at most
     # 64 header names, so the rest would reach the upstream unseen). Apache's LimitRequestFields default. 0 = off.
     max_request_headers: int = Field(default=100, ge=0)
