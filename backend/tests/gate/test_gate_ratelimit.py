@@ -69,7 +69,7 @@ async def test_ipv6_clients_share_their_64(make_gate, fake_server) -> None:  # t
     from gate_helpers import client_for
 
     fake_server.set_policy("v1", rate_limited={"2001:db8:1:2::/64": 1})
-    app, gate = await make_gate()
+    app, _gate = await make_gate()
     async with client_for(app, ip="2001:db8:1:2::10") as c:
         assert (await c.get("/")).status_code == 200
     async with client_for(app, ip="2001:db8:1:2::abcd") as c:
