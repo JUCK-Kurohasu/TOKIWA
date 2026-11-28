@@ -2,7 +2,10 @@
 
 Fail-open / fail-static semantics (deliberate):
 
-- Before the first successful fetch the gate enforces nothing (pure sensor + proxy).
+- Before the first successful fetch the gate enforces the policy it last saved (``gate.policy_cache_file``,
+  audit #32), trimmed of entries whose expiry has passed and refused when older than
+  ``gate.policy_cache_max_age_hours``; with no usable copy it enforces nothing (pure sensor + proxy). Without the
+  copy, restarting the Gate while the server was unreachable silently unblocked every blocked attacker.
 - When the server is unreachable or returns garbage, the *last known* policy stays in force. Blocks are TTL'd
   server-side, so a stale policy can only be as old as the outage; dropping it would silently unblock an
   active attacker the moment they DoS the TOKIWA server.
@@ -16,13 +19,16 @@ Fail-open / fail-static semantics (deliberate):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import random
 import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
@@ -264,8 +270,13 @@ class PolicyManager:
         refresh_seconds: float = 5.0,
         timeout: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
+        cache_file: Path | None = None,
+        cache_max_age_hours: float = 168.0,
     ) -> None:
         self._client = client
+        self.cache_file = cache_file
+        self.cache_max_age = timedelta(hours=max(0.0, cache_max_age_hours))
+        self.source: str | None = None  # "cache" until the first successful fetch, then "server"
         self._url = server_url.rstrip("/") + POLICY_PATH
         self._tokens = TokenSource.of(token)
         self.refresh_seconds = max(0.5, refresh_seconds)
@@ -290,15 +301,22 @@ class PolicyManager:
             self._expire_entries()
         return self._current
 
-    def apply(self, policy: GatePolicy) -> bool:
-        """Install ``policy`` if its version differs from the current one. Returns True when swapped."""
+    def apply(self, policy: GatePolicy, *, now: datetime | None = None) -> bool:
+        """Install ``policy`` if its version differs from the current one. Returns True when swapped.
+
+        ``now`` (wall clock) is given for a policy read back from the cache: its entries then run until their
+        absolute ``expires_at``. A freshly fetched policy measures from its ``generated_at`` instead, so a skewed
+        Gate clock cannot stretch a block; a cached one was generated before the restart, and measuring from
+        ``generated_at`` again would give every entry its full TTL back.
+        """
         if policy.version == self._current.version:
             return False
         received = self._clock()
+        base = now or policy.generated_at
         deadlines: list[tuple[float, str, str]] = []
         for section, entries in policy.entry_expires_at.items():
             for key, expires_at in entries.items():
-                remaining = (expires_at - policy.generated_at).total_seconds()
+                remaining = (expires_at - base).total_seconds()
                 deadlines.append((received + remaining, section, key))
         deadlines.sort()
         self._source = policy
@@ -353,7 +371,67 @@ class PolicyManager:
         self._consecutive_failures = 0
         self.last_error = None
         self.last_success = utcnow()
-        return self.apply(policy)
+        self.source = "server"
+        swapped = self.apply(policy)
+        if swapped:
+            await asyncio.to_thread(self._save_cache, resp.content)
+        return swapped
+
+    # ------------------------------------------------------------------ local copy (audit #32)
+    def load_cache(self) -> bool:
+        """Install the saved policy (startup, before the first fetch). Never raises; True when installed."""
+        path = self.cache_file
+        if path is None or not path.is_file():
+            return False
+        try:
+            policy = GatePolicy.model_validate_json(path.read_bytes())
+        except (OSError, ValidationError, ValueError) as exc:
+            log.warning(
+                "gate policy cache %s unusable (%s); starting without a policy", path, type(exc).__name__
+            )
+            return False
+        now = utcnow()
+        age = now - policy.generated_at
+        if self.cache_max_age and age > self.cache_max_age:
+            log.warning(
+                "gate policy cache %s is %s old (> gate.policy_cache_max_age_hours); not enforcing it",
+                path,
+                str(age).split(".")[0],
+            )
+            return False
+        expired = {
+            section: {k for k, at in entries.items() if at <= now}
+            for section, entries in policy.entry_expires_at.items()
+        }
+        if any(expired.values()):
+            policy = _without(policy, expired)
+        installed = self.apply(policy, now=now)
+        if installed:
+            self.source = "cache"
+            log.warning(
+                "gate: enforcing the saved policy %s (generated %s) until the server answers",
+                policy.version,
+                policy.generated_at.isoformat(),
+            )
+        return installed
+
+    def _save_cache(self, payload: bytes) -> None:
+        """Write the fetched policy atomically, mode 600 (it carries decoy routes and canary snippets)."""
+        path = self.cache_file
+        if path is None:
+            return
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(payload)
+            os.replace(tmp, path)
+        except OSError as exc:
+            # A read-only filesystem must not affect the proxy: the Gate just loses the restart protection.
+            log.warning("gate: could not save the policy to %s (%s)", path, exc)
+            with contextlib.suppress(OSError):
+                tmp.unlink()
 
     async def _get(self) -> httpx.Response:
         headers = {"Accept": "application/json"}
@@ -388,4 +466,5 @@ class PolicyManager:
             "expired_locally": self.expired_locally,
             "last_error": self.last_error,
             "last_success": self.last_success.isoformat() if self.last_success else None,
+            "source": self.source,
         }

@@ -390,6 +390,12 @@ class GateSettings(BaseModel):
     batch_size: int = 100
     flush_interval_seconds: float = 1.0
     policy_refresh_seconds: float = 5.0
+    # Audit #32: the last policy fetched is saved here and enforced at startup until the server answers, so a Gate
+    # restarted during a server outage keeps blocking. None = <server.data_dir>/gate-policy-<sensor_id>.json.
+    persist_policy: bool = True
+    policy_cache_file: Path | None = None
+    # A saved policy older than this (by its generated_at) is not enforced at startup. 0 = no limit.
+    policy_cache_max_age_hours: float = Field(default=168.0, ge=0)
     trust_forwarded_for: bool = False
     # Audit #22: with trust_forwarded_for, X-Forwarded-For is honoured only when the TCP peer is one of these
     # proxies (IPs / CIDRs, e.g. ["10.0.0.0/8"] for the LB subnet). The chain is walked from the right, skipping

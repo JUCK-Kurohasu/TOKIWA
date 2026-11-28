@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
@@ -26,6 +27,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from email.utils import formatdate
 from http.cookiejar import CookieJar, DefaultCookiePolicy
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -147,6 +149,8 @@ class Gate:
             settings.server_url,
             self.tokens,
             refresh_seconds=settings.policy_refresh_seconds,
+            cache_file=_policy_cache_file(settings),
+            cache_max_age_hours=settings.policy_cache_max_age_hours,
         )
         self.shipper = EventShipper(
             self.server_client,
@@ -184,6 +188,8 @@ class Gate:
     async def start(self) -> None:
         if not self.token:
             log.warning("gate: no ingest token configured; the server will reject events and policy fetches")
+        # The saved copy first (audit #32): if the server is unreachable, the restart does not lift blocks.
+        await asyncio.to_thread(self.policy.load_cache)
         if self.options.initial_policy_fetch:
             await self.policy.refresh()
         self._tasks = [
@@ -742,6 +748,16 @@ class Gate:
                 ex.status = 403
         finally:
             self._capture(ex)
+
+
+def _policy_cache_file(settings: GateSettings) -> Path | None:
+    """Where the last fetched policy is kept (audit #32); None when ``gate.persist_policy`` is off."""
+    if not settings.persist_policy:
+        return None
+    if settings.policy_cache_file is not None:
+        return settings.policy_cache_file
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", settings.sensor_id)[:64] or "gate"
+    return get_settings().server.data_dir / f"gate-policy-{safe_id}.json"
 
 
 def _trusted_proxy_table(settings: GateSettings) -> IpTable[bool] | None:
