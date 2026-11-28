@@ -415,6 +415,15 @@ class GateSettings(BaseModel):
     # client IP) get 429 instead of a slot, so a flood of fire-and-forget requests cannot pile up in the Gate. 0 = no cap.
     tarpit_max_concurrent: int = Field(default=256, ge=0)
     tarpit_max_per_client: int = Field(default=8, ge=0)
+    # Audit #39 (slow POST / slowloris): a request body that sends nothing for body_idle_timeout_seconds, or is not
+    # complete after body_total_timeout_seconds, is answered 408 and its upstream connection freed (one byte every
+    # few seconds held an upstream connection forever; ~530 of them exhausted the pool). 0 = no limit.
+    body_idle_timeout_seconds: float = Field(default=15.0, ge=0)
+    body_total_timeout_seconds: float = Field(default=120.0, ge=0)
+    # Requests in flight per client IP (the resolved client, see trusted_proxies). Beyond it: 429 at once, with an
+    # event. Header-phase slowloris happens before the Gate sees a request: put nginx / a load balancer with a
+    # header timeout in front (docs/wiki Sensors). 0 = no limit.
+    max_requests_per_client: int = Field(default=64, ge=0)
 
 
 class AgentSettings(BaseModel):

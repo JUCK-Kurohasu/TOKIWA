@@ -74,6 +74,7 @@ RATE_LIMITED_BODY = b"Too Many Requests\n"
 WEBSOCKET_BODY = b"Not Implemented: WebSocket is not supported by this gateway\n"
 TOO_MANY_HEADERS_BODY = b"Request Header Fields Too Large\n"
 BAD_GATEWAY_BODY = b"Bad Gateway\n"
+REQUEST_TIMEOUT_BODY = b"Request Timeout\n"
 GATEWAY_TIMEOUT_BODY = b"Gateway Timeout\n"
 GENERIC_404 = (
     b"<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head>\n"
@@ -104,6 +105,10 @@ class GateOptions:
 
 class _ClientGone(Exception):
     """The client disconnected while its request body was being streamed upstream."""
+
+
+class _SlowBody(Exception):
+    """The request body stalled or took too long (audit #39); the reason is ``idle`` or ``total``."""
 
 
 class Gate:
@@ -175,6 +180,7 @@ class Gate:
         self._sleep = sleep
         self._tarpit_active = 0  # requests currently held by the tarpit (#99)
         self._tarpit_per_client: Counter[str] = Counter()
+        self._inflight: Counter[str] = Counter()  # requests being handled per client IP (#39)
         self.counters: Counter[str] = Counter()
         self._tasks: list[asyncio.Task[None]] = []
         self._upstream_server: bytes | None = None  # mimicked on gate-generated responses
@@ -257,8 +263,26 @@ class Gate:
         if scope["type"] != "http":
             return
         ex = self._exchange(scope)
+        key = ex.client_ip or "unknown"
+        cap = self.settings.max_requests_per_client
         try:
-            await self._dispatch(scope, receive, send, ex, self.policy.current)
+            if cap and self._inflight[key] >= cap:
+                # Audit #39: one client holding many slow requests would otherwise take every upstream
+                # connection. Answered at once, so the event reaches the server while the attack goes on.
+                ex.tag("gate:conn_limit")
+                ex.labels["gate.action"] = "conn_limit"
+                await self._respond(
+                    send, ex, 429, RATE_LIMITED_BODY, b"text/plain; charset=utf-8", [(b"retry-after", b"5")]
+                )
+                return
+            self._inflight[key] += 1
+            try:
+                await self._dispatch(scope, receive, send, ex, self.policy.current)
+            finally:
+                # Also on cancellation / disconnect: a leaked count would lock the client out for good.
+                self._inflight[key] -= 1
+                if self._inflight[key] <= 0:
+                    del self._inflight[key]
         finally:
             self._capture(ex)
 
@@ -544,6 +568,14 @@ class Gate:
             ex.tag("gate:client_disconnect")
             ex.status = 499  # nginx convention: client closed request
             return
+        except _SlowBody as exc:
+            ex.tag("gate:slow_body")
+            ex.labels["gate.action"] = "slow_body"
+            ex.labels["gate.slow_body"] = str(exc)
+            await self._respond(
+                send, ex, 408, REQUEST_TIMEOUT_BODY, b"text/plain; charset=utf-8", [(b"connection", b"close")]
+            )
+            return
         except httpx.TimeoutException as exc:
             await self._upstream_failed(send, ex, 504, GATEWAY_TIMEOUT_BODY, exc)
             return
@@ -589,9 +621,32 @@ class Gate:
     def _body_stream(self, receive: Receive, ex: Exchange) -> AsyncIterator[bytes]:
         """Stream the request body upstream while teeing the first ``capture_body_bytes`` into the capture."""
 
+        idle = self.settings.body_idle_timeout_seconds
+        total = self.settings.body_total_timeout_seconds
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + total if total else None
+
+        async def next_message() -> Message:
+            # Audit #39: without a limit, a client trickling one byte every few seconds held an upstream
+            # connection for as long as it liked. Both an idle gap and the whole body are bounded.
+            wait = idle or None
+            if deadline is not None:
+                left = deadline - loop.time()
+                if left <= 0:
+                    raise _SlowBody("total")
+                wait = left if wait is None else min(wait, left)
+            if wait is None:
+                return await receive()
+            try:
+                return await asyncio.wait_for(receive(), wait)
+            except TimeoutError:
+                raise _SlowBody(
+                    "total" if deadline is not None and loop.time() >= deadline else "idle"
+                ) from None
+
         async def gen() -> AsyncIterator[bytes]:
             while True:
-                message = await receive()
+                message = await next_message()
                 if message["type"] == "http.request":
                     chunk = message.get("body", b"")
                     if chunk:
