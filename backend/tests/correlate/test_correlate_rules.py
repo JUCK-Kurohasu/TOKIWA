@@ -68,6 +68,28 @@ def test_extract_cves() -> None:
         {"cves": ["CVE-2024-3400", "nope"]},
     )
     assert found == {"CVE-2021-44228", "CVE-2025-55182", "CVE-2024-3400"}
+    assert extract_cves({}, ["cve.2021-44228", "cve-2025-55182", "not-cve-2020-0001"]) == {
+        "CVE-2021-44228",
+        "CVE-2025-55182",
+    }
+    # IDS rule message (written by the rule author) still counts.
+    assert extract_cves({"signature": "ET EXPLOIT log4j RCE (CVE-2021-44228)"}) == {"CVE-2021-44228"}
+
+
+def test_extract_cves_ignores_client_written_values() -> None:
+    """Audit #59: a CVE id in the User-Agent / path / endpoint is the client's claim, not a detector finding."""
+    assert (
+        extract_cves(
+            {
+                "user_agent": "Mozilla/5.0 (scan CVE-2021-44228)",
+                "path": "/CVE-2021-44228",
+                "endpoint": "/api/CVE-2017-5638",
+            },
+            ["ua:CVE-2021-44228"],
+            {"summary": "CVE-2021-44228"},
+        )
+        == set()
+    )
 
 
 def _facts(rule: str, cat: str, sev: str = "medium", **kw: object) -> AlertFacts:

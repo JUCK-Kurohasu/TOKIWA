@@ -102,6 +102,20 @@ async def test_same_session_links_across_ips(
     assert inc_b.actor_type == "automated_scanner"
 
 
+async def test_cve_in_user_agent_does_not_join_another_ip(add_alert: AddAlert) -> None:
+    """Audit #59: an attacker writing a CVE id into its User-Agent must not join a third party's incident."""
+    victim = await add_alert(
+        source_ip="198.51.100.7", entities={"cve": "CVE-2021-44228"}, rule_id="web.log4shell"
+    )
+    attacker = await add_alert(
+        source_ip="203.0.113.10", entities={"user_agent": "Mozilla/5.0 (scan CVE-2021-44228)"}
+    )
+    iv, ia = await correlate_alert(victim.id), await correlate_alert(attacker.id)
+    assert iv is not None and ia is not None
+    assert iv.id != ia.id
+    assert ia.source_ips == ["203.0.113.10"]
+
+
 async def test_entity_keys_link(add_alert: AddAlert) -> None:
     a = await add_alert(source_ip="203.0.113.1", entities={"cve": "CVE-2021-44228"})
     b = await add_alert(source_ip="203.0.113.2", entities={"cve": "CVE-2021-44228"})
