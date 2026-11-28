@@ -164,6 +164,7 @@ class Gate:
             batch_size=settings.batch_size,
             flush_interval=settings.flush_interval_seconds,
             max_queue=opts.max_queue,
+            sensor_id=settings.sensor_id,
         )
         self.limiter = TokenBucketLimiter(clock=clock)
         self.builder = EventBuilder(

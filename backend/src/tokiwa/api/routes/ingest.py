@@ -62,9 +62,9 @@ def is_gate_only(event: Event) -> bool:
     return event.kind == EventKind.DECEPTION or event.dataset.startswith(GATE_ONLY_DATASET_PREFIXES)
 
 
-# The agent's own health report (audit #131, sensors/logtail.py) accompanies whatever a token is bound to; refusing
-# it would refuse the whole batch and stall the agent's shipper behind it.
-ALWAYS_ALLOWED_DATASETS = frozenset({"agent.health"})
+# The agent's / Gate's own health report (audit #131 sensors/logtail.py, #55 gate/shipper.py) accompanies whatever a
+# token is bound to; refusing it would refuse the whole batch and stall the sender's shipper behind it.
+ALWAYS_ALLOWED_DATASETS = frozenset({"agent.health", "gate.health"})
 
 
 def check_binding(events: list[Event], token: ApiToken) -> None:
