@@ -27,7 +27,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -43,6 +43,7 @@ from tokiwa.util import utcnow
 log = logging.getLogger(__name__)
 
 POLICY_PATH = "/api/v1/gate/policy"
+CACHE_TOUCH_SECONDS = 3600  # how often an unchanged policy refreshes the saved copy's "confirmed" time
 TARPIT_MAX_MS = 30_000
 
 
@@ -375,6 +376,8 @@ class PolicyManager:
         swapped = self.apply(policy)
         if swapped:
             await asyncio.to_thread(self._save_cache, resp.content)
+        else:
+            await asyncio.to_thread(self._touch_cache)
         return swapped
 
     # ------------------------------------------------------------------ local copy (audit #32)
@@ -391,7 +394,13 @@ class PolicyManager:
             )
             return False
         now = utcnow()
-        age = now - policy.generated_at
+        # Age since the server last *confirmed* the policy (the file's mtime, refreshed on unchanged fetches), not
+        # since it last changed: a decoy-only policy can stay the same for weeks and is still current.
+        try:
+            confirmed = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        except OSError:
+            confirmed = policy.generated_at
+        age = now - max(policy.generated_at, confirmed)
         if self.cache_max_age and age > self.cache_max_age:
             log.warning(
                 "gate policy cache %s is %s old (> gate.policy_cache_max_age_hours); not enforcing it",
@@ -414,6 +423,17 @@ class PolicyManager:
                 policy.generated_at.isoformat(),
             )
         return installed
+
+    def _touch_cache(self) -> None:
+        """Mark the saved policy as confirmed by the server (at most every CACHE_TOUCH_SECONDS, never raises)."""
+        path = self.cache_file
+        if path is None:
+            return
+        try:
+            if time.time() - path.stat().st_mtime >= CACHE_TOUCH_SECONDS:
+                os.utime(path)
+        except OSError:
+            pass
 
     def _save_cache(self, payload: bytes) -> None:
         """Write the fetched policy atomically, mode 600 (it carries decoy routes and canary snippets)."""

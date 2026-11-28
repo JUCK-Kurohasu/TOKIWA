@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -77,6 +78,8 @@ async def test_too_old_or_broken_cache_is_not_enforced(fake_server: FakeServer, 
     cache = tmp_path / "gate-policy.json"
     old = GatePolicy(version="v1", generated_at=utcnow() - timedelta(hours=200), blocked=["198.51.100.1"])
     cache.write_text(old.model_dump_json())
+    stale = time.time() - 200 * 3600
+    os.utime(cache, (stale, stale))  # neither changed nor confirmed for 200 h
     assert _manager(fake_server, cache).load_cache() is False  # default limit 168 h
     assert _manager(fake_server, cache, cache_max_age_hours=0).load_cache() is True  # 0 = no limit
     cache.write_text("{not json")
@@ -101,3 +104,22 @@ def test_cache_path_defaults_and_opt_out(settings) -> None:  # type: ignore[no-u
     assert default == settings.server.data_dir / "gate-policy-edge_1.json"
     assert _policy_cache_file(GateSettings(persist_policy=False)) is None
     assert _policy_cache_file(GateSettings(policy_cache_file=Path("/x/p.json"))) == Path("/x/p.json")
+
+
+async def test_unchanged_policy_confirmed_recently_still_loads(
+    fake_server: FakeServer, tmp_path: Path
+) -> None:
+    """A policy that has not changed for weeks (e.g. decoys only) but that the server confirmed recently is current."""
+    cache = tmp_path / "gate-policy.json"
+    policy = fake_server.set_policy("v1", deceive=["203.0.113.9"])
+    policy.generated_at = utcnow() - timedelta(days=30)
+    manager = _manager(fake_server, cache)
+    assert await manager.refresh() is True  # saved
+    stale = time.time() - 2 * 3600
+    os.utime(cache, (stale, stale))
+    assert await manager.refresh() is False  # unchanged: the saved copy is marked as confirmed
+    assert time.time() - cache.stat().st_mtime < 60
+    fake_server.policy_status = 503
+    restarted = _manager(fake_server, cache)
+    assert restarted.load_cache() is True
+    assert restarted.current.deceive.lookup(parse_ip("203.0.113.9")) is not None
