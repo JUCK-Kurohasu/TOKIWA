@@ -71,13 +71,13 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | ingest_token | `--token-file`（不要用 `--token`：会在 `ps` 中可见） | 无 | 需要 `ingest` 和 `gate` 作用域。也可以用环境变量 `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节（0 表示不捕获） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | 拉取策略的间隔 |
-| trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |
+| trust_forwarded_for | `--trust-forwarded-for` | false | 从 `X-Forwarded-For` 确定来源 IP（仅限 `trusted_proxies` 中的对端；从右向左读取并跳过可信代理） |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 | forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 默认会移除的请求头（见下文）中，要原样转发给上游的那些 |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）；超出的请求返回 429（0 表示不限制） |
 | trusted_proxies | —（`TOKIWA_GATE__TRUSTED_PROXIES`） | `[]` | 启用 `trust_forwarded_for` 时，仅当 TCP 对端在此列表中（IP / CIDR，例如 `["10.0.0.0/8"]`）才读取 `X-Forwarded-For`。为空时保持旧行为（信任任何对端）并在启动时警告；设置 `TOKIWA_STRICT_CONFIG=1` 时拒绝启动 |
 | body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | 请求体中断的最长时间 / 整个请求体的上限。超出时返回 408 并释放上游连接（标签 `gate:slow_body`；0 表示不限制） |
-| max_requests_per_client | — | 64 | 同一来源 IP 正在处理的请求数上限。超出时立即返回 429（标签 `gate:conn_limit`；0 表示不限制） |
+| max_requests_per_client | — | 64 | 同一来源 IP 正在处理的请求数上限。超出时立即返回 429（标签 `gate:conn_limit`；0 表示不限制）。**在 LB 之后未启用 `trust_forwarded_for` 时，所有用户都显示为 LB 的地址，整个站点只能同时处理 64 个** |
 | persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | 保存获取到的策略，启动时即使无法连接服务器也强制执行（过旧的副本不使用；0 表示不限制） |
 
 仅 CLI 提供的运维参数：`--upstream-timeout`（30 秒）、`--max-queue`（待发送事件上限 10,000 条）、

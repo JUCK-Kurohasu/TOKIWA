@@ -72,13 +72,13 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | ingest_token | `--token-file` (avoid `--token`: visible in `ps`) | None | Requires the `ingest` and `gate` scopes. The environment variable `TOKIWA_GATE__INGEST_TOKEN` also works |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Number of leading bytes of the request body to capture (0 disables capture) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | How often to pull the policy |
-| trust_forwarded_for | `--trust-forwarded-for` | false | Use the **rightmost** `X-Forwarded-For` entry as the source IP |
+| trust_forwarded_for | `--trust-forwarded-for` | false | Take the source IP from `X-Forwarded-For` (only from `trusted_proxies` peers; read from the right, skipping trusted proxies) |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Headers normally removed (see below) to pass to the upstream unchanged |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Max requests held by the tarpit at once (in total / per IP); requests beyond get 429 (0 = no cap) |
 | trusted_proxies | — (`TOKIWA_GATE__TRUSTED_PROXIES`) | `[]` | With `trust_forwarded_for`, `X-Forwarded-For` is read only when the TCP peer is listed here (IPs / CIDRs, e.g. `["10.0.0.0/8"]`). Empty keeps the old behaviour (any peer is trusted) with a startup warning; `TOKIWA_STRICT_CONFIG=1` refuses to start |
 | body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | Max gap in a request body / max time for the whole body. Beyond it the Gate answers 408 and frees the upstream connection (tag `gate:slow_body`; 0 = no limit) |
-| max_requests_per_client | — | 64 | Requests in flight per source IP. Beyond it: 429 at once (tag `gate:conn_limit`; 0 = no limit) |
+| max_requests_per_client | — | 64 | Requests in flight per source IP. Beyond it: 429 at once (tag `gate:conn_limit`; 0 = no limit). **Behind a LB without `trust_forwarded_for`, every visitor has the LB's address: 64 for the whole site** |
 | persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | Save the fetched policy and enforce it at startup even when the server is unreachable (a copy older than the limit is not used; 0 = no limit) |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),

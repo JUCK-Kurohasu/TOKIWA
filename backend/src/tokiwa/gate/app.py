@@ -178,6 +178,12 @@ class Gate:
             h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
         self._trusted_proxies = _trusted_proxy_table(settings)
+        # forward_client_headers (e.g. CF-Connecting-IP) are only honoured from listed proxies when a list is set.
+        self._proxy_peers: IpTable[bool] | None = (
+            IpTable.build((p, True) for p in settings.trusted_proxies)[0]
+            if settings.trusted_proxies
+            else None
+        )
         self._sleep = sleep
         self._tarpit_active = 0  # requests currently held by the tarpit (#99)
         self._tarpit_per_client: Counter[str] = Counter()
@@ -534,6 +540,10 @@ class Gate:
         self, scope: Scope, receive: Receive, send: Send, ex: Exchange, policy: CompiledPolicy
     ) -> None:
         url, target = self.target.resolve(raw_path_of(scope), scope.get("query_string", b""))
+        pass_through = self._pass_through
+        if pass_through and self._proxy_peers is not None and parse_ip(ex.peer_ip) not in self._proxy_peers:
+            # A client that reached the Gate directly cannot claim CF-Connecting-IP & co. either (same as #22).
+            pass_through = frozenset()
         headers = forwarded_request_headers(
             ex.raw_headers,
             peer_ip=ex.peer_ip,
@@ -543,9 +553,9 @@ class Gate:
             upstream_host=self.target.host_header,
             restrict_encoding=policy.html_injection is not None,
             client_ip=ex.client_ip,
-            pass_through=self._pass_through,
+            pass_through=pass_through,
         )
-        stripped = stripped_client_headers(ex.raw_headers, self._pass_through)
+        stripped = stripped_client_headers(ex.raw_headers, pass_through)
         if stripped:
             ex.tag(
                 "gate:client_ip_header"

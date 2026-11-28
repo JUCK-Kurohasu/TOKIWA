@@ -72,13 +72,13 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | ingest_token | `--token-file` (evite `--token`: se ve en `ps`) | Ninguno | Requiere los ámbitos `ingest` y `gate`. También sirve la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo de la solicitud que se capturan (0 = no capturar) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
-| trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
+| trust_forwarded_for | `--trust-forwarded-for` | false | Obtiene la IP de origen de `X-Forwarded-For` (solo de pares en `trusted_proxies`; se lee de derecha a izquierda saltando los proxies de confianza) |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Encabezados que normalmente se eliminan (ver abajo) y que se pasan sin cambios al upstream |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP); las que excedan reciben 429 (0 = sin límite) |
 | trusted_proxies | — (`TOKIWA_GATE__TRUSTED_PROXIES`) | `[]` | Con `trust_forwarded_for`, `X-Forwarded-For` solo se lee si el par TCP está en esta lista (IP / CIDR, p. ej. `["10.0.0.0/8"]`). Vacía mantiene el comportamiento anterior (se confía en cualquier par) con una advertencia al iniciar; con `TOKIWA_STRICT_CONFIG=1` no arranca |
 | body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | Pausa máxima dentro del cuerpo de la solicitud / tiempo máximo del cuerpo completo. Al superarlo responde 408 y libera la conexión al upstream (etiqueta `gate:slow_body`; 0 = sin límite) |
-| max_requests_per_client | — | 64 | Solicitudes en curso por IP de origen. Por encima: 429 de inmediato (etiqueta `gate:conn_limit`; 0 = sin límite) |
+| max_requests_per_client | — | 64 | Solicitudes en curso por IP de origen. Por encima: 429 de inmediato (etiqueta `gate:conn_limit`; 0 = sin límite). **Detrás de un LB sin `trust_forwarded_for`, todos los visitantes tienen la dirección del LB: 64 para todo el sitio** |
 | persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | Guarda la política obtenida y la aplica al iniciar aunque el servidor no responda (no se usa una copia más antigua que el límite; 0 = sin límite) |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),

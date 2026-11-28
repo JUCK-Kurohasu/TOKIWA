@@ -114,7 +114,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--token` / `--token-file` | — | API 令牌（推荐使用环境变量 `TOKIWA_GATE__INGEST_TOKEN` 或文件；文件在变化时和收到 401 时重新读取） |
 | `--sensor-id` | `gate-1` | 记录到事件中的传感器 ID |
 | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节 |
-| `--trust-forwarded-for` | off | 将 `X-Forwarded-For` 的最右端作为来源（仅限可信的 LB 之后） |
+| `--trust-forwarded-for` | off | 从 `X-Forwarded-For` 确定来源（仅限可信的 LB 之后；在 `gate.trusted_proxies` 中列出其地址） |
 | `--policy-refresh` | 5 | 策略拉取间隔（秒） |
 | `--batch-size` / `--flush-interval` | 100 / 1.0 | 发送的批次 |
 | `--upstream-timeout` | 30 | 上游的读写超时（秒） |

@@ -580,6 +580,18 @@ async def test_xff_only_from_trusted_proxies(
     assert ev_lb["source"]["ip"] == "198.51.100.4"
 
 
+async def test_pass_through_headers_only_from_trusted_proxies(
+    make_gate: GateFactory, upstream: Upstream
+) -> None:
+    app, _gate = await make_gate(forward_client_headers=["cf-connecting-ip"], trusted_proxies=["10.0.0.0/24"])
+    async with client_for(app, ip="203.0.113.50") as direct:
+        await direct.get("/", headers={"CF-Connecting-IP": "198.51.100.4"})
+    async with client_for(app, ip="10.0.0.2") as via_proxy:
+        await via_proxy.get("/", headers={"CF-Connecting-IP": "198.51.100.5"})
+    assert upstream.header(0, "cf-connecting-ip") == []
+    assert upstream.header(1, "cf-connecting-ip") == ["198.51.100.5"]
+
+
 async def test_xff_multi_hop_and_unparsable_element(
     make_gate: GateFactory, fake_server: FakeServer, upstream: Upstream
 ) -> None:

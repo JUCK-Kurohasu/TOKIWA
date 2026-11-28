@@ -174,7 +174,7 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP). Las que excedan reciben 429. 0 = sin límite |
 | `gate.trusted_proxies` | `[]` | Pares cuyo `X-Forwarded-For` se lee (IP / CIDR del LB / CDN delante). Vacía mantiene el comportamiento anterior (se confía en todos) con advertencia |
 | `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | Pausa máxima / tiempo total del cuerpo de la solicitud. Por encima: 408. 0 = sin límite |
-| `gate.max_requests_per_client` | 64 | Solicitudes en curso por IP de origen. Por encima: 429. 0 = sin límite |
+| `gate.max_requests_per_client` | 64 | Solicitudes en curso por IP de origen. Por encima: 429. 0 = sin límite. Detrás de un LB requiere `trust_forwarded_for` + `trusted_proxies` (si no, todos comparten una dirección) |
 | `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / ninguno (`<server.data_dir>/gate-policy-<sensor_id>.json`) / 168 | Guarda la política obtenida y la aplica al iniciar si el servidor no responde |
 | `agent.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `agent.ingest_token` | Ninguno | Token de API (ámbito: ingest) |

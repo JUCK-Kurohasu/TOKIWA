@@ -170,7 +170,7 @@ deception:
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | tarpit で同時に保持する要求の上限（全体 / 同じ IP）。超えた要求は 429。0 で無制限 |
 | `gate.trusted_proxies` | `[]` | `X-Forwarded-For` を読む接続元（前段 LB / CDN の IP・CIDR）。空は従来動作（全接続元を信頼）で警告 |
 | `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | リクエストボディの無通信 / 全体の上限。超えると 408。0 で無制限 |
-| `gate.max_requests_per_client` | 64 | 同じ送信元 IP の処理中リクエスト数の上限。超えると 429。0 で無制限 |
+| `gate.max_requests_per_client` | 64 | 同じ送信元 IP の処理中リクエスト数の上限。超えると 429。0 で無制限。LB の背後では `trust_forwarded_for` + `trusted_proxies` が前提（無いと全利用者が 1 アドレスに見える） |
 | `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / なし（`<server.data_dir>/gate-policy-<sensor_id>.json`）/ 168 | 取得したポリシーを保存し、起動時にサーバー不達でも強制する |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA サーバー |
 | `agent.ingest_token` | なし | API トークン（scope: ingest） |

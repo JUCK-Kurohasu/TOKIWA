@@ -170,7 +170,7 @@ deception:
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）。超出的请求返回 429。0 表示不限制 |
 | `gate.trusted_proxies` | `[]` | 读取其 `X-Forwarded-For` 的对端（前置 LB / CDN 的 IP / CIDR）。为空时保持旧行为（信任所有对端）并警告 |
 | `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | 请求体的空闲 / 总时间上限。超出返回 408。0 表示不限制 |
-| `gate.max_requests_per_client` | 64 | 同一来源 IP 正在处理的请求数上限。超出返回 429。0 表示不限制 |
+| `gate.max_requests_per_client` | 64 | 同一来源 IP 正在处理的请求数上限。超出返回 429。0 表示不限制。在 LB 之后需要 `trust_forwarded_for` + `trusted_proxies`（否则所有用户共用一个地址） |
 | `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / 无（`<server.data_dir>/gate-policy-<sensor_id>.json`）/ 168 | 保存获取到的策略，启动时服务器不可达也强制执行 |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `agent.ingest_token` | 无 | API 令牌（scope: ingest） |

@@ -173,7 +173,7 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Max requests held by the tarpit at once (in total / per IP). Requests beyond get 429. 0 = no cap |
 | `gate.trusted_proxies` | `[]` | Peers whose `X-Forwarded-For` is read (IPs / CIDRs of the LB / CDN in front). Empty keeps the old behaviour (every peer trusted) with a warning |
 | `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | Max idle gap / total time for a request body. Beyond it: 408. 0 = no limit |
-| `gate.max_requests_per_client` | 64 | Requests in flight per source IP. Beyond it: 429. 0 = no limit |
+| `gate.max_requests_per_client` | 64 | Requests in flight per source IP. Beyond it: 429. 0 = no limit. Behind a LB, needs `trust_forwarded_for` + `trusted_proxies` (otherwise every visitor shares one address) |
 | `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / none (`<server.data_dir>/gate-policy-<sensor_id>.json`) / 168 | Save the fetched policy and enforce it at startup when the server is unreachable |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA server |
 | `agent.ingest_token` | None | API token (scope: ingest) |

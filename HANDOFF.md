@@ -28,19 +28,27 @@ GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 
   - #39: リクエストボディの無通信 15 秒・全体 120 秒で 408（`gate:slow_body`）、同一 IP の処理中 64 件超で 429（`gate:conn_limit`）。
   - #55: 送信待ちがあふれたら普通のページ閲覧から捨てる。捨てた件数は次の送信で `gate.health` イベントとして報告し、
     検知 `sensor.events_dropped`（送信元 IP なし）が出る。
+  - 追加（advisor レビューで判明・修正）: UA の孤立サロゲートで sessionizer と AI 検知器がハッシュ時に例外となり、その要求が AI 帰属から
+    漏れていた → Event 検証で U+FFFD に置換（#25）。triage の判定 JSON（Core UPDATE で書くので before_flush を通らない）も明示的に掃除。
+    #32 は保存の「古さ」を最後の変更ではなく最後のサーバー確認（ファイルの mtime。変わらない取得でも 1 時間ごとに更新）から測る。
+    `forward_client_headers`（CF-Connecting-IP 等）も `trusted_proxies` を設定したら列挙外の接続元からは渡さない（#22 と同類）。
 - **既定動作の変更（利用者に影響）**: (1) 自動承認を使っていて、プライベート / CGNAT 宛てに対処していた環境は人間の承認待ちになる。
-  (2) 120 秒を超えるアップロード・15 秒止まるボディは 408（0 で無効）。(3) 同一 IP から 65 本目の同時要求は 429（NAT 配下の多数利用者に注意）。
+  (2) 120 秒を超えるアップロード・15 秒止まるボディは 408（0 で無効）。(3) 同一 IP から 65 本目の同時要求は 429。**LB / リバースプロキシの背後で `trust_forwarded_for` を有効にしていないと全利用者が LB の 1 アドレスに見え、サイト全体で同時 64 件**になる（`trust_forwarded_for` + `trusted_proxies` を設定するか 0 で無効化。NAT 配下の多数利用者も同様）。
   (4) `trust_forwarded_for=true` で `trusted_proxies` が空だと起動時に警告（`TOKIWA_STRICT_CONFIG=1` なら起動拒否）。
   (5) Gate が `<data_dir>` にファイルを書く（書けなければ警告のみ）。
 - **残り（Closes にしなかった理由）**: #22 は既定が後方互換（空なら全信頼）なので、設定しない限り穴は残る。提案理由への
   「XFF 由来の送信元」表示も未対応。#23 は影響見積もり（同一 IP の別セッション数など）が未対応。#25 は sensors 側の shipper の
   毒バッチ分割（推奨 (4)）と PG の CI ジョブが未対応。#39 は **ヘッダ段の slowloris は uvicorn 0.54 にヘッダ読み取りタイムアウトが無く
   Gate では防げない**（前段 nginx / LB を wiki で案内）。#55 はディスクへのスピル・定期ハートビート（#79）が未対応。
-  #32 はポリシー署名（#139）が無いので、保存ファイルの改ざんは防げない（600 の権限のみ）。
+  #32 はポリシー署名（#139）が無いので、保存ファイルの改ざんは防げない（600 の権限のみ）。#59 は検知器が付けた CVE（本物の Log4Shell
+  ペイロード）では依然として別 IP のインシデントに合流する。推奨 (2) 提案先をその IP 自身の証拠で再検証、(3) `proposed_by=llm` を
+  自動承認から外すオプション、は未対応。
 - **要判断（ユーザー）**: (1) ADR-0007 / ADR-0008 の採否。(2) `shared_cidrs` の既定に RFC 1918 を含めたままでよいか。(3) `max_requests_per_client=64`・
   ボディ 15/120 秒の既定値。(4) #22 の既定を将来「空なら XFF を信頼しない」に変えるか（現状は警告のみ）。
 - **テスト用の新しい仕組み**: `TOKIWA_TEST_DATABASE_URL=postgresql+asyncpg://...` で DB を使うテストを別 DB で回せる（テストごとに全テーブル drop）。
   このセッションでは `/usr/lib/postgresql/16` の `initdb` / `pg_ctl` でポート 55432 に一時クラスタを立てた（`--extra postgres` で asyncpg）。
+- **性能**: 保存時サニタイザの追加コストは測定誤差内（1000 イベント・3 回の最良値で 2.43 秒 / 無効時 2.58 秒）。Event 検証の
+  サロゲート置換（`raw` を毎回再構築）は未計測。
 - **チェック**: backend 2114 passed（約 229 秒。SQLite）、DB を触る 161 件（ingest・respond・correlate・gate health）は PostgreSQL 16 でも passed、ruff・format 緑、mypy 既知 4 件のみ、frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK（14 ページ × 4 言語）。**未検証**: Docker（lab の `trusted_proxies` でホストからのポート転送が 172.28.0.0/24 から届くか、deploy の `gate-state` ボリュームの権限）。
 
 ## 監査修正 第 4 弾（2026-11-23〜24）— 系統 J 運用 / 第 1〜3 弾の残り（検知シグナル・UI）
