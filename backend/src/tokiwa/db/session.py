@@ -16,7 +16,10 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from tokiwa.config import get_settings
+from tokiwa.db import sanitize
 from tokiwa.db.base import Base
+
+sanitize.install()  # NUL / lone surrogates / VARCHAR overflow never fail a flush (audit #25)
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None

@@ -284,3 +284,5 @@ class IngestResult(BaseModel):
     accepted: int
     alerts: int
     alert_ids: list[str] = Field(default_factory=list)
+    # Events of the batch that were already stored or repeated within it (a sensor retry), skipped (audit #25).
+    duplicates: int = 0
