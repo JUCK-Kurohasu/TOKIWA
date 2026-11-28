@@ -71,10 +71,14 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | ingest_token | `--token-file`（不要用 `--token`：会在 `ps` 中可见） | 无 | 需要 `ingest` 和 `gate` 作用域。也可以用环境变量 `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕获请求体的前多少字节（0 表示不捕获） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | 拉取策略的间隔 |
-| trust_forwarded_for | `--trust-forwarded-for` | false | 将 `X-Forwarded-For` 的 **最右端** 作为来源 IP |
+| trust_forwarded_for | `--trust-forwarded-for` | false | 从 `X-Forwarded-For` 确定来源 IP（仅限 `trusted_proxies` 中的对端；从右向左读取并跳过可信代理） |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 | forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 默认会移除的请求头（见下文）中，要原样转发给上游的那些 |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）；超出的请求返回 429（0 表示不限制） |
+| trusted_proxies | —（`TOKIWA_GATE__TRUSTED_PROXIES`） | `[]` | 启用 `trust_forwarded_for` 时，仅当 TCP 对端在此列表中（IP / CIDR，例如 `["10.0.0.0/8"]`）才读取 `X-Forwarded-For`。为空时保持旧行为（信任任何对端）并在启动时警告；设置 `TOKIWA_STRICT_CONFIG=1` 时拒绝启动 |
+| body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | 请求体中断的最长时间 / 整个请求体的上限。超出时返回 408 并释放上游连接（标签 `gate:slow_body`；0 表示不限制） |
+| max_requests_per_client | — | 64 | 同一来源 IP 正在处理的请求数上限。超出时立即返回 429（标签 `gate:conn_limit`；0 表示不限制）。**在 LB 之后未启用 `trust_forwarded_for` 时，所有用户都显示为 LB 的地址，整个站点只能同时处理 64 个** |
+| persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | 保存获取到的策略，启动时即使无法连接服务器也强制执行（过旧的副本不使用；0 表示不限制） |
 
 仅 CLI 提供的运维参数：`--upstream-timeout`（30 秒）、`--max-queue`（待发送事件上限 10,000 条）、
 `--preserve-host / --rewrite-host`、`--access-log`、`--limit-concurrency`（并发连接上限，超出返回 503，默认不限制）。
@@ -98,6 +102,15 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 - 事件中最多保留 64 种请求头。User-Agent、Referer、`Sec-Fetch-*`、`X-Forwarded-*` 等用于检测的请求头无论出现在什么位置都会保留；
   超出的部分通过标签 `gate:headers_truncated` 和请求头数量（label `gate.header_count`）体现。
 - **fail-open**：即使 TOKIWA 服务器停止，Gate 的代理功能也不会停止（事件会暂时缓存并重新发送）。
+- **来源 IP**：启用 `trust_forwarded_for` 后，请在 `trusted_proxies` 中列出前置 LB / CDN 的地址。只读取这些对端发来的
+  `X-Forwarded-For`，从右向左跳过可信代理，第一个其他地址即为客户端。遇到非 IP 的元素（如 `unknown`）即停止。
+  其他对端发来的 `X-Forwarded-For` 会被忽略，并打上标签 `gate:untrusted_forwarded_for`。
+- **慢速攻击**：一点点发送请求体的请求返回 408，同一 IP 并发请求过多时返回 429。**慢速发送请求头的攻击（slowloris）发生在
+  Gate 之前的 uvicorn 阶段，Gate 无法阻止。** 直接暴露在互联网上时，请在前面放置具备请求头读取超时的 nginx 或负载均衡器。
+- **重启时的策略**：最后获取的策略（封禁、诱饵、金丝雀）会保存到文件，启动后即使无法连接服务器也会执行；已过期的条目会被移除。
+  在 Docker 中 `/data` 需要卷（`deploy/compose.yaml` 中的 `gate-state`）。
+- **事件丢弃**：服务器停止期间发送队列溢出时，优先丢弃普通页面浏览（GET/HEAD、2xx/3xx、无查询字符串、无标签）。
+  丢弃的数量会随下一批送达服务器的数据以 `gate.health` 事件报告，并产生检测 `sensor.events_dropped`。
 - **fail-static**：无法获取策略时，保持最后一次的策略（以免出现“让服务器宕机就能解除封禁”这样的漏洞）。但 Gate 仍会遵守每条封禁自身的期限（TTL），到期即解除。
 - 健康检查：`GET /__tokiwa/health` → `{"status":"ok"}`。对来自本地 / 私有 IP 的请求，还会返回发送统计等信息。
 - 不支持：WebSocket（返回 501）、HTTP/2 上游、gRPC。Gate 以单进程运行为前提。

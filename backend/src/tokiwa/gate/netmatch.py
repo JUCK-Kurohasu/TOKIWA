@@ -146,3 +146,47 @@ class IpTable(Generic[T]):
 
     def __bool__(self) -> bool:
         return self._size > 0
+
+
+def resolve_forwarded_client(
+    peer: str | None, xff: str, trusted: IpTable[bool] | None
+) -> tuple[str | None, bool]:
+    """Client address from the TCP peer and an ``X-Forwarded-For`` chain; returns ``(client_ip, peer_trusted)``.
+
+    Audit #22. ``trusted`` is the ``gate.trusted_proxies`` table, or None for the legacy mode (an empty list:
+    every peer counts as a trusted proxy and only one hop is read).
+
+    - The chain is only read when the peer itself is a trusted proxy; anyone who reaches the Gate directly
+      keeps their real address however many X-Forwarded-For values they send.
+    - From the right, entries that are trusted proxies are skipped (CDN -> LB -> Gate with both listed); the
+      first entry that is not is the client.
+    - An element that is not an IP (``unknown``, ``_hidden``, ``unix:``) ends the walk at the last trusted hop.
+      The old code skipped it and kept going left, into the part the client wrote itself.
+    """
+    peer_ip = parse_ip(peer)
+    peer_text = str(peer_ip) if peer_ip is not None else peer
+    if trusted is not None and (peer_ip is None or peer_ip not in trusted):
+        return peer_text, False
+    current = peer_text
+    for element in reversed([p.strip() for p in xff.split(",") if p.strip()]):
+        ip = parse_ip(element)
+        if ip is None:
+            return current, True
+        current = str(ip)
+        if trusted is None or ip not in trusted:
+            return current, True
+    return current, True
+
+
+def client_bucket_key(client_ip: str | None) -> str:
+    """Key for per-client limits: the address for IPv4, its /64 for IPv6 (ADR-0008 step 3, audit #142).
+
+    One IPv6 subscriber normally gets a whole /64, so keying by the full address let a client rotate through 2^64
+    addresses past every per-client limit (rate limit, in-flight cap, tarpit slots).
+    """
+    ip = parse_ip(client_ip)
+    if ip is None:
+        return client_ip or "unknown"
+    if ip.version == 6:
+        return str(ipaddress.IPv6Network((int(ip) >> 64 << 64, 64)))
+    return str(ip)

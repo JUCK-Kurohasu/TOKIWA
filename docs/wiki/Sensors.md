@@ -71,10 +71,14 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 | ingest_token | `--token-file`（`--token` は `ps` で見えるので使わない） | なし | スコープ `ingest` と `gate` が必要。環境変数 `TOKIWA_GATE__INGEST_TOKEN` でも可 |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | 捕捉するリクエストボディの先頭バイト数（0 で捕捉しない） |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | ポリシーを取りに行く間隔 |
-| trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` の **右端** を送信元 IP とする |
+| trust_forwarded_for | `--trust-forwarded-for` | false | `X-Forwarded-For` から送信元 IP を決める（`trusted_proxies` の接続元からだけ。右から読み、信頼プロキシを飛ばす） |
 | max_request_headers | —（`TOKIWA_GATE__MAX_REQUEST_HEADERS`） | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431（0 で無効） |
 | forward_client_headers | —（`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`） | `[]` | 既定では除去するヘッダ（下記）のうち、そのまま上流へ渡すもの |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | tarpit で同時に保持する要求の上限（全体 / 同じ IP）。超えた要求は 429（0 で無制限） |
+| trusted_proxies | —（`TOKIWA_GATE__TRUSTED_PROXIES`） | `[]` | `trust_forwarded_for` 時、`X-Forwarded-For` を読むのは接続元がここに含まれる場合だけ（IP / CIDR。例 `["10.0.0.0/8"]`）。空は従来動作（どの接続元も信頼）で起動時に警告、`TOKIWA_STRICT_CONFIG=1` なら起動拒否 |
+| body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | リクエストボディが途切れた時間 / 全体の上限。超えると 408 を返し上流接続を解放（タグ `gate:slow_body`。0 で無制限） |
+| max_requests_per_client | — | 64 | 同じ送信元 IP の処理中リクエスト数の上限。超えると即 429（タグ `gate:conn_limit`。0 で無制限）。**LB の背後で `trust_forwarded_for` を使わないと全利用者が LB の 1 アドレスに見え、サイト全体で 64 件になる** |
+| persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | 取得したポリシーを保存し、起動時にサーバーへ繋がらなくても強制する（古すぎる保存は使わない。0 で無制限） |
 
 CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue`（送信待ちイベントの上限 10,000 件）、
 `--preserve-host / --rewrite-host`、`--access-log`、`--limit-concurrency`（同時接続の上限。超えると 503。既定は無制限）。
@@ -98,6 +102,16 @@ CLI だけにある運用ノブ: `--upstream-timeout`（30 秒）、`--max-queue
 - イベントに残すリクエストヘッダは 64 種類までです。User-Agent・Referer・`Sec-Fetch-*`・`X-Forwarded-*` など検知に使うヘッダは
   位置に関係なく必ず残し、超えた分はタグ `gate:headers_truncated` とヘッダ数（label `gate.header_count`）で分かるようにします。
 - **fail-open**: TOKIWA サーバーが止まっても、Gate のプロキシは止まりません（イベントは一時的に溜めて再送します）。
+- **送信元 IP**: `trust_forwarded_for` を有効にしたら `trusted_proxies` に前段の LB / CDN のアドレスを列挙してください。列挙した接続元からの
+  `X-Forwarded-For` だけを右から読み、信頼するプロキシの分を飛ばした最初のアドレスを送信元にします。IP でない要素（`unknown` など）が
+  あればそこで止めます。列挙外の接続元が `X-Forwarded-For` を送ってきた場合は無視し、タグ `gate:untrusted_forwarded_for` を付けます。
+- **低速攻撃**: ボディを少しずつ送る要求は 408、同じ IP からの同時要求が多すぎる場合は 429 で切ります。**ヘッダを少しずつ送る攻撃
+  （slowloris）は Gate より手前の uvicorn の段階で起きるため Gate では防げません**。インターネットに直接出す場合は、ヘッダの読み取り
+  タイムアウトを持つ nginx やロードバランサを前に置いてください。
+- **再起動時のポリシー**: 最後に取得したポリシー（遮断・デコイ・カナリア）をファイルに保存し、起動直後にサーバーへ繋がらなくても
+  それを強制します。期限の過ぎた項目は外します。Docker では `/data` にボリュームが要ります（`deploy/compose.yaml` の `gate-state`）。
+- **イベントの破棄**: サーバー停止中に送信待ちがあふれると、まず普通のページ閲覧（GET/HEAD・2xx/3xx・クエリなし・タグなし）から捨てます。
+  捨てた件数は次にサーバーへ届く送信で `gate.health` イベントとして報告し、検知 `sensor.events_dropped` が出ます。
 - **fail-static**: ポリシーが取れないときは最後のポリシーを維持します（サーバーを落として遮断を外させる、という抜け道を作らないため）。ただし各遮断の期限（TTL）は Gate 側でも守り、期限を過ぎたものは外します。
 - ヘルスチェック: `GET /__tokiwa/health` → `{"status":"ok"}`。ローカル／プライベート IP からは送信統計なども返します。
 - 未対応: WebSocket（501 を返します）、HTTP/2 の上流、gRPC。Gate は単一プロセス前提です。

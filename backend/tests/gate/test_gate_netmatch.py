@@ -105,3 +105,22 @@ def test_large_tables_stay_fast_and_correct() -> None:
         ip = ipaddress.IPv4Address(rng.getrandbits(32))
         expected = str(ip) in hosts or any(ip in net for net in networks)
         assert (ip in table) is expected
+
+
+def test_resolve_forwarded_client() -> None:
+    """Audit #22: chain read only from trusted peers; trusted hops skipped; non-IP elements stop the walk."""
+    from tokiwa.gate.netmatch import resolve_forwarded_client
+
+    trusted, _ = IpTable.build([("10.0.0.0/8", True), ("192.0.2.0/24", True)])
+    assert resolve_forwarded_client("203.0.113.5", "198.51.100.1", trusted) == ("203.0.113.5", False)
+    assert resolve_forwarded_client("::ffff:10.0.0.2", "198.51.100.1", trusted) == ("198.51.100.1", True)
+    assert resolve_forwarded_client("10.0.0.2", "1.1.1.1, 198.51.100.1, 192.0.2.3", trusted) == (
+        "198.51.100.1",
+        True,
+    )
+    assert resolve_forwarded_client("10.0.0.2", "198.51.100.1, _hidden", trusted) == ("10.0.0.2", True)
+    assert resolve_forwarded_client("10.0.0.2", "", trusted) == ("10.0.0.2", True)
+    assert resolve_forwarded_client("10.0.0.2", "10.0.0.3, 10.0.0.4", trusted) == ("10.0.0.3", True)
+    # Legacy (no list): one hop, any peer.
+    assert resolve_forwarded_client("203.0.113.5", "1.1.1.1, 198.51.100.1", None) == ("198.51.100.1", True)
+    assert resolve_forwarded_client("203.0.113.5", "198.51.100.1, unknown", None) == ("203.0.113.5", True)

@@ -46,6 +46,7 @@ from tokiwa.respond.validate import (
     ONE_SHOT_ACTIONS,
     ActionValidationError,
     ValidatedAction,
+    shared_network,
     validate_action,
 )
 from tokiwa.runtime import on_startup
@@ -190,6 +191,8 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
     )
     who = actor or proposal.proposed_by.value
     reason = _clean_reason(proposal.reason)
+    # Audit #23: a target many people share (CGNAT, corporate NAT, an internal proxy) waits for a human.
+    shared = shared_network(v.target, settings) if v.action_type in NETWORK_ACTIONS else None
     now = utcnow()
     async with _propose_lock(), session_scope() as session:
         # Same transaction as the dedup below, so a concurrent reject / revert is seen by both or neither.
@@ -251,7 +254,7 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
                 status=ActionStatus.PROPOSED.value,
                 reversible=v.reversible,
                 ttl_minutes=v.ttl_minutes,
-                result=_initial_result(v.notes, hold),
+                result=_initial_result(v.notes, hold, shared),
             )
             session.add(row)
             await record_audit(
@@ -274,6 +277,14 @@ async def create_proposal(proposal: ActionProposal, *, actor: str | None = None)
         return merged
     await bus.publish("action.proposed", created)
     if auto_approve_allowed(v.action_type, settings) and hold is None:
+        if shared is not None:
+            await record_audit(
+                POLICY_ACTOR,
+                "response.auto_approve_withheld",
+                target=created.id,
+                details={"reason": "shared_address", "shared_cidr": shared},
+            )
+            return created
         weak = await _weak_deception_basis(v.alert_id, v.incident_id)
         if weak:
             # Audit #133: a passive / browser-induced canary trip can be caused by a third party (an <img> on
@@ -357,8 +368,18 @@ async def _weak_deception_basis(alert_id: str | None, incident_id: str | None) -
     return [r[0] for r in rows]
 
 
-def _initial_result(notes: tuple[str, ...], hold: ResponseSuppressionRow | None) -> dict[str, Any]:
-    result: dict[str, Any] = {"validation_notes": list(notes)} if notes else {}
+def _initial_result(
+    notes: tuple[str, ...], hold: ResponseSuppressionRow | None, shared: str | None = None
+) -> dict[str, Any]:
+    all_notes = list(notes)
+    if shared is not None:
+        all_notes.append(
+            f"target is inside response.shared_cidrs ({shared}): the address may be shared by many legitimate "
+            "users (carrier-grade NAT, corporate NAT, a proxy); never auto-approved"
+        )
+    result: dict[str, Any] = {"validation_notes": all_notes} if all_notes else {}
+    if shared is not None:
+        result["shared_address"] = shared
     if hold is not None:
         # Shown in the UI: why this proposal waits for a human although auto-approve may be on.
         result["suppression"] = {

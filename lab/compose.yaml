@@ -94,6 +94,8 @@ services:
       TOKIWA_GATE__SENSOR_ID: lab-gate
       # Lab only: lets `tokiwa sim run --spoof-xff` emulate many distinct source IPs from one container.
       TOKIWA_GATE__TRUST_FORWARDED_FOR: "true"
+      # Only peers on the lab network (sim / the host's port mapping) may claim an address (audit #22).
+      TOKIWA_GATE__TRUSTED_PROXIES: '["172.28.0.0/24"]'
       TOKIWA_HEALTHCHECK_URL: http://127.0.0.1:8080/__tokiwa/health
     volumes:
       - type: volume

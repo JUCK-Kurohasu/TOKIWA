@@ -50,7 +50,7 @@ uv run tokiwa gate run --upstream http://127.0.0.1:3000 --listen 0.0.0.0:8080 --
 
 1. `/__tokiwa/health` → ヘルス
 2. `blocked` に一致 → **403**（本文を読まずに即応答。タグ `gate:blocked`, label `gate.rule`）
-3. `rate_limited` に一致 → クライアント IP ごとのトークンバケット（容量 N、N/60 個/秒で補充）。空なら **429** + `Retry-After`
+3. `rate_limited` に一致 → トークンバケット（容量 N、N/60 個/秒で補充）。範囲のエントリ（`/24` など）は範囲全体で 1 つ、単一アドレスのエントリはクライアントごと（IPv6 は /64 ごと）。範囲内のアドレスを回しても予算は増えない（ADR-0008、監査 #142）。空なら **429** + `Retry-After`
 4. WebSocket（`Upgrade: websocket` / websocket scope）→ **501**（v1 は非対応。ログ + `gate:websocket_unsupported`）
 5. `tarpit` に一致 → `sleep(ms)`（上限 30 s）してから続行（`gate:tarpit`）。保持中の要求が `tarpit_max_concurrent`（全体）/
    `tarpit_max_per_client`（同じ IP）に達していれば待たせずに **429** + `Retry-After`（`gate:tarpit_overflow`）。待っている間に
@@ -127,7 +127,10 @@ deceive の汎用 404 に付く `no-store` は、上流の本物の 404 と見�
 > Gate ホストで権限 600 にする。漏えいが疑われたらトークンを失効し、`/deception` で資産のトークンをローテーションする。
 
 - `version` が変わったときだけ差し替える（同じなら既存テーブル・レートリミッタ状態を維持）。差し替えは参照の一括置換。
-- 初回取得前は何も強制しない（純粋なセンサー兼プロキシ）。取得失敗時は **最後のポリシーを維持**（fail-static）。
+- 取得したポリシーは `gate.policy_cache_file`（既定 `<server.data_dir>/gate-policy-<sensor_id>.json`、権限 600）に保存し、起動時に
+  初回取得より先に読み込んで強制する（監査 #32。以前は初回取得前は何も強制せず、サーバー停止中の再起動で遮断が外れた）。期限の過ぎた
+  エントリは外し、最後にサーバーが確認してから `gate.policy_cache_max_age_hours`（168）を超えた保存は使わない。保存も読み込みも
+  できなければ従来どおり何も強制しない。取得失敗時は **最後のポリシーを維持**（fail-static）。
   ブロックはサーバー側で TTL 管理されるため、サーバーを DoS すれば解除される、という抜け道を作らない。
 - ただし各エントリの期限（`GatePolicy.entry_expires_at`、監査 #64）は Gate 側でも守る: `受信時刻 + (expires_at - generated_at)`
   を単調時計で過ぎたエントリはその場で外す（Gate の壁時計のずれに依存しない）。期限のないエントリは従来どおり維持。
@@ -149,14 +152,16 @@ deceive の汎用 404 に付く `no-store` は、上流の本物の 404 と見�
 - hop-by-hop ヘッダ（`Connection` に列挙されたものも）を双方向で除去。`Transfer-Encoding` 付きリクエストは
   `Content-Length` を落とす（スマグリング対策）。
 - `X-Forwarded-For/Proto/Host`: `trust_forwarded_for=false` ならクライアント送信値を **破棄してゲートの観測値で置換**
-  （ゲート経由で上流に IP を偽装させない）。`true` なら既存チェーンに実ピアを追記し、送信元 IP は **右端** の有効 IP
-  （信頼 LB が付けた値。左端はクライアントが自由に書ける）。
+  （ゲート経由で上流に IP を偽装させない）。`true` で、かつ接続元が `gate.trusted_proxies` に含まれるときだけ、既存チェーンに
+  実ピアを追記し、送信元 IP はチェーンを右から読んで信頼プロキシを飛ばした最初の IP（監査 #22。左側はクライアントが自由に書ける。
+  IP でない要素で読むのをやめる）。列挙外の接続元が送った X-Forwarded-* は `false` と同じく破棄し、タグ `gate:untrusted_forwarded_for`。
+  `trusted_proxies` が空なら従来どおり全接続元を 1 段だけ信頼し、起動時に警告する。
 - それ以外の送信元 IP・スキーム・ルーティングの申告（`Forwarded`, `X-Real-IP`, `True-Client-IP`, `CF-Connecting-IP`, `X-Client-IP`,
   `X-Cluster-Client-IP`, `Fastly-Client-IP`, `X-Originating-IP`, `Client-IP`, `X-Original-Forwarded-For`, `X-Forwarded-Port/Prefix/Server/Scheme/Ssl`,
   `Front-End-Https`, `X-Url-Scheme`, `X-Original-URL`, `X-Rewrite-URL`, `X-Override-URL`。`gate.proxy.STRIPPED_CLIENT_HEADERS`）は
   **除去** し（監査 #138/#147。以前は X-Forwarded-For/Proto/Host 以外は素通しで、上流が `X-Real-IP` や `Forwarded` を読む構成では
   クライアントが任意の IP・https を名乗れた）、Gate が `X-Real-IP: <送信元 IP>` と `Forwarded: for=<送信元 IP>;proto=...;host=...`（1 要素）を
-  付ける。送信元 IP は Gate がイベントに記録するのと同じ値（`trust_forwarded_for=true` なら X-Forwarded-For の右端）。`Forwarded` は
+  付ける。送信元 IP は Gate がイベントに記録するのと同じ値（上の X-Forwarded-For の規則で決めたもの）。`Forwarded` は
   X-Forwarded-For のチェーンから組み立てない（左側はクライアントが書けるので `1.2.3.4;proto=https` で引数を足せてしまう）。
   除去したヘッダ名はイベントに `gate:client_ip_header` + label `gate.stripped_headers` として残り、値自体も `http.headers` に残る。
   前段の信頼できるプロキシが付けたヘッダを上流が読む構成では `forward_client_headers` に列挙する（列挙したものは除去せず、
@@ -210,7 +215,11 @@ uv run python scripts/bench_gate.py [--duration 10 --concurrency 32 --inject --p
   確認すること。Gate は br・zstd を展開できない（`gate:req_encoding_unknown` だけ残る）ので、上流がそれらを展開する構成では
   圧縮ボディ内の攻撃は検知されない。
 - 本文の redact は正規表現ベース。未知形式の秘密は残りうる。`capture_body_bytes=0` で本文捕捉を止められる。
-- `trust_forwarded_for` は信頼 LB が 1 段の構成を想定（右端 1 個を採用）。多段構成は未対応。
+- 多段構成（CDN → LB → Gate）は `trusted_proxies` に両段を列挙すれば扱える（監査 #22）。列挙しない段の出口 IP が送信元に見える。
+- ヘッダを少しずつ送る slowloris は uvicorn（0.54 にヘッダ読み取りタイムアウトが無い）の段階で起き、Gate では防げない（監査 #39）。
+  インターネットに直接出すなら前段に nginx / LB を置く。ボディの低速送信は 408、同一 IP の同時要求超過は 429 で切る。
+- `max_requests_per_client`（64）は解決後の送信元 IP ごと。**LB / リバースプロキシの背後で `trust_forwarded_for` を有効にしていないと
+  全利用者が LB の 1 アドレスに見え、サイト全体で同時 64 件までになる**。`trust_forwarded_for` + `trusted_proxies` を設定するか、0 で無効にする。
 - `/__tokiwa/health` の詳細は RFC1918 等の「プライベート」判定（Python `ipaddress.is_private`）に依存。
   ドキュメント用アドレス帯（TEST-NET）もプライベート扱いになる。
 - ポリシー取得 API（`GET /api/v1/gate/policy`）は respond モジュールの実装に依存。未実装の間は 404 → WARN を 1 回出し、

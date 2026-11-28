@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tokiwa.db.models.telemetry import EventRow
 from tokiwa.schemas.events import Event
+
+log = logging.getLogger(__name__)
 
 
 def event_to_row(e: Event) -> EventRow:
@@ -45,9 +49,33 @@ def row_to_event(row: EventRow) -> Event:
     return ev
 
 
-async def store_events(session: AsyncSession, events: Sequence[Event]) -> None:
-    session.add_all([event_to_row(e) for e in events])
-    await session.flush()
+async def store_events(session: AsyncSession, events: Sequence[Event]) -> list[str]:
+    """Insert the events; returns the ids that could not be stored (normally none).
+
+    The batch goes in one savepoint. If the database rejects it (a concurrent batch inserted the same id, or a
+    value the sanitizer did not anticipate), each event is retried in its own savepoint and the rejected ones are
+    logged and skipped, so one bad row never costs the rest of the batch (audit #25). Rows added inside a
+    rolled-back savepoint are expunged by SQLAlchemy.
+    """
+    rows = [event_to_row(e) for e in events]
+    try:
+        async with session.begin_nested():
+            session.add_all(rows)
+    except DBAPIError:
+        log.warning("event batch of %d rejected by the database; storing one by one", len(rows))
+    else:
+        return []
+    failed: list[str] = []
+    for e in events:
+        try:
+            async with session.begin_nested():
+                session.add(event_to_row(e))
+        except DBAPIError as exc:
+            failed.append(e.id)
+            log.error(
+                "event %s not stored: %s", e.id, type(exc.orig).__name__ if exc.orig else type(exc).__name__
+            )
+    return failed
 
 
 async def get_events(session: AsyncSession, ids: Sequence[str]) -> list[Event]:

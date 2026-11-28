@@ -62,7 +62,7 @@ curl -s http://localhost:8788/api/v1/auth/status
 `docker compose ... exec tokiwa tokiwa token create ...`。
 
 **所有访问看起来都来自同一个 IP（负载均衡器的 IP）**
-如果 Gate 位于负载均衡器之后，请设置 `--trust-forwarded-for`（`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`）。
+如果 Gate 位于负载均衡器之后，请设置 `--trust-forwarded-for`（`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`）。 请将 LB 的地址列入 `gate.trusted_proxies`（`TOKIWA_GATE__TRUSTED_PROXIES='["10.0.0.0/8"]'`）。否则直接访问 Gate 的客户端也能冒充来源 IP。
 **仅在可信的负载均衡器之后** 使用。在其他环境中，来源 IP 会被伪造。
 
 **WebSocket 无法使用了**

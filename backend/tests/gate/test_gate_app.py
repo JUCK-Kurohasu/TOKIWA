@@ -185,7 +185,7 @@ async def test_blocked_ip_gets_403_and_never_reaches_upstream(
     assert "gate:blocked" not in events[2]["tags"]
 
 
-async def test_rate_limit_429_per_ip_with_refill(
+async def test_rate_limit_429_per_range_with_refill(
     make_gate: GateFactory, upstream: Upstream, fake_server: FakeServer, fake_time: FakeTime
 ) -> None:
     fake_server.set_policy("v1", rate_limited={"203.0.113.0/24": 2})
@@ -195,15 +195,15 @@ async def test_rate_limit_429_per_ip_with_refill(
         limited = await c.get("/p3")
     assert codes == [200, 200, 429]
     assert limited.status_code == 429 and limited.headers["retry-after"] == "30"
-    async with client_for(app, ip="203.0.113.99") as c:  # same CIDR, separate bucket
-        assert (await c.get("/other")).status_code == 200
+    async with client_for(app, ip="203.0.113.99") as c:  # same CIDR, same budget (audit #142)
+        assert (await c.get("/other")).status_code == 429
     fake_time.advance(30)
     async with client_for(app) as c:
         assert (await c.get("/again")).status_code == 200
-    assert len(upstream.requests) == 4
+    assert len(upstream.requests) == 3
     events = await events_of(gate, fake_server)
     limited_events = [e for e in events if "gate:rate_limited" in e["tags"]]
-    assert len(limited_events) == 2
+    assert len(limited_events) == 3
     assert limited_events[0]["labels"]["gate.rule"] == "203.0.113.0/24"
 
 
@@ -558,6 +558,84 @@ async def test_xff_trusted_uses_rightmost_entry(
     assert ev_blocked["source"]["ip"] == "198.51.100.4"
     assert ev_blocked["labels"]["gate.peer_ip"] == "10.0.0.2"
     assert ev_spoof["source"]["ip"] == "192.0.2.9"
+
+
+async def test_xff_only_from_trusted_proxies(
+    make_gate: GateFactory, fake_server: FakeServer, upstream: Upstream
+) -> None:
+    """Audit #22: with trusted_proxies set, a client reaching the Gate directly cannot claim an address."""
+    fake_server.set_policy("v1", blocked=["198.51.100.4"])
+    app, gate = await make_gate(trust_forwarded_for=True, trusted_proxies=["10.0.0.0/24"])
+    async with client_for(app, ip="203.0.113.50") as direct:
+        spoofed = await direct.get("/", headers={"X-Forwarded-For": "198.51.100.4"})
+    async with client_for(app, ip="10.0.0.2") as via_lb:
+        blocked = await via_lb.get("/", headers={"X-Forwarded-For": "198.51.100.4"})
+    assert spoofed.status_code == 200  # the claim was ignored: not blocked as 198.51.100.4
+    assert blocked.status_code == 403
+    # Upstream sees the direct client's real address only, not its chain.
+    assert upstream.header(0, "x-forwarded-for") == ["203.0.113.50"]
+    ev_direct, ev_lb = await events_of(gate, fake_server)
+    assert ev_direct["source"]["ip"] == "203.0.113.50"
+    assert "gate:untrusted_forwarded_for" in ev_direct["tags"]
+    assert ev_lb["source"]["ip"] == "198.51.100.4"
+
+
+async def test_pass_through_headers_only_from_trusted_proxies(
+    make_gate: GateFactory, upstream: Upstream
+) -> None:
+    app, _gate = await make_gate(forward_client_headers=["cf-connecting-ip"], trusted_proxies=["10.0.0.0/24"])
+    async with client_for(app, ip="203.0.113.50") as direct:
+        await direct.get("/", headers={"CF-Connecting-IP": "198.51.100.4"})
+    async with client_for(app, ip="10.0.0.2") as via_proxy:
+        await via_proxy.get("/", headers={"CF-Connecting-IP": "198.51.100.5"})
+    assert upstream.header(0, "cf-connecting-ip") == []
+    assert upstream.header(1, "cf-connecting-ip") == ["198.51.100.5"]
+
+
+async def test_xff_multi_hop_and_unparsable_element(
+    make_gate: GateFactory, fake_server: FakeServer, upstream: Upstream
+) -> None:
+    """CDN -> LB -> Gate: trusted hops are skipped; a non-IP element stops the walk (no left-ward skipping)."""
+    app, gate = await make_gate(trust_forwarded_for=True, trusted_proxies=["10.0.0.0/24", "192.0.2.0/24"])
+    async with client_for(app, ip="10.0.0.2") as c:
+        await c.get("/", headers={"X-Forwarded-For": "1.1.1.1, 198.51.100.9, 192.0.2.7"})
+        await c.get("/", headers={"X-Forwarded-For": "198.51.100.4, unknown"})
+    ev_chain, ev_unknown = await events_of(gate, fake_server)
+    assert (
+        ev_chain["source"]["ip"] == "198.51.100.9"
+    )  # CDN edge 192.0.2.7 skipped, client-written 1.1.1.1 unused
+    assert ev_unknown["source"]["ip"] == "10.0.0.2"  # last trusted hop, not the client-written 198.51.100.4
+
+
+async def test_xff_legacy_mode_stops_at_unparsable(make_gate: GateFactory, fake_server: FakeServer) -> None:
+    app, gate = await make_gate(trust_forwarded_for=True)
+    async with client_for(app, ip="10.0.0.2") as c:
+        await c.get("/", headers={"X-Forwarded-For": "198.51.100.4, unknown"})
+    (event,) = await events_of(gate, fake_server)
+    assert event["source"]["ip"] == "10.0.0.2"
+
+
+def test_trusted_proxies_config_checks(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from tokiwa.config import ConfigError, GateSettings
+    from tokiwa.gate.app import _trusted_proxy_table
+
+    legacy = GateSettings(trust_forwarded_for=True)
+    with caplog.at_level("WARNING"):
+        assert _trusted_proxy_table(legacy) is None
+    assert "trusted_proxies is empty" in caplog.text
+    # A list that fails to parse trusts nobody rather than everybody.
+    typo = _trusted_proxy_table(GateSettings(trust_forwarded_for=True, trusted_proxies=["10.0.0.0/33"]))
+    assert typo is not None and len(typo) == 0
+    assert _trusted_proxy_table(GateSettings(trust_forwarded_for=False)) is None
+    monkeypatch.setenv("TOKIWA_STRICT_CONFIG", "1")
+    with pytest.raises(ConfigError):
+        _trusted_proxy_table(legacy)
+    assert (
+        _trusted_proxy_table(GateSettings(trust_forwarded_for=True, trusted_proxies=["10.0.0.0/8"]))
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------------- websocket / health

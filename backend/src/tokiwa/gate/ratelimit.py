@@ -1,8 +1,9 @@
 """Per-client token-bucket rate limiter for the gate's ``rate_limited`` policy.
 
-The policy says "max N requests per minute" for an IP/CIDR. Each *client IP* gets its own bucket (so a CIDR
-entry limits every address inside it individually, matching how the respond module proposes per-attacker
-limits). Bucket capacity is N (burst) and it refills at N/60 tokens per second.
+The policy says "max N requests per minute" for an IP/CIDR. The caller picks the bucket key (``gate.app``): a range
+entry is one budget for the whole range, and a single-address entry keys by the client, an IPv6 client by its /64
+(ADR-0008, audit #142: per-address buckets let a client rotate through a range or its own /64 without limit).
+Bucket capacity is N (burst) and it refills at N/60 tokens per second.
 
 Memory is bounded: buckets live in an LRU map (``max_keys``); an evicted bucket simply starts full again,
 which errs on the side of letting traffic through (fail-open), never on blocking legitimate users.

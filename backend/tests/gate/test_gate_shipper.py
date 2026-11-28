@@ -23,13 +23,22 @@ def _event(i: int) -> Event:
 
 def _shipper(server: FakeServer, **kw: object) -> tuple[EventShipper, httpx.AsyncClient]:
     client = httpx.AsyncClient(transport=httpx.MockTransport(server.handler))
-    args: dict[str, object] = {"batch_size": 3, "flush_interval": 0.05, "max_queue": 10}
+    args: dict[str, object] = {
+        "batch_size": 3,
+        "flush_interval": 0.05,
+        "max_queue": 10,
+        "sensor_id": "gate-x",
+    }
     args.update(kw)
     return EventShipper(client, "http://tokiwa.test", "tkw_ship", **args), client  # type: ignore[arg-type]
 
 
 def _ids(server: FakeServer) -> list[int]:
-    return [int(e["labels"]["i"]) for e in server.events]
+    return [int(e["labels"]["i"]) for e in server.events if e["dataset"] != "gate.health"]
+
+
+def _health(server: FakeServer) -> list[dict[str, object]]:
+    return [e for e in server.events if e["dataset"] == "gate.health"]
 
 
 async def test_flush_batches_with_token(fake_server: FakeServer) -> None:
@@ -55,6 +64,45 @@ async def test_overflow_drops_oldest(fake_server: FakeServer) -> None:
         assert shipper.stats.dropped_overflow == 15
         await shipper.flush()
     assert _ids(fake_server) == list(range(15, 25))  # newest survive
+    (health,) = _health(fake_server)  # audit #55: the server is told what was lost
+    assert health["labels"]["health.dropped"] == "15"  # type: ignore[index]
+    assert health["sensor_id"] == "gate-x"
+
+
+async def test_overflow_drops_plain_page_views_first(fake_server: FakeServer) -> None:
+    """Audit #55: a flood of cheap GETs no longer pushes the preceding attack out of the queue."""
+    shipper, client = _shipper(fake_server, max_queue=10, batch_size=10)
+    attack = Event(
+        kind=EventKind.HTTP,
+        dataset="gate.http",
+        source=Endpoint(ip="203.0.113.7"),
+        http=HttpInfo(method="GET", path="/products/1", query="id=1' OR 1=1--", status=500),
+        labels={"i": "999"},
+    )
+    async with client:
+        shipper.submit(attack)
+        for i in range(30):
+            shipper.submit(_event(i))
+        assert shipper.stats.dropped_overflow == 21 and shipper.stats.dropped_notable == 0
+        await shipper.flush()
+    assert 999 in _ids(fake_server)
+    (health,) = _health(fake_server)
+    assert health["labels"]["health.dropped"] == "21"  # type: ignore[index]
+
+
+async def test_drop_report_survives_outage_and_is_sent_once(fake_server: FakeServer) -> None:
+    shipper, client = _shipper(fake_server, max_queue=3, batch_size=3)
+    async with client:
+        fake_server.down = True
+        for i in range(5):
+            shipper.submit(_event(i))
+        assert await shipper.flush() == 0  # failed: the report is not consumed
+        fake_server.down = False
+        assert await shipper.flush() == 3
+        assert await shipper.flush() == 0  # nothing new: no second report
+    (health,) = _health(fake_server)
+    assert health["labels"]["health.dropped"] == "2"  # type: ignore[index]
+    assert shipper.stats.drops_reported == 2
 
 
 async def test_transient_failure_keeps_order_and_retries(fake_server: FakeServer) -> None:

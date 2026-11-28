@@ -314,6 +314,14 @@ class ResponseSettings(BaseModel):
     # Reject private / ULA / link-local targets (e.g. management networks). Off by default: lab attackers
     # usually live on private networks.
     block_private_targets: bool = False
+    # Audit #23: addresses that many people share (carrier-grade NAT, corporate NAT / internal proxies). A
+    # network action (block / rate_limit / tarpit / deceive / nftables) on an overlapping target is never
+    # auto-approved and carries a warning; a human can still approve it. Unlike protected_cidrs this does not
+    # refuse anything. Add your own LB / proxy / monitoring / CDN egress ranges here (none are bundled: such
+    # lists change and must come from the provider's current publication).
+    shared_cidrs: list[str] = Field(
+        default_factory=lambda: ["100.64.0.0/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
+    )
     # Refuse targets broader than these prefixes (e.g. 0.0.0.0/0) for gate/nftables actions.
     min_prefix_v4: int = 16
     min_prefix_v6: int = 48
@@ -382,7 +390,19 @@ class GateSettings(BaseModel):
     batch_size: int = 100
     flush_interval_seconds: float = 1.0
     policy_refresh_seconds: float = 5.0
+    # Audit #32: the last policy fetched is saved here and enforced at startup until the server answers, so a Gate
+    # restarted during a server outage keeps blocking. None = <server.data_dir>/gate-policy-<sensor_id>.json.
+    persist_policy: bool = True
+    policy_cache_file: Path | None = None
+    # A saved policy older than this (by its generated_at) is not enforced at startup. 0 = no limit.
+    policy_cache_max_age_hours: float = Field(default=168.0, ge=0)
     trust_forwarded_for: bool = False
+    # Audit #22: with trust_forwarded_for, X-Forwarded-For is honoured only when the TCP peer is one of these
+    # proxies (IPs / CIDRs, e.g. ["10.0.0.0/8"] for the LB subnet). The chain is walked from the right, skipping
+    # entries that are themselves trusted proxies, so CDN -> LB -> Gate works when both hops are listed. Empty
+    # keeps the legacy behaviour (any peer is trusted, one hop) with a startup warning; TOKIWA_STRICT_CONFIG=1
+    # refuses to start in that case.
+    trusted_proxies: list[str] = Field(default_factory=list)
     # Requests with more header lines than this are answered 431 instead of being forwarded (events keep at most
     # 64 header names, so the rest would reach the upstream unseen). Apache's LimitRequestFields default. 0 = off.
     max_request_headers: int = Field(default=100, ge=0)
@@ -395,6 +415,15 @@ class GateSettings(BaseModel):
     # client IP) get 429 instead of a slot, so a flood of fire-and-forget requests cannot pile up in the Gate. 0 = no cap.
     tarpit_max_concurrent: int = Field(default=256, ge=0)
     tarpit_max_per_client: int = Field(default=8, ge=0)
+    # Audit #39 (slow POST / slowloris): a request body that sends nothing for body_idle_timeout_seconds, or is not
+    # complete after body_total_timeout_seconds, is answered 408 and its upstream connection freed (one byte every
+    # few seconds held an upstream connection forever; ~530 of them exhausted the pool). 0 = no limit.
+    body_idle_timeout_seconds: float = Field(default=15.0, ge=0)
+    body_total_timeout_seconds: float = Field(default=120.0, ge=0)
+    # Requests in flight per client IP (the resolved client, see trusted_proxies). Beyond it: 429 at once, with an
+    # event. Header-phase slowloris happens before the Gate sees a request: put nginx / a load balancer with a
+    # header timeout in front (docs/wiki Sensors). 0 = no limit.
+    max_requests_per_client: int = Field(default=64, ge=0)
 
 
 class AgentSettings(BaseModel):

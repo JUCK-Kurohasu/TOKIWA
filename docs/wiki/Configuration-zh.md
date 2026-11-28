@@ -143,6 +143,7 @@ deception:
 | `auto_approve_cooldown_minutes` | 1440 | 人工拒绝或撤销后，同类型 + 同目标在此时间（分钟）内不会被自动批准（0 表示禁用） |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL 的默认值和上限 |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | 绝不作为处置对象的范围 |
+| `shared_cidrs` | `100.64.0.0/10`、RFC 1918、`fc00::/7` | 可能被大量用户共享的范围（运营商级 NAT、企业 NAT、代理）。对重叠目标的处置绝不自动批准并附带警告（人工仍可批准）。不内置 CDN / 云出口范围，如有需要请添加提供商最新公布的范围 |
 | `protect_server_addresses` | true | 保护服务器自身的 IP |
 | `block_private_targets` | false | 禁止以私有地址为对象（保护管理网络） |
 | `default_rate_limit_rpm` / `default_tarpit_delay_ms` | 60 / 2000 | 速率限制、tarpit 的默认值 |
@@ -167,6 +168,10 @@ deception:
 | `gate.max_request_headers` | 100 | 请求头行数超过此值的请求不转发给上游，返回 431（0 表示不限制） |
 | `gate.forward_client_headers` | `[]` | 默认会移除的 `X-Real-IP`、`Forwarded`、`CF-Connecting-IP`、`X-Original-URL` 等请求头中，要原样转发给上游的那些（仅限前置的可信代理所添加的） |
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | tarpit 同时挂起的请求上限（总计 / 同一 IP）。超出的请求返回 429。0 表示不限制 |
+| `gate.trusted_proxies` | `[]` | 读取其 `X-Forwarded-For` 的对端（前置 LB / CDN 的 IP / CIDR）。为空时保持旧行为（信任所有对端）并警告 |
+| `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | 请求体的空闲 / 总时间上限。超出返回 408。0 表示不限制 |
+| `gate.max_requests_per_client` | 64 | 同一来源 IP 正在处理的请求数上限。超出返回 429。0 表示不限制。在 LB 之后需要 `trust_forwarded_for` + `trusted_proxies`（否则所有用户共用一个地址） |
+| `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / 无（`<server.data_dir>/gate-policy-<sensor_id>.json`）/ 168 | 保存获取到的策略，启动时服务器不可达也强制执行 |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA 服务器 |
 | `agent.ingest_token` | 无 | API 令牌（scope: ingest） |
 | `agent.interval_seconds` | 10 | 主机传感器的采集间隔 |

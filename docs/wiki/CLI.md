@@ -117,7 +117,7 @@ tokiwa gate run --upstream http://127.0.0.1:3000 [--listen 0.0.0.0:8080] [--serv
 | `--token` / `--token-file` | — | API トークン（環境変数 `TOKIWA_GATE__INGEST_TOKEN` か、ファイルを推奨。ファイルは変更時と 401 受信時に読み直す） |
 | `--sensor-id` | `gate-1` | イベントに記録するセンサー ID |
 | `--capture-body-bytes` | 4096 | 捕捉するボディの先頭バイト数 |
-| `--trust-forwarded-for` | off | `X-Forwarded-For` の右端を送信元とする（信頼できる LB の背後のみ） |
+| `--trust-forwarded-for` | off | `X-Forwarded-For` から送信元を決める（信頼できる LB の背後のみ。LB のアドレスは `gate.trusted_proxies` に列挙） |
 | `--policy-refresh` | 5 | ポリシー取得間隔（秒） |
 | `--batch-size` / `--flush-interval` | 100 / 1.0 | 送信のバッチ |
 | `--upstream-timeout` | 30 | 上流の読み書きタイムアウト（秒） |

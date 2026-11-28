@@ -143,6 +143,7 @@ deception:
 | `auto_approve_cooldown_minutes` | 1440 | 人間が却下・取り消した種類 + 対象は、この時間（分）自動承認しない（0 で無効） |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL の既定と上限 |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | 絶対に対象にしない範囲 |
+| `shared_cidrs` | `100.64.0.0/10`、RFC 1918、`fc00::/7` | 多数の利用者が共有しうる範囲（CGNAT・社内 NAT・プロキシ）。重なる対象への対処は自動承認せず警告を付ける（人間は承認できる）。CDN・クラウドの出口は同梱しないので、必要なら提供元の最新の公開レンジを追加 |
 | `protect_server_addresses` | true | サーバー自身の IP を保護 |
 | `block_private_targets` | false | プライベートアドレスを対象にすることを禁止（管理網の保護） |
 | `default_rate_limit_rpm` / `default_tarpit_delay_ms` | 60 / 2000 | レート制限・tarpit の既定値 |
@@ -167,6 +168,10 @@ deception:
 | `gate.max_request_headers` | 100 | ヘッダ行がこれを超える要求は上流へ転送せず 431 を返す（0 で無効） |
 | `gate.forward_client_headers` | `[]` | 既定では除去する `X-Real-IP`・`Forwarded`・`CF-Connecting-IP`・`X-Original-URL` 等のうち、そのまま上流へ渡すもの（前段の信頼できるプロキシが付けるものだけ） |
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | tarpit で同時に保持する要求の上限（全体 / 同じ IP）。超えた要求は 429。0 で無制限 |
+| `gate.trusted_proxies` | `[]` | `X-Forwarded-For` を読む接続元（前段 LB / CDN の IP・CIDR）。空は従来動作（全接続元を信頼）で警告 |
+| `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | リクエストボディの無通信 / 全体の上限。超えると 408。0 で無制限 |
+| `gate.max_requests_per_client` | 64 | 同じ送信元 IP の処理中リクエスト数の上限。超えると 429。0 で無制限。LB の背後では `trust_forwarded_for` + `trusted_proxies` が前提（無いと全利用者が 1 アドレスに見える） |
+| `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / なし（`<server.data_dir>/gate-policy-<sensor_id>.json`）/ 168 | 取得したポリシーを保存し、起動時にサーバー不達でも強制する |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA サーバー |
 | `agent.ingest_token` | なし | API トークン（scope: ingest） |
 | `agent.interval_seconds` | 10 | ホストセンサーの収集間隔 |

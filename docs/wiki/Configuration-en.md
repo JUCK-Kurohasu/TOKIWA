@@ -146,6 +146,7 @@ See [LLM setup & cost](LLM-en). Main items: `provider`, `anthropic_api_key` (or 
 | `auto_approve_cooldown_minutes` | 1440 | After a human rejects or reverts an action, the same type + target is not auto-approved for this many minutes (0 disables) |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | Default and maximum TTL |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | Ranges that are never targeted |
+| `shared_cidrs` | `100.64.0.0/10`, RFC 1918, `fc00::/7` | Ranges many users may share (carrier-grade NAT, corporate NAT, proxies). Actions on an overlapping target are never auto-approved and carry a warning (a human can still approve). CDN / cloud egress ranges are not bundled: add the provider's current published ranges if needed |
 | `protect_server_addresses` | true | Protect the server's own IPs |
 | `block_private_targets` | false | Forbid targeting private addresses (protects management networks) |
 | `default_rate_limit_rpm` / `default_tarpit_delay_ms` | 60 / 2000 | Defaults for rate limiting and tarpit |
@@ -170,6 +171,10 @@ See [Deception (Mirage)](Deception-en) and [Vulnerability intelligence](Threat-I
 | `gate.max_request_headers` | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | `gate.forward_client_headers` | `[]` | Headers normally removed (`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `X-Original-URL`, ...) to pass to the upstream unchanged (only ones a trusted proxy in front sets) |
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Max requests held by the tarpit at once (in total / per IP). Requests beyond get 429. 0 = no cap |
+| `gate.trusted_proxies` | `[]` | Peers whose `X-Forwarded-For` is read (IPs / CIDRs of the LB / CDN in front). Empty keeps the old behaviour (every peer trusted) with a warning |
+| `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | Max idle gap / total time for a request body. Beyond it: 408. 0 = no limit |
+| `gate.max_requests_per_client` | 64 | Requests in flight per source IP. Beyond it: 429. 0 = no limit. Behind a LB, needs `trust_forwarded_for` + `trusted_proxies` (otherwise every visitor shares one address) |
+| `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / none (`<server.data_dir>/gate-policy-<sensor_id>.json`) / 168 | Save the fetched policy and enforce it at startup when the server is unreachable |
 | `agent.server_url` | `http://127.0.0.1:8788` | TOKIWA server |
 | `agent.ingest_token` | None | API token (scope: ingest) |
 | `agent.interval_seconds` | 10 | Host sensor collection interval |

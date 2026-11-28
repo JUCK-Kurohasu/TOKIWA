@@ -62,7 +62,7 @@ run the command in the same directory as the server (`backend/`) with the same e
 `docker compose ... exec tokiwa tokiwa token create ...`.
 
 **All traffic appears to come from the same IP (the load balancer's IP)**
-If the Gate is behind a load balancer, set `--trust-forwarded-for` (`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`).
+If the Gate is behind a load balancer, set `--trust-forwarded-for` (`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`). List the LB addresses in `gate.trusted_proxies` (`TOKIWA_GATE__TRUSTED_PROXIES='["10.0.0.0/8"]'`). Otherwise a client that reaches the Gate directly can also claim a source IP.
 Use it **only behind a trusted load balancer**. In any other environment, the source IP can be spoofed.
 
 **WebSocket stopped working**

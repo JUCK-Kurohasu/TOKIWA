@@ -124,11 +124,18 @@ services:
       TOKIWA_GATE__BATCH_SIZE:
       TOKIWA_GATE__FLUSH_INTERVAL_SECONDS:
       TOKIWA_GATE__POLICY_REFRESH_SECONDS:
+      TOKIWA_GATE__PERSIST_POLICY:
+      TOKIWA_GATE__POLICY_CACHE_FILE:
+      TOKIWA_GATE__POLICY_CACHE_MAX_AGE_HOURS:
+      TOKIWA_GATE__TRUSTED_PROXIES:
       TOKIWA_GATE__TRUST_FORWARDED_FOR:
       TOKIWA_GATE__MAX_REQUEST_HEADERS:
       TOKIWA_GATE__FORWARD_CLIENT_HEADERS:
       TOKIWA_GATE__TARPIT_MAX_CONCURRENT:
       TOKIWA_GATE__TARPIT_MAX_PER_CLIENT:
+      TOKIWA_GATE__BODY_IDLE_TIMEOUT_SECONDS:
+      TOKIWA_GATE__BODY_TOTAL_TIMEOUT_SECONDS:
+      TOKIWA_GATE__MAX_REQUESTS_PER_CLIENT:
       TOKIWA_LLM__REDACTION__ENABLED: # the gate masks captured headers / bodies with these
       TOKIWA_LLM__REDACTION__SENSITIVE_HEADERS:
       TOKIWA_LLM__REDACTION__MASK_EMAILS:
@@ -137,7 +144,10 @@ services:
       TOKIWA_DECEPTION__CANARY_HEADER:
     tmpfs:
       - /tmp
-      - /data # the gate keeps no state; avoids an anonymous volume for the image's VOLUME
+    volumes:
+      # Only the last fetched policy (audit #32): enforced at startup when the server cannot be reached, so a
+      # Gate restarted during a server outage keeps blocking. Mode 600; it holds decoy routes / canary snippets.
+      - gate-state:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -147,5 +157,6 @@ services:
         condition: service_healthy
 
 volumes:
+  gate-state:
   tokiwa-data:
   postgres-data:

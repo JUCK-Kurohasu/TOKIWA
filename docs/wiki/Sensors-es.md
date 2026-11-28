@@ -72,10 +72,14 @@ El orden de prioridad de los ajustes es "flag de la CLI > variables de entorno `
 | ingest_token | `--token-file` (evite `--token`: se ve en `ps`) | Ninguno | Requiere los ámbitos `ingest` y `gate`. También sirve la variable de entorno `TOKIWA_GATE__INGEST_TOKEN` |
 | capture_body_bytes | `--capture-body-bytes` | 4096 | Número de bytes iniciales del cuerpo de la solicitud que se capturan (0 = no capturar) |
 | policy_refresh_seconds | `--policy-refresh` | 5.0 | Intervalo de obtención de la política |
-| trust_forwarded_for | `--trust-forwarded-for` | false | Toma el valor **más a la derecha** de `X-Forwarded-For` como IP de origen |
+| trust_forwarded_for | `--trust-forwarded-for` | false | Obtiene la IP de origen de `X-Forwarded-For` (solo de pares en `trusted_proxies`; se lee de derecha a izquierda saltando los proxies de confianza) |
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Encabezados que normalmente se eliminan (ver abajo) y que se pasan sin cambios al upstream |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP); las que excedan reciben 429 (0 = sin límite) |
+| trusted_proxies | — (`TOKIWA_GATE__TRUSTED_PROXIES`) | `[]` | Con `trust_forwarded_for`, `X-Forwarded-For` solo se lee si el par TCP está en esta lista (IP / CIDR, p. ej. `["10.0.0.0/8"]`). Vacía mantiene el comportamiento anterior (se confía en cualquier par) con una advertencia al iniciar; con `TOKIWA_STRICT_CONFIG=1` no arranca |
+| body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | Pausa máxima dentro del cuerpo de la solicitud / tiempo máximo del cuerpo completo. Al superarlo responde 408 y libera la conexión al upstream (etiqueta `gate:slow_body`; 0 = sin límite) |
+| max_requests_per_client | — | 64 | Solicitudes en curso por IP de origen. Por encima: 429 de inmediato (etiqueta `gate:conn_limit`; 0 = sin límite). **Detrás de un LB sin `trust_forwarded_for`, todos los visitantes tienen la dirección del LB: 64 para todo el sitio** |
+| persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | Guarda la política obtenida y la aplica al iniciar aunque el servidor no responda (no se usa una copia más antigua que el límite; 0 = sin límite) |
 
 Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--max-queue` (límite de eventos pendientes de envío: 10 000),
 `--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (límite de conexiones simultáneas; por encima, 503; sin límite por defecto).
@@ -99,6 +103,17 @@ Opciones operativas disponibles solo en la CLI: `--upstream-timeout` (30 s), `--
 - Los eventos conservan hasta 64 encabezados distintos. Los que se usan para la detección (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
   se conservan siempre, estén donde estén; el resto queda indicado con la etiqueta `gate:headers_truncated` y el número de encabezados (label `gate.header_count`).
 - **fail-open**: aunque el servidor de TOKIWA se detenga, el proxy de Gate sigue funcionando (los eventos se acumulan temporalmente y se reenvían).
+- **IP de origen**: si activa `trust_forwarded_for`, enumere en `trusted_proxies` las direcciones del LB / CDN que está delante. Solo se lee
+  `X-Forwarded-For` de esos pares, de derecha a izquierda, saltando los proxies de confianza; la primera otra dirección es el cliente. Un
+  elemento que no es una IP (`unknown`, etc.) detiene el recorrido. El `X-Forwarded-For` de cualquier otro par se ignora y se etiqueta `gate:untrusted_forwarded_for`.
+- **Ataques lentos**: una solicitud que envía el cuerpo a cuentagotas recibe 408, y demasiadas solicitudes simultáneas desde una IP reciben 429.
+  **Un cliente que envía los encabezados lentamente (slowloris) lo atiende uvicorn antes de que Gate vea la solicitud, así que Gate no puede
+  detenerlo.** Si se expone directamente a internet, ponga delante nginx o un balanceador con tiempo de espera de lectura de encabezados.
+- **Política tras reinicios**: la última política obtenida (bloqueos, señuelos, canarios) se guarda en un archivo y se aplica justo al iniciar
+  aunque el servidor no responda; las entradas vencidas se descartan. En Docker, `/data` necesita un volumen (`gate-state` en `deploy/compose.yaml`).
+- **Eventos descartados**: cuando la cola de envío se desborda durante una caída del servidor, se descartan primero las visitas simples
+  (GET/HEAD, 2xx/3xx, sin cadena de consulta, sin etiqueta). El número descartado se informa con el siguiente lote que llega al servidor como
+  evento `gate.health`, que genera la detección `sensor.events_dropped`.
 - **fail-static**: si no puede obtener la política, mantiene la última (para no abrir la vía de "tumbar el servidor para que se levanten los bloqueos"). Aun así, el Gate respeta el vencimiento (TTL) de cada bloqueo: las entradas vencidas se levantan.
 - Comprobación de estado: `GET /__tokiwa/health` → `{"status":"ok"}`. Desde IP locales/privadas devuelve también estadísticas de envío, entre otros datos.
 - No soportado: WebSocket (devuelve 501), upstream HTTP/2, gRPC. Gate está pensado para funcionar como un único proceso.

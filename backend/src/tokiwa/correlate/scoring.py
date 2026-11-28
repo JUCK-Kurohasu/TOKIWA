@@ -98,20 +98,44 @@ def max_score(values: Iterable[float | None]) -> float | None:
     return max(scores) if scores else None
 
 
+# Audit #59: where a CVE id may come from. Entity values such as ``path`` / ``user_agent`` / ``endpoint`` are written
+# by the client, so scanning every value let an attacker put "CVE-2021-44228" in its User-Agent and join (or pull
+# a third party into) another source's incident -- whose triage may then propose blocking that third party.
+# Only fields a detector or rule author sets are read: the CVE keys, and an IDS ``signature`` (the rule's message,
+# which the traffic cannot choose).
+_CVE_FIELDS = ("cve", "cves", "vuln_id", "vuln_ids")
+_CVE_TEXT_FIELDS = ("signature",)
+# A tag that is itself a CVE id: detector "cve-2021-44228", Sigma "cve.2021-44228", "cve:CVE-2021-44228".
+_CVE_TAG_RE = re.compile(r"^cve(?:[.-]|:cve-)(\d{4}-\d{4,7})$", re.IGNORECASE)
+
+
+def _cve_values(source: dict[str, Any], keys: Iterable[str]) -> list[str]:
+    out: list[str] = []
+    for key in keys:
+        val = source.get(key)
+        if isinstance(val, str):
+            out.append(val)
+        elif isinstance(val, list | tuple):
+            out.extend(str(v) for v in val)
+    return out
+
+
 def extract_cves(
     entities: dict[str, str], tags: Iterable[str] = (), details: dict[str, Any] | None = None
 ) -> set[str]:
-    """CVE ids referenced by an alert (entity values, tags, ``details.cve``/``details.cves``)."""
-    texts: list[str] = [str(v) for v in entities.values()]
-    texts.extend(str(t) for t in tags)
+    """CVE ids an alert's detector / rule asserted (never ids found in client-written text, audit #59).
+
+    Read from the CVE keys of ``entities`` and ``details``, an IDS ``signature``, and tags that *are* a CVE id.
+    """
+    texts = _cve_values(entities, (*_CVE_FIELDS, *_CVE_TEXT_FIELDS))
     if details:
-        for key in ("cve", "cves", "vuln_id", "vuln_ids"):
-            val = details.get(key)
-            if isinstance(val, str):
-                texts.append(val)
-            elif isinstance(val, list | tuple):
-                texts.extend(str(v) for v in val)
-    return {m.upper() for t in texts for m in _CVE_RE.findall(t)}
+        texts.extend(_cve_values(details, _CVE_FIELDS))
+    found = {m.upper() for t in texts for m in _CVE_RE.findall(t)}
+    for tag in tags:
+        m = _CVE_TAG_RE.match(str(tag).strip())
+        if m:
+            found.add(f"CVE-{m.group(1)}")
+    return found
 
 
 @dataclass

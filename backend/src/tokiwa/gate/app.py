@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, MutableMapping
@@ -26,6 +27,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from email.utils import formatdate
 from http.cookiejar import CookieJar, DefaultCookiePolicy
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -35,9 +37,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from tokiwa.config import GateSettings, RedactionSettings, get_settings
+from tokiwa.config import ConfigError, GateSettings, RedactionSettings, get_settings, strict_config_enabled
 from tokiwa.gate.capture import BodyCapture, EventBuilder, Exchange, mime_type
-from tokiwa.gate.netmatch import parse_ip
+from tokiwa.gate.netmatch import IpTable, client_bucket_key, parse_ip, resolve_forwarded_client
 from tokiwa.gate.policy import TARPIT_MAX_MS, CompiledPolicy, PolicyManager, path_anomalies
 from tokiwa.gate.proxy import (
     HOP_BY_HOP,
@@ -72,6 +74,7 @@ RATE_LIMITED_BODY = b"Too Many Requests\n"
 WEBSOCKET_BODY = b"Not Implemented: WebSocket is not supported by this gateway\n"
 TOO_MANY_HEADERS_BODY = b"Request Header Fields Too Large\n"
 BAD_GATEWAY_BODY = b"Bad Gateway\n"
+REQUEST_TIMEOUT_BODY = b"Request Timeout\n"
 GATEWAY_TIMEOUT_BODY = b"Gateway Timeout\n"
 GENERIC_404 = (
     b"<!DOCTYPE html>\n<html><head><title>404 Not Found</title></head>\n"
@@ -102,6 +105,10 @@ class GateOptions:
 
 class _ClientGone(Exception):
     """The client disconnected while its request body was being streamed upstream."""
+
+
+class _SlowBody(Exception):
+    """The request body stalled or took too long (audit #39); the reason is ``idle`` or ``total``."""
 
 
 class Gate:
@@ -147,6 +154,8 @@ class Gate:
             settings.server_url,
             self.tokens,
             refresh_seconds=settings.policy_refresh_seconds,
+            cache_file=_policy_cache_file(settings),
+            cache_max_age_hours=settings.policy_cache_max_age_hours,
         )
         self.shipper = EventShipper(
             self.server_client,
@@ -155,6 +164,7 @@ class Gate:
             batch_size=settings.batch_size,
             flush_interval=settings.flush_interval_seconds,
             max_queue=opts.max_queue,
+            sensor_id=settings.sensor_id,
         )
         self.limiter = TokenBucketLimiter(clock=clock)
         self.builder = EventBuilder(
@@ -167,9 +177,17 @@ class Gate:
         self._pass_through = frozenset(
             h.strip().lower().encode("latin-1") for h in settings.forward_client_headers if h.strip()
         )
+        self._trusted_proxies = _trusted_proxy_table(settings)
+        # forward_client_headers (e.g. CF-Connecting-IP) are only honoured from listed proxies when a list is set.
+        self._proxy_peers: IpTable[bool] | None = (
+            IpTable.build((p, True) for p in settings.trusted_proxies)[0]
+            if settings.trusted_proxies
+            else None
+        )
         self._sleep = sleep
         self._tarpit_active = 0  # requests currently held by the tarpit (#99)
         self._tarpit_per_client: Counter[str] = Counter()
+        self._inflight: Counter[str] = Counter()  # requests being handled per client IP (#39)
         self.counters: Counter[str] = Counter()
         self._tasks: list[asyncio.Task[None]] = []
         self._upstream_server: bytes | None = None  # mimicked on gate-generated responses
@@ -183,6 +201,8 @@ class Gate:
     async def start(self) -> None:
         if not self.token:
             log.warning("gate: no ingest token configured; the server will reject events and policy fetches")
+        # The saved copy first (audit #32): if the server is unreachable, the restart does not lift blocks.
+        await asyncio.to_thread(self.policy.load_cache)
         if self.options.initial_policy_fetch:
             await self.policy.refresh()
         self._tasks = [
@@ -250,8 +270,26 @@ class Gate:
         if scope["type"] != "http":
             return
         ex = self._exchange(scope)
+        key = client_bucket_key(ex.client_ip)  # IPv6: the /64 (ADR-0008)
+        cap = self.settings.max_requests_per_client
         try:
-            await self._dispatch(scope, receive, send, ex, self.policy.current)
+            if cap and self._inflight[key] >= cap:
+                # Audit #39: one client holding many slow requests would otherwise take every upstream
+                # connection. Answered at once, so the event reaches the server while the attack goes on.
+                ex.tag("gate:conn_limit")
+                ex.labels["gate.action"] = "conn_limit"
+                await self._respond(
+                    send, ex, 429, RATE_LIMITED_BODY, b"text/plain; charset=utf-8", [(b"retry-after", b"5")]
+                )
+                return
+            self._inflight[key] += 1
+            try:
+                await self._dispatch(scope, receive, send, ex, self.policy.current)
+            finally:
+                # Also on cancellation / disconnect: a leaked count would lock the client out for good.
+                self._inflight[key] -= 1
+                if self._inflight[key] <= 0:
+                    del self._inflight[key]
         finally:
             self._capture(ex)
 
@@ -282,14 +320,16 @@ class Gate:
         )
         if self.settings.trust_forwarded_for:
             xff = ", ".join(v.decode("latin-1") for k, v in headers if k.lower() == b"x-forwarded-for")
-            # Right-most entry = the address the trusted proxy in front of us saw (left-most is client-supplied).
-            for candidate in reversed([p.strip() for p in xff.split(",") if p.strip()]):
-                ip = parse_ip(candidate)
-                if ip is not None:
-                    if ex.client_ip:
-                        ex.labels["gate.peer_ip"] = ex.client_ip
-                    ex.client_ip = str(ip)
-                    break
+            client_ip, ex.forwarded_trusted = resolve_forwarded_client(ex.peer_ip, xff, self._trusted_proxies)
+            if not ex.forwarded_trusted:
+                if xff:
+                    # Trust is configured, yet this peer is not one of the proxies: someone reached the Gate
+                    # directly (bypassing the LB) and claimed an address. Their own address is kept (#22).
+                    ex.tag("gate:untrusted_forwarded_for")
+            elif client_ip and client_ip != ex.client_ip:
+                if ex.client_ip:
+                    ex.labels["gate.peer_ip"] = ex.client_ip
+                ex.client_ip = client_ip
         return ex
 
     async def _dispatch(
@@ -315,7 +355,11 @@ class Gate:
 
         limited = policy.rate_limited.lookup(ip)
         if limited is not None:
-            allowed, retry_after = self.limiter.allow(ex.client_ip or "unknown", limited[1])
+            # A range entry is one budget for the whole range (audit #142: per-address buckets let a client rotate
+            # through the range without limit); a single-address entry keys by the client (IPv6: its /64).
+            network = limited[0]
+            bucket = network if _is_range(network) else client_bucket_key(ex.client_ip)
+            allowed, retry_after = self.limiter.allow(bucket, limited[1])
             if not allowed:
                 ex.tag("gate:rate_limited")
                 ex.labels["gate.action"] = "rate_limited"
@@ -344,7 +388,7 @@ class Gate:
             delay_ms = min(tarpit[1], TARPIT_MAX_MS)
             ex.tag("gate:tarpit")
             ex.labels["gate.tarpit_ms"] = str(delay_ms)
-            key = ex.client_ip or "unknown"
+            key = client_bucket_key(ex.client_ip)
             if not self._tarpit_acquire(key):
                 # Holding more of this client's requests would cost the Gate more than the client (#99).
                 ex.tag("gate:tarpit_overflow")
@@ -500,18 +544,22 @@ class Gate:
         self, scope: Scope, receive: Receive, send: Send, ex: Exchange, policy: CompiledPolicy
     ) -> None:
         url, target = self.target.resolve(raw_path_of(scope), scope.get("query_string", b""))
+        pass_through = self._pass_through
+        if pass_through and self._proxy_peers is not None and parse_ip(ex.peer_ip) not in self._proxy_peers:
+            # A client that reached the Gate directly cannot claim CF-Connecting-IP & co. either (same as #22).
+            pass_through = frozenset()
         headers = forwarded_request_headers(
             ex.raw_headers,
             peer_ip=ex.peer_ip,
             scheme=ex.scheme,
-            trust_forwarded_for=self.settings.trust_forwarded_for,
+            trust_forwarded_for=ex.forwarded_trusted,
             preserve_host=self.options.preserve_host,
             upstream_host=self.target.host_header,
             restrict_encoding=policy.html_injection is not None,
             client_ip=ex.client_ip,
-            pass_through=self._pass_through,
+            pass_through=pass_through,
         )
-        stripped = stripped_client_headers(ex.raw_headers, self._pass_through)
+        stripped = stripped_client_headers(ex.raw_headers, pass_through)
         if stripped:
             ex.tag(
                 "gate:client_ip_header"
@@ -534,6 +582,14 @@ class Gate:
         except _ClientGone:
             ex.tag("gate:client_disconnect")
             ex.status = 499  # nginx convention: client closed request
+            return
+        except _SlowBody as exc:
+            ex.tag("gate:slow_body")
+            ex.labels["gate.action"] = "slow_body"
+            ex.labels["gate.slow_body"] = str(exc)
+            await self._respond(
+                send, ex, 408, REQUEST_TIMEOUT_BODY, b"text/plain; charset=utf-8", [(b"connection", b"close")]
+            )
             return
         except httpx.TimeoutException as exc:
             await self._upstream_failed(send, ex, 504, GATEWAY_TIMEOUT_BODY, exc)
@@ -580,9 +636,32 @@ class Gate:
     def _body_stream(self, receive: Receive, ex: Exchange) -> AsyncIterator[bytes]:
         """Stream the request body upstream while teeing the first ``capture_body_bytes`` into the capture."""
 
+        idle = self.settings.body_idle_timeout_seconds
+        total = self.settings.body_total_timeout_seconds
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + total if total else None
+
+        async def next_message() -> Message:
+            # Audit #39: without a limit, a client trickling one byte every few seconds held an upstream
+            # connection for as long as it liked. Both an idle gap and the whole body are bounded.
+            wait = idle or None
+            if deadline is not None:
+                left = deadline - loop.time()
+                if left <= 0:
+                    raise _SlowBody("total")
+                wait = left if wait is None else min(wait, left)
+            if wait is None:
+                return await receive()
+            try:
+                return await asyncio.wait_for(receive(), wait)
+            except TimeoutError:
+                raise _SlowBody(
+                    "total" if deadline is not None and loop.time() >= deadline else "idle"
+                ) from None
+
         async def gen() -> AsyncIterator[bytes]:
             while True:
-                message = await receive()
+                message = await next_message()
                 if message["type"] == "http.request":
                     chunk = message.get("body", b"")
                     if chunk:
@@ -739,6 +818,50 @@ class Gate:
                 ex.status = 403
         finally:
             self._capture(ex)
+
+
+def _is_range(network: str) -> bool:
+    """True for a policy entry covering more than one address (``10.0.0.0/24``; not ``10.0.0.5/32``)."""
+    _, _, prefix = network.partition("/")
+    if not prefix.isdigit():
+        return False
+    return int(prefix) < (128 if ":" in network else 32)
+
+
+def _policy_cache_file(settings: GateSettings) -> Path | None:
+    """Where the last fetched policy is kept (audit #32); None when ``gate.persist_policy`` is off."""
+    if not settings.persist_policy:
+        return None
+    if settings.policy_cache_file is not None:
+        return settings.policy_cache_file
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", settings.sensor_id)[:64] or "gate"
+    return get_settings().server.data_dir / f"gate-policy-{safe_id}.json"
+
+
+def _trusted_proxy_table(settings: GateSettings) -> IpTable[bool] | None:
+    """``gate.trusted_proxies`` as a lookup table; None = legacy "trust any peer" mode (audit #22).
+
+    Only meaningful with ``trust_forwarded_for``. An unparsable entry or the legacy mode is a configuration
+    problem: warned about, and refused under ``TOKIWA_STRICT_CONFIG=1`` like other config issues.
+    """
+    if not settings.trust_forwarded_for:
+        return None
+    table, invalid = IpTable.build((p, True) for p in settings.trusted_proxies)
+    problems: list[str] = []
+    if invalid:
+        problems.append(f"gate.trusted_proxies has entries that are not IPs/CIDRs: {', '.join(invalid)}")
+    if not settings.trusted_proxies:
+        problems.append(
+            "gate.trust_forwarded_for is on but gate.trusted_proxies is empty: X-Forwarded-For is accepted from "
+            "any client that reaches the Gate, which can then claim any source address. List the proxy/LB "
+            "addresses in gate.trusted_proxies"
+        )
+    for problem in problems:
+        log.warning("gate config: %s", problem)
+    if problems and strict_config_enabled():
+        raise ConfigError("; ".join(problems) + " (TOKIWA_STRICT_CONFIG is set)")
+    # A list whose entries all failed to parse trusts no peer (not "any peer"): a typo must not widen trust.
+    return table if settings.trusted_proxies else None
 
 
 def _no_cookie_jar() -> CookieJar:

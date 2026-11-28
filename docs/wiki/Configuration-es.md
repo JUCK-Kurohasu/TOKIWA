@@ -147,6 +147,7 @@ Consulte [Configuración de LLM y costos](LLM-es). Principales: `provider`, `ant
 | `auto_approve_cooldown_minutes` | 1440 | Tras rechazar o revertir una persona una acción, el mismo tipo + objetivo no se aprueba automáticamente durante estos minutos (0 lo desactiva) |
 | `default_ttl_minutes` / `max_ttl_minutes` | 60 / 10080 | TTL por defecto y máximo |
 | `protected_cidrs` | `127.0.0.0/8`, `::1/128` | Rangos que nunca serán objetivo |
+| `shared_cidrs` | `100.64.0.0/10`, RFC 1918, `fc00::/7` | Rangos que pueden compartir muchos usuarios (NAT de operador, NAT corporativo, proxies). Las acciones sobre un objetivo que se solapa nunca se aprueban automáticamente y llevan una advertencia (una persona puede aprobarlas). No se incluyen rangos de CDN / nube: añada los rangos publicados vigentes del proveedor si los necesita |
 | `protect_server_addresses` | true | Protege las IP del propio servidor |
 | `block_private_targets` | false | Prohíbe usar direcciones privadas como objetivo (protección de la red de administración) |
 | `default_rate_limit_rpm` / `default_tarpit_delay_ms` | 60 / 2000 | Valores por defecto de la limitación de tasa y del tarpit |
@@ -171,6 +172,10 @@ Consulte [Engaño (Mirage)](Deception-es) e [Inteligencia de vulnerabilidades](T
 | `gate.max_request_headers` | 100 | Las solicitudes con más líneas de encabezado reciben 431 en lugar de reenviarse (0 = sin límite) |
 | `gate.forward_client_headers` | `[]` | Encabezados que normalmente se eliminan (`X-Real-IP`, `Forwarded`, `CF-Connecting-IP`, `X-Original-URL`, ...) y que se pasan sin cambios al upstream (solo los que añade un proxy de confianza situado delante) |
 | `gate.tarpit_max_concurrent` / `gate.tarpit_max_per_client` | 256 / 8 | Máximo de solicitudes retenidas a la vez por el tarpit (en total / por IP). Las que excedan reciben 429. 0 = sin límite |
+| `gate.trusted_proxies` | `[]` | Pares cuyo `X-Forwarded-For` se lee (IP / CIDR del LB / CDN delante). Vacía mantiene el comportamiento anterior (se confía en todos) con advertencia |
+| `gate.body_idle_timeout_seconds` / `gate.body_total_timeout_seconds` | 15 / 120 | Pausa máxima / tiempo total del cuerpo de la solicitud. Por encima: 408. 0 = sin límite |
+| `gate.max_requests_per_client` | 64 | Solicitudes en curso por IP de origen. Por encima: 429. 0 = sin límite. Detrás de un LB requiere `trust_forwarded_for` + `trusted_proxies` (si no, todos comparten una dirección) |
+| `gate.persist_policy` / `gate.policy_cache_file` / `gate.policy_cache_max_age_hours` | true / ninguno (`<server.data_dir>/gate-policy-<sensor_id>.json`) / 168 | Guarda la política obtenida y la aplica al iniciar si el servidor no responde |
 | `agent.server_url` | `http://127.0.0.1:8788` | Servidor de TOKIWA |
 | `agent.ingest_token` | Ninguno | Token de API (ámbito: ingest) |
 | `agent.interval_seconds` | 10 | Intervalo de recopilación del sensor de host |

@@ -33,6 +33,9 @@ from tokiwa.schemas.events import Endpoint, Event, EventKind, HttpInfo
 from tokiwa.util import utcnow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Opt-in: run DB-backed tests against another database (e.g. a throwaway PostgreSQL) instead of a temp SQLite
+# file. Tables are dropped and recreated per test. Read before the fixture clears TOKIWA_* variables.
+TEST_DATABASE_URL = os.environ.get("TOKIWA_TEST_DATABASE_URL", "").strip()
 
 
 @pytest.fixture
@@ -44,7 +47,9 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
     monkeypatch.setenv("TOKIWA_ENV", "test")
     monkeypatch.setenv("TOKIWA_CONFIG", os.devnull)  # explicitly no YAML file (#161: a missing one warns)
     monkeypatch.setenv("TOKIWA_SERVER__DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("TOKIWA_DATABASE__URL", f"sqlite+aiosqlite:///{tmp_path / 'tokiwa.db'}")
+    monkeypatch.setenv(
+        "TOKIWA_DATABASE__URL", TEST_DATABASE_URL or f"sqlite+aiosqlite:///{tmp_path / 'tokiwa.db'}"
+    )
     monkeypatch.setenv("TOKIWA_LLM__PROVIDER", "mock")
     monkeypatch.setenv("TOKIWA_DETECTION__SIGMA_RULE_DIRS", f'["{REPO_ROOT / "rules" / "sigma"}"]')
     reset_settings_cache()
@@ -63,6 +68,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Settin
 
 @pytest.fixture
 async def db(settings: Settings) -> AsyncIterator[None]:
+    await _reset_test_database()
     dbsession.init_engine()
     await dbsession.create_all()
     yield
@@ -70,10 +76,24 @@ async def db(settings: Settings) -> AsyncIterator[None]:
     await dbsession.dispose_engine()
 
 
+async def _reset_test_database() -> None:
+    """Drop every table of the opt-in ``TOKIWA_TEST_DATABASE_URL`` database (a fresh SQLite file needs nothing)."""
+    if not TEST_DATABASE_URL:
+        return
+    from tokiwa.db import models  # noqa: F401  - registers all model modules
+    from tokiwa.db.base import Base
+
+    engine = dbsession.init_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await dbsession.dispose_engine()
+
+
 @pytest.fixture
 async def app(settings: Settings) -> AsyncIterator[FastAPI]:
     from tokiwa.api.app import create_app
 
+    await _reset_test_database()
     application = create_app(run_jobs=False)
     async with application.router.lifespan_context(application):
         yield application
