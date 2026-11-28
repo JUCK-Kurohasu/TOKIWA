@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from tokiwa import payload_shapes
 from tokiwa.config import RedactionSettings
 from tokiwa.gate.netmatch import parse_ip
 from tokiwa.llm.redact import redact_headers, redact_text
@@ -283,15 +284,23 @@ def decode_request_body(
 
 
 class BodyCapture:
-    """Keeps the first ``limit`` bytes of a streamed body and counts the total size."""
+    """Keeps the first ``limit`` bytes of a streamed body and counts the total size.
 
-    __slots__ = ("_buf", "complete", "limit", "size")
+    Bytes past the kept prefix are never stored, but up to ``payload_shapes.MAX_SCAN_CHARS`` of them are classified
+    as they stream by (ADR-0007 C, audit #21): padding a payload past the capture limit no longer hides it entirely,
+    the event says which attack shapes were beyond the limit (classes only).
+    """
+
+    __slots__ = ("_buf", "_scan_tail", "_scanned", "beyond_classes", "complete", "limit", "size")
 
     def __init__(self, limit: int) -> None:
         self.limit = max(0, limit)
         self._buf = bytearray()
         self.size = 0
         self.complete = False  # True once the whole body went through feed()
+        self.beyond_classes: set[str] = set()
+        self._scanned = 0
+        self._scan_tail = ""  # end of the previous chunk, so a payload split across chunks is still seen
 
     def feed(self, chunk: bytes) -> None:
         if not chunk:
@@ -300,6 +309,15 @@ class BodyCapture:
         room = self.limit - len(self._buf)
         if room > 0:
             self._buf += chunk[:room]
+            rest = chunk[room:]
+        else:
+            rest = chunk
+        if rest and self._scanned < payload_shapes.MAX_SCAN_CHARS:
+            part = rest[: payload_shapes.MAX_SCAN_CHARS - self._scanned].decode("utf-8", "replace")
+            self._scanned += len(part)
+            text = self._scan_tail + part
+            self.beyond_classes |= payload_shapes.classify(text)
+            self._scan_tail = text[-256:]
 
     @property
     def prefix(self) -> bytes:
@@ -504,25 +522,69 @@ class EventBuilder:
             )
         # An unsupported coding stays opaque bytes: sniffing them could only produce garbage "text".
         text = body_text(body.data, body.truncated, content_type) if body.status != "unknown" else None
+        shown_headers = redact_headers(headers, cfg)
+        shown_body = redact_text(text, self.body_redaction) if text else None
+        shown_path = redact_text(ex.path, cfg)
+        shown_query = redact_text(ex.query, cfg) if ex.query else None
+        self._mark_hidden(ex, shown_path, shown_query, shown_headers, text, shown_body)
         return HttpInfo(
             method=ex.method,
             scheme=ex.scheme,
             host=redact_text(headers.get("host"), cfg),
-            path=redact_text(ex.path, cfg),
-            query=redact_text(ex.query, cfg) if ex.query else None,
-            headers=redact_headers(headers, cfg),
+            path=shown_path,
+            query=shown_query,
+            headers=shown_headers,
             header_order=order,
             user_agent=redact_text(headers.get("user-agent"), cfg),
             referrer=redact_text(headers.get("referer"), cfg),
             content_type=content_type,
             request_body_size=body_size,
-            request_body=redact_text(text, self.body_redaction) if text else None,
+            request_body=shown_body,
             status=ex.status,
             response_size=ex.response_size,
             response_content_type=ex.response_content_type,
             duration_ms=ex.duration_ms,
             http_version=ex.http_version,
         )
+
+    @staticmethod
+    def _mark_hidden(
+        ex: Exchange,
+        shown_path: str | None,
+        shown_query: str | None,
+        shown_headers: dict[str, str],
+        body: str | None,
+        shown_body: str | None,
+    ) -> None:
+        """Label the attack shapes that masking or cutting hid from the server (ADR-0007 C; classes only).
+
+        Each value is compared with what the event will carry; only a value that changed is scanned, and only
+        classes absent from the shown value count, so a payload the detectors can still read is not reported twice.
+        Raw header values are taken from the request itself: a Cookie / X-Api-Key value is replaced wholesale,
+        and a header past the captured set is not in the event at all.
+        """
+        hidden: dict[str, set[str]] = {}
+
+        def note(where: str, classes: set[str]) -> None:
+            if classes:
+                hidden.setdefault(where, set()).update(classes)
+
+        note("path", payload_shapes.hidden_classes(ex.path, shown_path))
+        note("query", payload_shapes.hidden_classes(ex.query or None, shown_query))
+        joined: dict[
+            str, list[str]
+        ] = {}  # repeated lines are joined in the capture: compare the joined value
+        for k, v in ex.raw_headers:
+            joined.setdefault(k.decode("latin-1").lower(), []).append(v.decode("latin-1"))
+        for name, values in joined.items():
+            raw_value = ", ".join(values)
+            note(f"header:{name[:48]}", payload_shapes.hidden_classes(raw_value, shown_headers.get(name)))
+        note("body", payload_shapes.hidden_classes(body, shown_body))
+        note("body_beyond", set(ex.body.beyond_classes))
+        label = payload_shapes.format_label(hidden)
+        if label:
+            ex.tag("gate:hidden_signals")
+            ex.labels[payload_shapes.HIDDEN_SIGNALS_LABEL] = label
 
     def build(self, ex: Exchange) -> list[Event]:
         """One HTTP event per exchange, plus a DECEPTION event when a Mirage decoy was served."""
