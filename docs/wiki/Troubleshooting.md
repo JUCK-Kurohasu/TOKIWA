@@ -62,7 +62,7 @@ Docker で `tokiwa.yaml` をマウントしているのに `config: ...: is a di
 `docker compose ... exec tokiwa tokiwa token create ...` を使います。
 
 **すべてのアクセスが同じ IP（ロードバランサの IP）に見える**
-Gate がロードバランサの背後にある場合は、`--trust-forwarded-for`（`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`）を設定します。
+Gate がロードバランサの背後にある場合は、`--trust-forwarded-for`（`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`）を設定します。 前段の LB のアドレスを `gate.trusted_proxies`（`TOKIWA_GATE__TRUSTED_PROXIES='["10.0.0.0/8"]'`）に列挙してください。列挙しないと、Gate に直接届くクライアントも送信元 IP を名乗れます。
 **信頼できるロードバランサの背後でだけ** 使ってください。そうでない環境では、送信元 IP を偽装されます。
 
 **WebSocket が使えなくなった**

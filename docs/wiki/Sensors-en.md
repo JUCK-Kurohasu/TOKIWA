@@ -76,6 +76,10 @@ Settings take precedence in this order: "CLI flags > environment variables `TOKI
 | max_request_headers | — (`TOKIWA_GATE__MAX_REQUEST_HEADERS`) | 100 | Requests with more header lines than this get 431 instead of being forwarded (0 disables) |
 | forward_client_headers | — (`TOKIWA_GATE__FORWARD_CLIENT_HEADERS`) | `[]` | Headers normally removed (see below) to pass to the upstream unchanged |
 | tarpit_max_concurrent / tarpit_max_per_client | — | 256 / 8 | Max requests held by the tarpit at once (in total / per IP); requests beyond get 429 (0 = no cap) |
+| trusted_proxies | — (`TOKIWA_GATE__TRUSTED_PROXIES`) | `[]` | With `trust_forwarded_for`, `X-Forwarded-For` is read only when the TCP peer is listed here (IPs / CIDRs, e.g. `["10.0.0.0/8"]`). Empty keeps the old behaviour (any peer is trusted) with a startup warning; `TOKIWA_STRICT_CONFIG=1` refuses to start |
+| body_idle_timeout_seconds / body_total_timeout_seconds | — | 15 / 120 | Max gap in a request body / max time for the whole body. Beyond it the Gate answers 408 and frees the upstream connection (tag `gate:slow_body`; 0 = no limit) |
+| max_requests_per_client | — | 64 | Requests in flight per source IP. Beyond it: 429 at once (tag `gate:conn_limit`; 0 = no limit) |
+| persist_policy / policy_cache_file / policy_cache_max_age_hours | — | true / `<server.data_dir>/gate-policy-<sensor_id>.json` / 168 | Save the fetched policy and enforce it at startup even when the server is unreachable (a copy older than the limit is not used; 0 = no limit) |
 
 Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds), `--max-queue` (cap on events waiting to be sent, 10,000),
 `--preserve-host / --rewrite-host`, `--access-log`, `--limit-concurrency` (cap on concurrent connections; 503 beyond it; unlimited by default).
@@ -99,6 +103,17 @@ Operational knobs that exist only on the CLI: `--upstream-timeout` (30 seconds),
 - Events keep up to 64 distinct request headers. Headers used for detection (User-Agent, Referer, `Sec-Fetch-*`, `X-Forwarded-*`, ...)
   are always kept wherever they appear; anything beyond is visible as the tag `gate:headers_truncated` with the header count (label `gate.header_count`).
 - **fail-open**: If the TOKIWA server goes down, the Gate keeps proxying (events are buffered temporarily and resent).
+- **Source IP**: when you enable `trust_forwarded_for`, list the addresses of the LB / CDN in front in `trusted_proxies`. Only
+  `X-Forwarded-For` from those peers is read, from the right, skipping trusted proxies; the first other address is the client. An element
+  that is not an IP (`unknown` etc.) stops the walk. `X-Forwarded-For` from any other peer is ignored and tagged `gate:untrusted_forwarded_for`.
+- **Slow attacks**: a request body sent in dribbles gets 408, and too many concurrent requests from one IP get 429. **A client that sends
+  its headers slowly (slowloris) is handled by uvicorn before the Gate sees a request, so the Gate cannot stop it.** When exposed
+  directly to the internet, put nginx or a load balancer with a header read timeout in front.
+- **Policy across restarts**: the last fetched policy (blocks, decoys, canaries) is saved to a file and enforced right after startup even
+  if the server cannot be reached; entries past their expiry are dropped. In Docker, `/data` needs a volume (`gate-state` in `deploy/compose.yaml`).
+- **Dropped events**: when the send queue overflows during a server outage, plain page views (GET/HEAD, 2xx/3xx, no query string, no tag)
+  go first. The number dropped is reported with the next batch that reaches the server as a `gate.health` event, which raises the
+  detection `sensor.events_dropped`.
 - **fail-static**: If the Gate cannot fetch the policy, it keeps the last policy (so that taking the server down does not become a loophole for lifting blocks). Each block's own expiry (TTL) is still honoured by the Gate: entries past it are lifted.
 - Health check: `GET /__tokiwa/health` → `{"status":"ok"}`. Requests from local / private IPs also get send statistics and more.
 - Not supported: WebSocket (returns 501), HTTP/2 upstreams, gRPC. The Gate assumes a single process.

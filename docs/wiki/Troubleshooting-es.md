@@ -62,7 +62,7 @@ así que ejecute el comando en el mismo directorio que el servidor (`backend/`) 
 `docker compose ... exec tokiwa tokiwa token create ...`.
 
 **Todos los accesos parecen venir de la misma IP (la del balanceador de carga)**
-Si Gate está detrás de un balanceador de carga, configure `--trust-forwarded-for` (`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`).
+Si Gate está detrás de un balanceador de carga, configure `--trust-forwarded-for` (`TOKIWA_GATE__TRUST_FORWARDED_FOR=true`). Enumere las direcciones del LB en `gate.trusted_proxies` (`TOKIWA_GATE__TRUSTED_PROXIES='["10.0.0.0/8"]'`). Si no, un cliente que llegue directamente a Gate también puede declarar una IP de origen.
 Úselo **solo detrás de un balanceador de carga de confianza**. En otros entornos, permitiría suplantar la IP de origen.
 
 **WebSocket ha dejado de funcionar**
