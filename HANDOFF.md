@@ -3,11 +3,45 @@
 > 新しいセッション/アカウントはまずここを読む。作業の区切りごとに **必ず更新** する。
 > 秘密情報・社内情報は書かない。
 
-最終更新: 2026-11-24（監査修正 第 1〜3 弾は PR JUCK-Kurohasu/TOKIWA#179 でマージ済み。第 4 弾はブランチ `claude/charming-keller-wb74vf`・PR JUCK-Kurohasu/TOKIWA#180（ドラフト））
+最終更新: 2026-11-28（監査修正 第 1〜4 弾は PR JUCK-Kurohasu/TOKIWA#179 / JUCK-Kurohasu/TOKIWA#180 でマージ済み。第 5 弾はブランチ `claude/nifty-hypatia-w9l629`・PR JUCK-Kurohasu/TOKIWA#181（ドラフト））
 状態: **第 1 波はすべて main にマージ済み**（PR #1〜#5、main = `db9f012` 以降）。GitHub Actions の CI 全ジョブ緑。
 **第 2 波は未着手**（仕様は `docs/tasks/wave2-*.md` に作成済み）。次のセッションは §0 から始める。
 **利用者向け Wiki**（日本語既定 + 英・中・西）の正本は `docs/wiki/`。main へのマージで `.github/workflows/wiki.yml` が
 GitHub Wiki に同期する（2026-10-26 に初回公開済み: 13 ページ × 4 言語。`GITHUB_TOKEN` で push できることを確認）。
+
+## 監査修正 第 5 弾（2026-11-28）— 依存関係で選んだ「単独で閉じられる」7 件 + 横断テーマの ADR
+
+- **選び方**: open 114 件を依存関係で整理し（横断テーマ「マスキングと検知の順序」「アクター単位」に従属するものは後回し）、
+  単独で閉じられる high 4 件（#22 #23 #25 #39）と medium 3 件（#55 #32 #59）を直列で修正（サブエージェント不使用）。
+  横断テーマは ADR 草案（**提案**、決定はユーザー）: `docs/decisions/ADR-0007-masking-before-detection.md`、`ADR-0008-actor-unit.md`。
+- **やったこと（すべて Refs。Closes にするかは下の「残り」を見て判断）**:
+  - #22: `gate.trusted_proxies`（接続元がここに含まれるときだけ XFF を右から読む。信頼ホップは飛ばす。非 IP 要素で停止）。上流へ送る
+    X-Forwarded-* も同じ判定。直接来た XFF にタグ `gate:untrusted_forwarded_for`。ラボは `172.28.0.0/24` だけ信頼。
+  - #23: `response.shared_cidrs`（既定 CGNAT・RFC 1918・ULA）と重なる対処は自動承認しない（`response.auto_approve_withheld` / reason
+    `shared_address`）。人間は承認できる。承認待ち一覧に「共有アドレスの可能性」バッジ。CDN レンジは同梱しない（ユーザー判断）。
+  - #25: `tokiwa.db.sanitize`（全 ORM セッションの before_flush で NUL 除去・孤立サロゲート置換・`String(n)` 切り詰め。主キーは切らない）、
+    長すぎる event id の付け替え、バッチ内・既存の重複 id を検知前に除外（`IngestResult.duplicates`）、保存失敗時は行単位で隔離。
+    **ローカルの PostgreSQL 16 で再現（新テスト 7/7 失敗）→ 修正後 9/9 成功を確認**。
+  - #59: CVE 相関キーは `cve`/`cves`/`vuln_id(s)` キー・IDS の `signature`・CVE そのもののタグだけから取る（UA・パスの CVE 文字列は無視）。
+  - #32: 取得したポリシーを `<server.data_dir>/gate-policy-<sensor_id>.json`（600・原子的書き込み）に保存し、起動時に読み込む。
+    保存分は絶対期限で失効（TTL は戻らない）、168 時間より古ければ使わない。deploy の gate に `gate-state` ボリューム。
+  - #39: リクエストボディの無通信 15 秒・全体 120 秒で 408（`gate:slow_body`）、同一 IP の処理中 64 件超で 429（`gate:conn_limit`）。
+  - #55: 送信待ちがあふれたら普通のページ閲覧から捨てる。捨てた件数は次の送信で `gate.health` イベントとして報告し、
+    検知 `sensor.events_dropped`（送信元 IP なし）が出る。
+- **既定動作の変更（利用者に影響）**: (1) 自動承認を使っていて、プライベート / CGNAT 宛てに対処していた環境は人間の承認待ちになる。
+  (2) 120 秒を超えるアップロード・15 秒止まるボディは 408（0 で無効）。(3) 同一 IP から 65 本目の同時要求は 429（NAT 配下の多数利用者に注意）。
+  (4) `trust_forwarded_for=true` で `trusted_proxies` が空だと起動時に警告（`TOKIWA_STRICT_CONFIG=1` なら起動拒否）。
+  (5) Gate が `<data_dir>` にファイルを書く（書けなければ警告のみ）。
+- **残り（Closes にしなかった理由）**: #22 は既定が後方互換（空なら全信頼）なので、設定しない限り穴は残る。提案理由への
+  「XFF 由来の送信元」表示も未対応。#23 は影響見積もり（同一 IP の別セッション数など）が未対応。#25 は sensors 側の shipper の
+  毒バッチ分割（推奨 (4)）と PG の CI ジョブが未対応。#39 は **ヘッダ段の slowloris は uvicorn 0.54 にヘッダ読み取りタイムアウトが無く
+  Gate では防げない**（前段 nginx / LB を wiki で案内）。#55 はディスクへのスピル・定期ハートビート（#79）が未対応。
+  #32 はポリシー署名（#139）が無いので、保存ファイルの改ざんは防げない（600 の権限のみ）。
+- **要判断（ユーザー）**: (1) ADR-0007 / ADR-0008 の採否。(2) `shared_cidrs` の既定に RFC 1918 を含めたままでよいか。(3) `max_requests_per_client=64`・
+  ボディ 15/120 秒の既定値。(4) #22 の既定を将来「空なら XFF を信頼しない」に変えるか（現状は警告のみ）。
+- **テスト用の新しい仕組み**: `TOKIWA_TEST_DATABASE_URL=postgresql+asyncpg://...` で DB を使うテストを別 DB で回せる（テストごとに全テーブル drop）。
+  このセッションでは `/usr/lib/postgresql/16` の `initdb` / `pg_ctl` でポート 55432 に一時クラスタを立てた（`--extra postgres` で asyncpg）。
+- **チェック**: backend 2114 passed（約 229 秒。SQLite）、DB を触る 161 件（ingest・respond・correlate・gate health）は PostgreSQL 16 でも passed、ruff・format 緑、mypy 既知 4 件のみ、frontend typecheck・lint・vitest・build 緑、`check_wiki.py` OK（14 ページ × 4 言語）。**未検証**: Docker（lab の `trusted_proxies` でホストからのポート転送が 172.28.0.0/24 から届くか、deploy の `gate-state` ボリュームの権限）。
 
 ## 監査修正 第 4 弾（2026-11-23〜24）— 系統 J 運用 / 第 1〜3 弾の残り（検知シグナル・UI）
 

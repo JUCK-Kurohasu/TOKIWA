@@ -70,7 +70,9 @@ def clean_json(value: Any, _depth: int = 0) -> Any:
 
 
 def _clean_object(obj: object) -> None:
-    state = inspect(obj)
+    state = inspect(obj, raiseerr=False)
+    if state is None:
+        return
     for attr in state.mapper.column_attrs:
         if len(attr.columns) != 1:
             continue
