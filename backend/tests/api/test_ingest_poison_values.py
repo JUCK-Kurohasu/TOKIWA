@@ -74,6 +74,23 @@ async def test_poison_value_does_not_fail_batch(
         assert value is None or ("\x00" not in value and "\ud800" not in value)
 
 
+async def test_actor_session_with_poison_ua_is_persisted(
+    client: httpx.AsyncClient, ingest_headers: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The sessionizer copies the UA into actor_sessions; on PostgreSQL that upsert used to fail and retry forever."""
+    from tokiwa.db.models.telemetry import ActorSessionRow
+    from tokiwa.enrich.sessionizer import flush_current
+
+    r = await _post(client, ingest_headers, [_http_event(user_agent="curl\x00evil\ud800")])
+    assert r.status_code == 200, r.text
+    await flush_current()
+    async with session_scope() as s:
+        sessions = list((await s.execute(select(ActorSessionRow))).scalars())
+    assert sessions
+    assert all("\x00" not in (x.user_agent or "") and "\ud800" not in (x.user_agent or "") for x in sessions)
+    assert "failed to persist" not in caplog.text
+
+
 async def test_attack_strings_with_nul_reach_alert_rows(
     client: httpx.AsyncClient, ingest_headers: dict[str, str]
 ) -> None:

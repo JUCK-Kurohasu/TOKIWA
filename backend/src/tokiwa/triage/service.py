@@ -39,6 +39,7 @@ from tokiwa.correlate import scoring
 from tokiwa.correlate.service import correlation_lock
 from tokiwa.db.models.detection import AlertRow, IncidentRow
 from tokiwa.db.models.telemetry import ActorSessionRow
+from tokiwa.db.sanitize import clean_json
 from tokiwa.db.session import session_scope
 from tokiwa.llm.base import LLMPurpose, LLMTier, StructuredRequest
 from tokiwa.llm.gateway import LLMGateway, get_gateway
@@ -281,7 +282,8 @@ class TriageService:
                 update(AlertRow)
                 .where(AlertRow.id == alert_id)
                 .values(
-                    triage=record.model_dump(mode="json"),
+                    # A Core UPDATE skips the ORM before_flush sanitizer; the verdict can quote attacker text (#25).
+                    triage=clean_json(record.model_dump(mode="json")),
                     status=case(
                         (AlertRow.status.in_([s.value for s in _TRIAGE_OWNED]), AlertStatus.TRIAGED.value),
                         else_=AlertRow.status,

@@ -11,6 +11,7 @@ them to the LLM without :mod:`tokiwa.llm.redact` + the untrusted-data envelope i
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Self
@@ -36,6 +37,30 @@ TRUNCATED_LABEL = "tokiwa.truncated"
 _TRUNCATED_LABEL_MAX = 1024
 
 
+# Audit #25: a lone UTF-16 surrogate (JSON "\\ud800") cannot be encoded as UTF-8. Left in, it crashed every hash of
+# the field (the sessionizer and the AI detectors fingerprint the User-Agent), so one such request escaped AI
+# attribution, and it failed the event's own ``raw`` size check. Replaced with U+FFFD here; NUL is kept (it is
+# attack evidence and Python handles it) and only removed at storage (tokiwa.db.sanitize).
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def _fix(value: str) -> str:
+    return _SURROGATE.sub("\ufffd", value)
+
+
+def _fix_json(value: Any, depth: int = 0) -> Any:
+    """Replace surrogates only, never cut (``raw`` is capped as a whole by :func:`_clip_raw`)."""
+    if isinstance(value, str):
+        return _fix(value) if _SURROGATE.search(value) else value
+    if depth > 64:
+        return value
+    if isinstance(value, dict):
+        return {_fix_json(k, depth + 1): _fix_json(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_fix_json(v, depth + 1) for v in value]
+    return value
+
+
 def _cut(value: str, path: str, clipped: list[str]) -> str:
     clipped.append(f"{path}:{len(value)}")
     return value[:EVENT_FIELD_MAX_CHARS]
@@ -53,7 +78,9 @@ def _clip_model(model: BaseModel, prefix: str, clipped: list[str], skip: str | N
     ) in fields.items():  # values of existing keys are replaced in place: no resize while iterating
         if isinstance(item, str):
             if len(item) > EVENT_FIELD_MAX_CHARS:
-                fields[name] = _cut(item, prefix + name, clipped)
+                item = fields[name] = _cut(item, prefix + name, clipped)
+            if _SURROGATE.search(item):
+                fields[name] = _fix(item)
         elif isinstance(item, BaseModel):
             _clip_model(item, f"{prefix}{name}.", clipped)
         elif isinstance(item, list | dict) and item and name != skip:
@@ -67,7 +94,9 @@ def _clip_container(value: list[Any] | dict[Any, Any], path: str, clipped: list[
         for i, item in enumerate(value):
             if isinstance(item, str):
                 if len(item) > EVENT_FIELD_MAX_CHARS:
-                    value[i] = _cut(item, path + "[]", clipped)
+                    item = value[i] = _cut(item, path + "[]", clipped)
+                if _SURROGATE.search(item):
+                    value[i] = _fix(item)
             elif isinstance(item, BaseModel):
                 _clip_model(item, path + "[].", clipped)
             elif isinstance(item, list | dict) and item:
@@ -76,12 +105,19 @@ def _clip_container(value: list[Any] | dict[Any, Any], path: str, clipped: list[
     changed = False
     out: dict[Any, Any] = {}
     for key, item in value.items():
-        if isinstance(key, str) and len(key) > EVENT_FIELD_MAX_CHARS:
-            key = _cut(key, path + "{}", clipped)
-            changed = True
+        if isinstance(key, str):
+            if len(key) > EVENT_FIELD_MAX_CHARS:
+                key = _cut(key, path + "{}", clipped)
+                changed = True
+            if _SURROGATE.search(key):
+                key = _fix(key)
+                changed = True
         if isinstance(item, str):
             if len(item) > EVENT_FIELD_MAX_CHARS:
                 item = _cut(item, path + "{}", clipped)
+                changed = True
+            if _SURROGATE.search(item):
+                item = _fix(item)
                 changed = True
         elif isinstance(item, BaseModel):
             _clip_model(item, path + "{}.", clipped)
@@ -264,7 +300,7 @@ class Event(BaseModel):
         clipped: list[str] = []
         _clip_model(self, "", clipped, skip="raw")
         if self.raw:
-            self.raw = _clip_raw(self.raw, clipped)
+            self.raw = _clip_raw(_fix_json(self.raw), clipped)
         if clipped:
             if TRUNCATED_TAG not in self.tags:
                 self.tags.append(TRUNCATED_TAG)
