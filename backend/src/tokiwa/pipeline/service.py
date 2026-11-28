@@ -51,8 +51,9 @@ async def process_events(events: list[Event]) -> IngestResult:
         return IngestResult(accepted=0, alerts=0)
     received = len(events)
     events = await _new_events(events)
+    duplicates = received - len(events)
     if not events:
-        return IngestResult(accepted=received, alerts=0, duplicates=received)
+        return IngestResult(accepted=0, alerts=0, duplicates=received)
     now = utcnow()
     for e in events:
         e.ingested_at = now
@@ -72,12 +73,8 @@ async def process_events(events: list[Event]) -> IngestResult:
     await bus.publish("event.ingested", events)
     await engine.publish(created, updated)
     ids = [a.id for a in created] + [a.id for a in updated]
-    return IngestResult(
-        accepted=received,
-        alerts=len(created),
-        alert_ids=ids,
-        duplicates=received - len(events) - len(rejected),
-    )
+    # accepted: stored events, including those the enrichers derived (e.g. PORT_CHANGE from a snapshot).
+    return IngestResult(accepted=len(events), alerts=len(created), alert_ids=ids, duplicates=duplicates)
 
 
 async def _new_events(events: list[Event]) -> list[Event]:
